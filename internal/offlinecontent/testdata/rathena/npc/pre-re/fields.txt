@@ -1,0 +1,1 @@
+prt_fild00,0,0,20,20\tmonster\tPoring\t1002,2,1000,2000

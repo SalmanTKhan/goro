@@ -24,6 +24,12 @@ var (
 	damageFloaterRed    = color.RGBA{R: 255, G: 64, B: 64, A: 255}
 )
 
+// Damage feedback is rendered in world space, so the authored RO number
+// sprites are otherwise much smaller than the touch-first mobile HUD. Keep a
+// single display multiplier for the number/message sprites and their fallback
+// text so all combat feedback remains visually consistent.
+const damageFloaterDisplayScale = 1.5
+
 func (m *WorldMode) damageNumberSprite(ctx client.Context) *spriteView {
 	if m.damageNumberView != nil || m.damageNumberMiss || ctx.Resources == nil {
 		return m.damageNumberView
@@ -244,6 +250,13 @@ func damageFloaterProgress(floater damageFloater, now time.Time) float64 {
 		return 1
 	}
 	return float64(now.Sub(floater.starts)) / float64(duration)
+}
+
+func damageFloaterRenderScale(scale float64) float64 {
+	if scale <= 0 || math.IsNaN(scale) || math.IsInf(scale, 0) {
+		return 0
+	}
+	return scale * damageFloaterDisplayScale
 }
 
 func clampFloat(value, minValue, maxValue float64) float64 {

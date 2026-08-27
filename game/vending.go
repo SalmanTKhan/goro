@@ -32,6 +32,9 @@ func applyVendingBoardToWorld(ctx client.Context, board network.VendingBoard) {
 
 func (m *WorldMode) applyVendingBoardDisappear(ctx client.Context, board network.VendingBoardDisappear) {
 	applyVendingBoardDisappearToWorld(ctx, board)
+	if m != nil && m.mobileVending.ownerAID == board.OwnerAID {
+		m.mobileVending = mobileVendingState{}
+	}
 	glog.Debugf("vending board removed actor=%d", board.OwnerAID)
 }
 
@@ -64,5 +67,7 @@ func (m *WorldMode) requestVendingList(ctx client.Context, actor worldstate.Acto
 	}
 	if err := ctx.Network.SendVendingListRequest(actor.ID); err != nil {
 		glog.Warnf("%s vending request failed actor=%d: %v", reason, actor.ID, err)
+		return
 	}
+	m.mobileVending = mobileVendingState{open: true, loading: true, ownerAID: actor.ID, shopName: actor.VendingName}
 }

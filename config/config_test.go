@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kivutar/goro/input"
 )
 
 func isolateUserConfig(t *testing.T) {
@@ -74,6 +76,15 @@ snap = true
 itemsnap = false
 force_user_ai = false
 
+[mobile]
+movement = tap
+camera_sensitivity = 1.50
+zoom_sensitivity = 0.75
+invert_camera_y = true
+long_press_ms = 900
+show_target_names = false
+show_minimap = false
+
 [script]
 path = ./ignored.lua
 
@@ -137,6 +148,12 @@ file = ./ignored.log
 	}
 	if cfg.Gameplay.NoShift || !cfg.Gameplay.NoCtrl || cfg.Gameplay.LessEffects || cfg.Gameplay.SnapTargets || !cfg.Gameplay.SnapItems || !cfg.Gameplay.ForceUserAI {
 		t.Fatalf("unexpected gameplay config: %#v", cfg.Gameplay)
+	}
+	if cfg.Mobile.MovementMode != input.MovementTapToMove || cfg.Mobile.CameraSensitivity != 1.5 || cfg.Mobile.ZoomSensitivity != 0.75 || !cfg.Mobile.InvertCameraY || cfg.Mobile.LongPressMS != 900 || cfg.Mobile.ShowTargetNames {
+		t.Fatalf("unexpected mobile config: %#v", cfg.Mobile)
+	}
+	if cfg.MobileDisplay.ShowMinimap {
+		t.Fatalf("show minimap = true, want false")
 	}
 	if cfg.Script.Path != filepath.Join(root, "bot.lua") {
 		t.Fatalf("script path = %q", cfg.Script.Path)
@@ -277,6 +294,95 @@ fullscreen = false
 		"snap = true",
 		"itemsnap = true",
 	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("saved config missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestMobileSettingsRoundTripPreservesUnrelatedINI(t *testing.T) {
+	isolateUserConfig(t)
+	path, err := UserConfigPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("[login]\nusername = KeepMe\n\n[audio]\nbgm_volume = 0.33\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	controls := input.DefaultMobileControls()
+	controls.MovementMode = input.MovementTapToMove
+	controls.CameraSensitivity = 1.5
+	controls.ZoomSensitivity = 0.75
+	controls.InvertCameraY = true
+	controls.LongPressMS = 900
+	controls.ShowTargetNames = false
+	if _, err := SaveMobileControls(controls); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadUserMobileControls()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded != controls {
+		t.Fatalf("loaded mobile controls = %#v, want %#v", loaded, controls)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, want := range []string{"username = KeepMe", "bgm_volume = 0.33", "movement = tap", "camera_sensitivity = 1.50", "zoom_sensitivity = 0.75", "invert_camera_y = true", "long_press_ms = 900", "show_target_names = false"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("saved config missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestMobileSettingsRoundTripPreservesAllSupportedValues(t *testing.T) {
+	isolateUserConfig(t)
+	path, err := UserConfigPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("[login]\nusername = KeepMe\n\n[network]\ntrace = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	settings := input.DefaultMobileSettings()
+	settings.Controls.MovementMode = input.MovementTapToMove
+	settings.Controls.CameraSensitivity = 2
+	settings.Controls.LongPressMS = 900
+	settings.Controls.ShowTargetNames = false
+	settings.Audio.BGMEnabled = false
+	settings.Audio.BGMVolume = 0.25
+	settings.Audio.SFXVolume = 0.75
+	settings.Display.ShowMinimap = false
+	settings.Gameplay.NoShift = true
+	settings.Gameplay.NoCtrl = false
+	settings.Gameplay.LessEffects = true
+	settings.Gameplay.SnapTargets = true
+	settings.Gameplay.SnapItems = true
+	if _, err := SaveMobileSettings(settings); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadUserMobileSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded != settings {
+		t.Fatalf("loaded mobile settings = %#v, want %#v", loaded, settings)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, want := range []string{"username = KeepMe", "trace = true", "movement = tap", "bgm = false", "bgm_volume = 0.25", "sfx_volume = 0.75", "show_minimap = false", "no_shift = true", "itemsnap = true"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("saved config missing %q:\n%s", want, text)
 		}

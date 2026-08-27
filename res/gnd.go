@@ -81,7 +81,7 @@ func ParseGND(data []byte) (*GND, error) {
 	}
 	textures := make([]string, textureCount)
 	for i := range textures {
-		textures[i] = fixedBinaryString(reader.bytes(textureNameLength))
+		textures[i] = fixedResourceString(reader.bytes(textureNameLength))
 	}
 
 	lightmapCount := int(reader.i32())

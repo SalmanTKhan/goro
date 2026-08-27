@@ -3,6 +3,9 @@ package res
 import (
 	"bytes"
 	"testing"
+
+	"golang.org/x/text/encoding/korean"
+	"golang.org/x/text/transform"
 )
 
 func TestParseRSM(t *testing.T) {
@@ -114,4 +117,15 @@ func writeRSMTextureVertex(buf *bytes.Buffer, r, g, b, a byte, u, v float32) {
 	buf.WriteByte(a)
 	writeF32(buf, u)
 	writeF32(buf, v)
+}
+
+func TestDecodeRSMResourceStringDecodesLegacyEUCKR(t *testing.T) {
+	want := `프론테라\pron-newcastle.bmp`
+	raw, _, err := transform.String(korean.EUCKR.NewEncoder(), want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := decodeRSMResourceString([]byte(raw)); got != want {
+		t.Fatalf("decoded RSM resource string = %q, want %q", got, want)
+	}
 }

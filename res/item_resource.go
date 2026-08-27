@@ -370,6 +370,29 @@ func itemTableCandidates(fileName string) []string {
 	}
 }
 
+// ItemMetadataResourceCandidates returns the table/script candidates used by
+// the item presentation lookup. Mobile packs use this closure so item IDs can
+// resolve the same display/resource/description metadata as the full client.
+func ItemMetadataResourceCandidates() [][]string {
+	fileNames := []string{
+		"num2itemdisplaynametable.txt",
+		"idnum2itemdisplaynametable.txt",
+		"num2itemresnametable.txt",
+		"idnum2itemresnametable.txt",
+		"num2itemdesctable.txt",
+		"idnum2itemdesctable.txt",
+		"itemslotcounttable.txt",
+		"cardprefixnametable.txt",
+		"cardpostfixnametable.txt",
+	}
+	candidates := make([][]string, 0, len(fileNames)+1)
+	for _, fileName := range fileNames {
+		candidates = append(candidates, itemTableCandidates(fileName))
+	}
+	candidates = append(candidates, append([]string(nil), itemInfoLuaCandidates...))
+	return candidates
+}
+
 func parseItemDescriptionTable(data []byte) map[int][]string {
 	out := make(map[int][]string)
 	currentID := 0

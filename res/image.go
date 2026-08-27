@@ -7,27 +7,86 @@ import (
 	"image/draw"
 	_ "image/jpeg"
 	_ "image/png"
+	"path/filepath"
 	"strings"
+	"time"
 
 	_ "golang.org/x/image/bmp"
 )
 
+type ImageLoadMetrics struct {
+	EncodedBytes     int64
+	DecodedRGBABytes int64
+	Width            int
+	Height           int
+	Source           string
+	DecodeDuration   time.Duration
+}
+
 func LoadImage(manager *Manager, candidates []string) (image.Image, string, error) {
-	for _, candidate := range candidates {
+	img, source, _, err := LoadImageDetailed(manager, candidates)
+	return img, source, err
+}
+
+func LoadImageDetailed(manager *Manager, candidates []string) (image.Image, string, ImageLoadMetrics, error) {
+	var metrics ImageLoadMetrics
+	orderedCandidates := candidates
+	if manager != nil && manager.PreferOptimizedTextures {
+		orderedCandidates = optimizedFirstCandidates(candidates)
+	}
+	for _, candidate := range orderedCandidates {
 		data, err := manager.ReadFile(candidate)
 		if err != nil {
 			continue
 		}
+		started := time.Now()
 		img, _, err := image.Decode(bytes.NewReader(data))
 		if err != nil {
 			img, err = decodeTGA(data)
 			if err != nil {
-				return nil, candidate, fmt.Errorf("decode image: %w", err)
+				return nil, candidate, ImageLoadMetrics{EncodedBytes: int64(len(data)), Source: candidate, DecodeDuration: time.Since(started)}, fmt.Errorf("decode image: %w", err)
 			}
 		}
-		return applyROTransparency(img), candidate, nil
+		img = applyROTransparency(img)
+		bounds := img.Bounds()
+		metrics = ImageLoadMetrics{EncodedBytes: int64(len(data)), DecodedRGBABytes: int64(bounds.Dx()) * int64(bounds.Dy()) * 4, Width: bounds.Dx(), Height: bounds.Dy(), Source: candidate, DecodeDuration: time.Since(started)}
+		return img, candidate, metrics, nil
 	}
-	return nil, "", fmt.Errorf("image not found: %s", strings.Join(candidates, ", "))
+	return nil, "", metrics, fmt.Errorf("image not found: %s", strings.Join(candidates, ", "))
+}
+
+func optimizedFirstCandidates(candidates []string) []string {
+	ordered := make([]string, 0, len(candidates)*2)
+	seen := make(map[string]struct{}, len(candidates)*2)
+	add := func(candidate string) {
+		if candidate == "" {
+			return
+		}
+		if _, ok := seen[candidate]; ok {
+			return
+		}
+		seen[candidate] = struct{}{}
+		ordered = append(ordered, candidate)
+	}
+	for _, candidate := range candidates {
+		if optimized, ok := optimizedTextureCandidate(candidate); ok {
+			add(optimized)
+		}
+		add(candidate)
+	}
+	return ordered
+}
+
+func optimizedTextureCandidate(candidate string) (string, bool) {
+	normalized := strings.ReplaceAll(strings.TrimSpace(candidate), "\\", "/")
+	if !strings.HasPrefix(strings.ToLower(normalized), "data/texture/") {
+		return "", false
+	}
+	texturePath := normalized[len("data/texture/"):]
+	if ext := strings.ToLower(filepath.Ext(texturePath)); ext != ".bmp" && ext != ".tga" && ext != ".jpg" && ext != ".jpeg" && ext != ".png" {
+		return "", false
+	}
+	return "mobile/optimized/" + normalized + ".png", true
 }
 
 func LoadImageExact(manager *Manager, candidates []string) (image.Image, string, error) {

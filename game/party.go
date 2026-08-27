@@ -103,23 +103,32 @@ func (m *WorldMode) openExpelPartyMemberConfirm(ctx client.Context, member sessi
 
 func (m *WorldMode) openPartyInviteRequest(ctx client.Context, request network.PartyInviteRequest) {
 	name := partyDisplayName(request.Name)
+	if ctx.Session != nil {
+		ctx.Session.PendingPartyInvite = &session.PendingPartyInvite{
+			RequestID: request.RequestID,
+			Name:      request.Name,
+		}
+	}
 	m.ui.partyRequest.Open(ctx, "Party Invitation", fmt.Sprintf("%s has invited you to join a party.", name), func() {
-		if ctx.Network == nil {
-			glog.Warnf("party invite accept failed: not connected")
-			return
-		}
-		if err := ctx.Network.SendPartyInviteAck(request.RequestID, true); err != nil {
-			glog.Warnf("party invite accept failed request=%d name=%q: %v", request.RequestID, request.Name, err)
-		}
+		m.respondPartyInvite(ctx, request, true)
 	}, func() {
-		if ctx.Network == nil {
-			glog.Warnf("party invite reject failed: not connected")
-			return
-		}
-		if err := ctx.Network.SendPartyInviteAck(request.RequestID, false); err != nil {
-			glog.Warnf("party invite reject failed request=%d name=%q: %v", request.RequestID, request.Name, err)
-		}
+		m.respondPartyInvite(ctx, request, false)
 	})
+}
+
+func (m *WorldMode) respondPartyInvite(ctx client.Context, request network.PartyInviteRequest, accepted bool) bool {
+	if ctx.Network == nil {
+		glog.Warnf("party invite response failed: not connected")
+		return false
+	}
+	if err := ctx.Network.SendPartyInviteAck(request.RequestID, accepted); err != nil {
+		glog.Warnf("party invite response failed request=%d name=%q accepted=%t: %v", request.RequestID, request.Name, accepted, err)
+		return false
+	}
+	if ctx.Session != nil && ctx.Session.PendingPartyInvite != nil && ctx.Session.PendingPartyInvite.RequestID == request.RequestID {
+		ctx.Session.PendingPartyInvite = nil
+	}
+	return true
 }
 
 func (m *WorldMode) handlePartyCreateResult(ctx client.Context, result network.PartyCreateResult) {

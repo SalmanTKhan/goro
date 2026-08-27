@@ -193,6 +193,27 @@ func DrawBitmapTextAtColor(dst *Frame, text string, x, y int, c color.RGBA) {
 	dst.DrawImage(img, &opts)
 }
 
+// DrawBitmapTextScaledAtColor draws the compact bitmap text used by the
+// debug/legacy paths at a larger logical size. Mobile surfaces use this when
+// the normal desktop-sized HUD labels would otherwise be unreadable at arm's
+// length. The source glyphs remain cached, so scaling does not create a new
+// font atlas for every label.
+func DrawBitmapTextScaledAtColor(dst *Frame, text string, x, y int, c color.RGBA, scale float64) {
+	if dst == nil || text == "" {
+		return
+	}
+	if scale <= 0 || math.IsNaN(scale) || math.IsInf(scale, 0) {
+		scale = 1
+	}
+	img := cachedBitmapTextColor(text, c)
+	var opts DrawImageOptions
+	opts.GeoM.Scale(scale, scale)
+	sx, sy := snapScreenPoint(dst, float64(x), float64(y))
+	opts.GeoM.Translate(sx, sy)
+	opts.Filter = FilterLinear
+	dst.DrawImage(img, &opts)
+}
+
 func DrawImageBitmapTextAtColor(dst *Image, text string, x, y int, c color.RGBA) {
 	if dst == nil || dst.pix == nil || text == "" {
 		return

@@ -1,0 +1,43 @@
+Header:
+  Type: ITEM_DB
+  Version: 3
+Body:
+  - Id: 501
+    AegisName: Red_Potion
+    Name: Red Potion
+    Type: Healing
+    Buy: 50
+    Sell: 25
+    Weight: 10
+    Stack:
+      Amount: 100
+    Script: "{ itemheal rand(45,65),0; }"
+  - Id: 777
+    AegisName: Scripted_Thing
+    Name: Scripted Thing
+    Type: Usable
+    Script: "{ callfunc(\"unsupported\"); }"
+  - Id: 909
+    AegisName: Jellopy
+    Name: Jellopy
+    Type: Etc
+    Buy: 6
+    Sell: 3
+    Weight: 1
+  - Id: 1201
+    AegisName: Knife_
+    Name: Knife
+    Type: Weapon
+    Buy: 50
+    Sell: 25
+    Weight: 60
+    Locations:
+      Right_Hand: true
+  - Id: 501
+    AegisName: Red_Potion
+    Name: Red Potion
+    Type: Healing
+    Buy: 50
+    Sell: 25
+    Weight: 10
+    Script: "{ itemheal rand(45,65),0; }"

@@ -1,0 +1,130 @@
+plugins { id 'com.android.application' }
+
+def patchManifestUrlProperty = providers.gradleProperty('mobileAssetPatchManifestUrl').orElse('')
+def patchFormatProperty = providers.gradleProperty('mobileAssetPatchFormat').orElse('auto')
+def patchNetworkPolicyProperty = providers.gradleProperty('mobileAssetPatchNetworkPolicy').orElse('unmetered')
+def patchPublicKeyProperty = providers.gradleProperty('mobileAssetPatchPublicKey').orElse('')
+def mobileAssetDir = providers.gradleProperty('mobileAssetDir')
+def mobileAssetFormat = providers.gradleProperty('mobileAssetFormat').orElse('pak')
+def mobileAssetProfile = providers.gradleProperty('mobileAssetProfile')
+def stagedMobileAssetsParent = layout.buildDirectory.dir('generated/mobile-assets')
+
+def javaStringLiteral = { value ->
+    '"' + value.toString().replace('\\', '\\\\').replace('"', '\\"') + '"'
+}
+
+android {
+    namespace 'com.kivutar.goro.host'
+    compileSdk 36
+    buildFeatures { buildConfig true }
+
+    defaultConfig {
+        applicationId 'com.kivutar.goro.host'
+        minSdk 29
+        targetSdk 36
+        versionCode 1
+        versionName '0.0.1-phase0e'
+        ndkVersion '29.0.14206865'
+        buildConfigField 'String', 'MOBILE_ASSET_PATCH_MANIFEST_URL', javaStringLiteral(patchManifestUrlProperty.get())
+        buildConfigField 'String', 'MOBILE_ASSET_PATCH_FORMAT', javaStringLiteral(patchFormatProperty.get())
+        buildConfigField 'String', 'MOBILE_ASSET_PATCH_NETWORK_POLICY', javaStringLiteral(patchNetworkPolicyProperty.get())
+        buildConfigField 'String', 'MOBILE_ASSET_PATCH_PUBLIC_KEY', javaStringLiteral(patchPublicKeyProperty.get())
+		// Keep the physical-device arm64 target and include x86_64 for the
+		// local Android emulator. The Go/WGPU native library is built once per
+		// ABI before Gradle packages the universal debug APK.
+		ndk { abiFilters 'arm64-v8a', 'x86_64' }
+    }
+
+    buildTypes { debug { debuggable true } }
+
+    externalNativeBuild {
+        cmake { path file('src/main/cpp/CMakeLists.txt'); version '3.22.1' }
+    }
+
+    // data.pak is already chunk-compressed by the Goro PAK writer. Avoid
+    // wrapping the full client archive in a second ZIP deflate pass while
+    // building the APK.
+    androidResources { noCompress 'pak' }
+
+    // The generated staging directory is exposed as the goro-mobile asset
+    // root. When a real mobile asset directory is supplied, omit the large
+    // renderer fixture archives that are only useful for local smoke tests.
+    sourceSets {
+        main {
+            if (mobileAssetDir.isPresent()) {
+                // Use only the generated asset tree for production/mobile
+                // builds. The default src/main/assets tree contains the
+                // multi-gigabyte renderer fixture used by local smoke tests.
+                assets.setSrcDirs([stagedMobileAssetsParent])
+            } else {
+                assets.srcDir(stagedMobileAssetsParent)
+            }
+        }
+    }
+}
+
+tasks.register('stageMobileAssets', Sync) {
+    if (mobileAssetDir.isPresent()) {
+        from(file(mobileAssetDir.get())) {
+            include 'mobile-assets.json'
+            include 'validation.json'
+            into 'goro-mobile'
+        }
+        from(file('src/main/assets/offline')) {
+            into 'offline'
+        }
+    }
+    into { stagedMobileAssetsParent }
+    doLast {
+        if (!mobileAssetDir.isPresent()) return
+        def sourceDir = file(mobileAssetDir.get())
+        def destinationDir = stagedMobileAssetsParent.get().asFile
+        def manifestFile = new File(destinationDir, 'goro-mobile/mobile-assets.json')
+        if (!manifestFile.isFile()) throw new GradleException("mobile asset manifest is missing: ${manifestFile}")
+        def manifest = new groovy.json.JsonSlurper().parse(manifestFile)
+        def requestedProfile = mobileAssetProfile.isPresent() ? mobileAssetProfile.get() : manifest.default_profile
+        def profile = (manifest.profiles ?: []).find { it.name == requestedProfile }
+        if (profile == null) throw new GradleException("mobile asset profile is missing: ${requestedProfile}")
+        def requestedFormat = mobileAssetFormat.get().toLowerCase(Locale.ROOT)
+        if (!(requestedFormat in ['pak', 'grf', 'gpf', 'auto'])) throw new GradleException("mobileAssetFormat must be pak, grf, gpf, or auto")
+        def selectedFormat = requestedFormat == 'auto' ? 'pak' : requestedFormat
+        def packByName = [:]
+        (manifest.packs ?: []).each { packByName[it.name] = it }
+        def selectedFiles = []
+        (profile.packs ?: []).each { packName ->
+            def pack = packByName[packName]
+            if (pack == null) throw new GradleException("profile references unknown mobile pack: ${packName}")
+            def packSelectedFormat = selectedFormat
+            def artifact = (pack.files ?: []).find { it.format == packSelectedFormat }
+            if (artifact == null && requestedFormat == 'auto') {
+                artifact = (pack.files ?: []).find { it.format == 'grf' || it.format == 'gpf' }
+                packSelectedFormat = artifact == null ? packSelectedFormat : artifact.format
+            }
+            if (artifact == null && (packSelectedFormat == 'grf' || packSelectedFormat == 'gpf') && pack.file) {
+                artifact = [format: 'grf', file: pack.file]
+            }
+            if (artifact == null) throw new GradleException("mobile pack ${packName} has no ${packSelectedFormat} artifact")
+            def relative = artifact.file.toString().replace('\\', '/')
+            def sourceFile = new File(sourceDir, relative)
+            def sourceCanonical = sourceDir.canonicalFile.toPath()
+            def artifactCanonical = sourceFile.canonicalFile.toPath()
+            if (!artifactCanonical.startsWith(sourceCanonical) || !sourceFile.isFile()) {
+                throw new GradleException("mobile pack artifact is missing or outside output: ${relative}")
+            }
+            selectedFiles << [relative: relative, source: sourceFile]
+        }
+        selectedFiles.each { selected ->
+            def target = new File(destinationDir, "goro-mobile/${selected.relative}")
+            target.parentFile.mkdirs()
+            project.copy { from selected.source; into target.parentFile; rename { target.name } }
+        }
+        manifest.default_profile = requestedProfile
+        manifest.preferred_format = selectedFormat
+        manifestFile.text = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(manifest)) + System.lineSeparator()
+    }
+}
+tasks.named('preBuild') { dependsOn('stageMobileAssets') }
+
+dependencies {
+    implementation 'androidx.work:work-runtime:2.10.1'
+}

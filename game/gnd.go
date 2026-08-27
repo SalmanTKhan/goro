@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kivutar/goro/glog"
 	"github.com/kivutar/goro/render"
 	"github.com/kivutar/goro/res"
 	worldstate "github.com/kivutar/goro/world"
@@ -411,9 +412,14 @@ func (m *WorldMode) groundTexture(manager *res.Manager, name string) *render.Ima
 		return nil
 	}
 
-	img, _, err := res.LoadImage(manager, res.GroundTextureCandidates(name))
+	img, _, loadMetrics, err := res.LoadImageDetailed(manager, res.GroundTextureCandidates(name))
+	m.metrics.TextureDecodeDuration += loadMetrics.DecodeDuration
+	m.metrics.TextureDecodeCount++
+	m.metrics.TextureEncodedBytes += loadMetrics.EncodedBytes
+	m.metrics.TextureDecodedRGBABytes += loadMetrics.DecodedRGBABytes
 	if err != nil {
 		m.textureMiss[name] = struct{}{}
+		glog.Warnf("terrain texture fallback name=%q error=%v", name, err)
 		return nil
 	}
 	texture := render.NewImageFromImage(img)

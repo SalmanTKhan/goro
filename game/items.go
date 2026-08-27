@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kivutar/goro/input"
 	"github.com/kivutar/goro/network"
 	"github.com/kivutar/goro/render"
 	"github.com/kivutar/goro/res"
@@ -134,6 +135,30 @@ func (m *WorldMode) requestPickup(ctx client.Context, item worldstate.FloorItem,
 	if playerIsDead(ctx) {
 		return false
 	}
+	if ctx.Offline != nil {
+		playerX, playerY := currentPlayerCell(ctx, time.Now())
+		if itemWithinPickupRange(playerX, playerY, item.X, item.Y) {
+			accepted := ctx.Offline.HandleCommand(ctxPickupCommand(item.ID))
+			if accepted {
+				m.facePlayerTowardItem(ctx, item)
+				m.startLocalPickupAnimation(ctx, time.Now())
+			}
+			return accepted
+		}
+		targetX, targetY, ok := pickupApproachCell(ctx, item)
+		if !ok {
+			glog.Warnf("%s pickup walk blocked item=%d player=%d,%d item=%d,%d", source, item.ID, playerX, playerY, item.X, item.Y)
+			m.setWalkCooldown(walkRequestCooldown)
+			return false
+		}
+		m.pendingPickup = pickupIntent{itemID: item.ID, expires: time.Now().Add(8 * time.Second)}
+		glog.Debugf("%s pickup walk target item=%d player=%d,%d item=%d,%d walk=%d,%d", source, item.ID, playerX, playerY, item.X, item.Y, targetX, targetY)
+		if m.requestWalk(ctx, targetX, targetY, source+" pickup") {
+			return true
+		}
+		m.pendingPickup = pickupIntent{}
+		return false
+	}
 	if ctx.Network == nil {
 		m.setWalkCooldown(walkErrorCooldown)
 		return false
@@ -223,7 +248,18 @@ func (m *WorldMode) processPendingPickup(ctx client.Context) {
 		return
 	}
 	m.pendingPickup = pickupIntent{}
+	if ctx.Offline != nil {
+		if ctx.Offline.HandleCommand(ctxPickupCommand(item.ID)) {
+			m.facePlayerTowardItem(ctx, item)
+			m.startLocalPickupAnimation(ctx, time.Now())
+		}
+		return
+	}
 	m.sendPickupRequest(ctx, item, "pending")
+}
+
+func ctxPickupCommand(dropID uint32) input.PlayerCommand {
+	return input.PlayerCommand{Kind: input.CommandPickUpItem, ItemID: dropID}
 }
 
 func pendingPickupReadyAt(player worldstate.Actor, now time.Time) time.Time {
@@ -460,19 +496,31 @@ func (m *WorldMode) itemSpriteBillboard(manager *res.Manager, item worldstate.Fl
 }
 
 func (m *WorldMode) drawInventoryItemIcon(screen *render.Frame, manager *res.Manager, item session.InventoryItem, x, y int) {
-	if screen == nil {
+	m.drawInventoryItemIconSized(screen, manager, item, x, y, inventoryIconSize)
+}
+
+func (m *WorldMode) drawInventoryItemIconSized(screen *render.Frame, manager *res.Manager, item session.InventoryItem, x, y, size int) {
+	m.drawInventoryItemIconSizedWithFilter(screen, manager, item, x, y, size, spriteDrawFilter())
+}
+
+func (m *WorldMode) drawInventoryItemIconSizedNearest(screen *render.Frame, manager *res.Manager, item session.InventoryItem, x, y, size int) {
+	m.drawInventoryItemIconSizedWithFilter(screen, manager, item, x, y, size, spriteCompositionFilter())
+}
+
+func (m *WorldMode) drawInventoryItemIconSizedWithFilter(screen *render.Frame, manager *res.Manager, item session.InventoryItem, x, y, size int, filter render.Filter) {
+	if screen == nil || size <= 0 {
 		return
 	}
 	if icon := m.itemIconTexture(manager, item.ItemID, item.Identified); icon != nil {
 		bounds := icon.Bounds()
 		width, height := float64(bounds.Dx()), float64(bounds.Dy())
 		if width > 0 && height > 0 {
-			scale := math.Min(float64(inventoryIconSize)/width, float64(inventoryIconSize)/height)
+			scale := math.Min(float64(size)/width, float64(size)/height)
 			dstW, dstH := width*scale, height*scale
 			var opts render.DrawImageOptions
 			opts.GeoM.Scale(scale, scale)
-			opts.GeoM.Translate(float64(x)+(float64(inventoryIconSize)-dstW)/2, float64(y)+(float64(inventoryIconSize)-dstH)/2)
-			opts.Filter = spriteDrawFilter()
+			opts.GeoM.Translate(float64(x)+(float64(size)-dstW)/2, float64(y)+(float64(size)-dstH)/2)
+			opts.Filter = filter
 			screen.DrawImage(icon, &opts)
 			return
 		}
@@ -483,32 +531,32 @@ func (m *WorldMode) drawInventoryItemIcon(screen *render.Frame, manager *res.Man
 		DroppedAt:  time.Time{},
 	}, time.Now())
 	if billboard == nil || billboard.image == nil {
-		m.drawFallbackInventoryItemIcon(screen, x, y)
+		m.drawFallbackInventoryItemIconSizedWithFilter(screen, x, y, size, filter)
 		return
 	}
 	bounds := visibleImageBounds(billboard.image)
 	if bounds.Empty() {
-		m.drawFallbackInventoryItemIcon(screen, x, y)
+		m.drawFallbackInventoryItemIconSizedWithFilter(screen, x, y, size, filter)
 		return
 	}
 	width, height := float64(bounds.Dx()), float64(bounds.Dy())
 	if width <= 0 || height <= 0 {
 		return
 	}
-	scale := math.Min(float64(inventoryIconSize-2)/width, float64(inventoryIconSize-2)/height)
+	scale := math.Min(float64(size-2)/width, float64(size-2)/height)
 	if scale <= 0 || math.IsNaN(scale) || math.IsInf(scale, 0) {
 		scale = 1
 	}
 	dstW, dstH := width*scale, height*scale
-	dstX := float64(x) + (float64(inventoryIconSize)-dstW)/2
-	dstY := float64(y) + (float64(inventoryIconSize)-dstH)/2
+	dstX := float64(x) + (float64(size)-dstW)/2
+	dstY := float64(y) + (float64(size)-dstH)/2
 	vertices := []render.Vertex{
 		{DstX: float32(dstX), DstY: float32(dstY), SrcX: float32(bounds.Min.X), SrcY: float32(bounds.Min.Y), ColorR: 1, ColorG: 1, ColorB: 1, ColorA: 1},
 		{DstX: float32(dstX + dstW), DstY: float32(dstY), SrcX: float32(bounds.Max.X), SrcY: float32(bounds.Min.Y), ColorR: 1, ColorG: 1, ColorB: 1, ColorA: 1},
 		{DstX: float32(dstX), DstY: float32(dstY + dstH), SrcX: float32(bounds.Min.X), SrcY: float32(bounds.Max.Y), ColorR: 1, ColorG: 1, ColorB: 1, ColorA: 1},
 		{DstX: float32(dstX + dstW), DstY: float32(dstY + dstH), SrcX: float32(bounds.Max.X), SrcY: float32(bounds.Max.Y), ColorR: 1, ColorG: 1, ColorB: 1, ColorA: 1},
 	}
-	screen.DrawTrianglesOwned(vertices, quadIndices012213, billboard.image, &render.DrawTrianglesOptions{Filter: spriteDrawFilter(), Address: render.AddressClampToZero})
+	screen.DrawTrianglesOwned(vertices, quadIndices012213, billboard.image, &render.DrawTrianglesOptions{Filter: filter, Address: render.AddressClampToZero})
 }
 
 func (m *WorldMode) itemIconTexture(manager *res.Manager, itemID uint16, identified bool) *render.Image {
@@ -574,6 +622,14 @@ func (m *WorldMode) itemCollectionTexture(manager *res.Manager, itemID uint16, i
 }
 
 func (m *WorldMode) drawSkillIcon(screen *render.Frame, manager *res.Manager, skill session.Skill, x, y, size int) {
+	m.drawSkillIconWithFilter(screen, manager, skill, x, y, size, spriteDrawFilter())
+}
+
+func (m *WorldMode) drawSkillIconNearest(screen *render.Frame, manager *res.Manager, skill session.Skill, x, y, size int) {
+	m.drawSkillIconWithFilter(screen, manager, skill, x, y, size, spriteCompositionFilter())
+}
+
+func (m *WorldMode) drawSkillIconWithFilter(screen *render.Frame, manager *res.Manager, skill session.Skill, x, y, size int, filter render.Filter) {
 	if screen == nil || size <= 0 {
 		return
 	}
@@ -586,7 +642,7 @@ func (m *WorldMode) drawSkillIcon(screen *render.Frame, manager *res.Manager, sk
 			var opts render.DrawImageOptions
 			opts.GeoM.Scale(scale, scale)
 			opts.GeoM.Translate(float64(x)+(float64(size)-dstW)/2, float64(y)+(float64(size)-dstH)/2)
-			opts.Filter = spriteDrawFilter()
+			opts.Filter = filter
 			screen.DrawImage(icon, &opts)
 			return
 		}
@@ -625,16 +681,27 @@ func (m *WorldMode) skillIconTexture(manager *res.Manager, skill session.Skill) 
 }
 
 func (m *WorldMode) drawFallbackInventoryItemIcon(screen *render.Frame, x, y int) {
+	m.drawFallbackInventoryItemIconSized(screen, x, y, inventoryIconSize)
+}
+
+func (m *WorldMode) drawFallbackInventoryItemIconSized(screen *render.Frame, x, y, size int) {
+	m.drawFallbackInventoryItemIconSizedWithFilter(screen, x, y, size, spriteDrawFilter())
+}
+
+func (m *WorldMode) drawFallbackInventoryItemIconSizedWithFilter(screen *render.Frame, x, y, size int, filter render.Filter) {
+	if size <= 0 {
+		return
+	}
 	img := m.itemMarkerTexture()
 	if img == nil {
 		return
 	}
 	bounds := img.Bounds()
-	scale := float64(inventoryIconSize) / float64(maxInt(bounds.Dx(), bounds.Dy()))
+	scale := float64(size) / float64(maxInt(bounds.Dx(), bounds.Dy()))
 	var opts render.DrawImageOptions
 	opts.GeoM.Scale(scale, scale)
 	opts.GeoM.Translate(float64(x), float64(y))
-	opts.Filter = spriteDrawFilter()
+	opts.Filter = filter
 	screen.DrawImage(img, &opts)
 }
 

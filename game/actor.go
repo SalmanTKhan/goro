@@ -154,6 +154,13 @@ func upsertNetworkActor(ctx client.Context, entry network.ActorEntry) {
 	if isLocalActor(ctx, entry.ID) {
 		return
 	}
+	objectType, hasObjectType := entry.ObjectType, entry.HasObjectType
+	if !hasObjectType && entry.Appearance {
+		// The 2008 spawn/idle packets used by Sabine and rAthena omit the
+		// object-type byte. Recover the same role distinction from the legacy
+		// view class so static NPCs remain talkable on the mobile picker.
+		objectType, hasObjectType = inferLegacyActorObjectType(entry.Job)
+	}
 	name := companionActorEntryName(ctx, entry)
 	applyCompanionActorEntry(ctx, entry)
 	dir := entry.Dir
@@ -197,8 +204,8 @@ func upsertNetworkActor(ctx client.Context, entry network.ActorEntry) {
 		ToY:              entry.ToY,
 		MoveStartTick:    entry.MoveStartTick,
 		HasMoveStartTick: entry.HasMoveStartTick,
-		ObjectType:       entry.ObjectType,
-		HasObjectType:    entry.HasObjectType,
+		ObjectType:       objectType,
+		HasObjectType:    hasObjectType,
 		Speed:            entry.Speed,
 		AttackRange:      attackRange,
 		BodyState:        entry.BodyState,
@@ -220,6 +227,22 @@ func upsertNetworkActor(ctx client.Context, entry network.ActorEntry) {
 	}
 	applyActorCartStateFromEffect(&actor)
 	upsertActor(ctx, actor)
+}
+
+func inferLegacyActorObjectType(job int16) (uint8, bool) {
+	jobID := int(job)
+	switch {
+	case res.HasPlayerJobToken(jobID):
+		return actorObjectTypePC, true
+	case isMonsterLikeJob(jobID):
+		return actorObjectTypeMob, true
+	default:
+		return actorObjectTypeNPC, true
+	}
+}
+
+func isMonsterLikeJob(job int) bool {
+	return job >= 1000 && (job < 6001 || job > 6047)
 }
 
 func (m *WorldMode) upsertNetworkActor(ctx client.Context, entry network.ActorEntry) {
@@ -1212,8 +1235,7 @@ func isMonsterLikeHoverActor(actor worldstate.Actor) bool {
 	if res.HasPlayerJobToken(int(actor.Job)) {
 		return false
 	}
-	job := int(actor.Job)
-	return job >= 1000 && (job < 6001 || job > 6047)
+	return isMonsterLikeJob(int(actor.Job))
 }
 
 func selectedCharacterName(s *session.Session) string {

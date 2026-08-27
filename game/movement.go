@@ -153,12 +153,23 @@ func (m *WorldMode) requestWalk(ctx client.Context, targetX, targetY int, source
 	if playerIsDead(ctx) {
 		return false
 	}
-	if ctx.World == nil || ctx.Network == nil || !walkTargetInBounds(ctx, targetX, targetY) {
+	if ctx.World == nil || !walkTargetInBounds(ctx, targetX, targetY) {
 		m.setWalkCooldown(walkRequestCooldown)
 		return false
 	}
 	playerX, playerY := currentPlayerCell(ctx, time.Now())
 	glog.Debugf("%s walk request from=%d,%d to=%d,%d", source, playerX, playerY, targetX, targetY)
+	if ctx.Network == nil && ctx.Offline != nil {
+		dir := directionFromDelta(playerX, playerY, targetX, targetY, ctx.World.Player.Dir)
+		setPlayerMovementAt(ctx, playerX, playerY, targetX, targetY, dir, time.Now(), 0)
+		ctx.Session.PlayerX, ctx.Session.PlayerY, ctx.Session.PlayerDir = targetX, targetY, dir
+		ctx.Offline.TryWarpAt(targetX, targetY)
+		m.setWalkCooldown(walkRequestCooldown)
+		return true
+	}
+	if ctx.Network == nil {
+		return false
+	}
 	if err := ctx.Network.SendWalkToXY(targetX, targetY); err == nil {
 		m.setWalkCooldown(walkRequestCooldown)
 		return true

@@ -1,10 +1,12 @@
 package game
 
 import (
+	"fmt"
 	"image/color"
 	"math"
 	"time"
 
+	"github.com/kivutar/goro/glog"
 	"github.com/kivutar/goro/render"
 	"github.com/kivutar/goro/res"
 )
@@ -230,6 +232,11 @@ func (m *WorldMode) rsmMeshesForPlacement(manager *res.Manager, rsm *res.RSM, rs
 				}
 				continue
 			}
+			m.rsmTextureFallbacks++
+			if worldTri.textureName == "" {
+				m.rsmEmptyTextureFallbacks++
+			}
+			m.noteRSMTextureFallback(rsm, worldTri.textureName)
 			if m.whitePixel == nil {
 				m.whitePixel = render.NewImage(1, 1)
 				m.whitePixel.Fill(color.White)
@@ -408,6 +415,11 @@ func (m *WorldMode) drawAnimatedRSMNodeTriangles(screen *render.Frame, manager *
 			}
 			continue
 		}
+		m.rsmTextureFallbacks++
+		if faceMeta.textureName == "" {
+			m.rsmEmptyTextureFallbacks++
+		}
+		m.noteRSMTextureFallback(rsm, faceMeta.textureName)
 		if m.whitePixel == nil {
 			m.whitePixel = render.NewImage(1, 1)
 			m.whitePixel.Fill(color.White)
@@ -422,6 +434,28 @@ func (m *WorldMode) drawAnimatedRSMNodeTriangles(screen *render.Frame, manager *
 			)
 		}
 	}
+}
+
+func (m *WorldMode) noteRSMTextureFallback(rsm *res.RSM, name string) {
+	if m == nil {
+		return
+	}
+	key := fmt.Sprintf("%p:%s", rsm, name)
+	if m.rsmTextureMiss == nil {
+		m.rsmTextureMiss = make(map[string]struct{})
+	}
+	if _, seen := m.rsmTextureMiss[key]; seen {
+		return
+	}
+	m.rsmTextureMiss[key] = struct{}{}
+	if name != "" && len(m.rsmTextureFallbackExamples) < 16 {
+		m.rsmTextureFallbackExamples = append(m.rsmTextureFallbackExamples, name)
+	}
+	if name == "" {
+		glog.Warnf("rsm texture fallback: empty face texture model_textures=%d", len(rsm.Textures))
+		return
+	}
+	glog.Warnf("rsm texture fallback: texture=%q model_textures=%d", name, len(rsm.Textures))
 }
 
 func (m *WorldMode) animatedRSMNodeWorldVerts(rsm *res.RSM, node *res.RSMNode, nodeMatrix mat4, instance modelInstance) []modelPoint3 {

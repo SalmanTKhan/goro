@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"github.com/kivutar/goro/glog"
 	"github.com/kivutar/goro/input"
+	"github.com/kivutar/goro/mobileui"
 	"image"
+	"sort"
 	"time"
 
 	"github.com/gogpu/ui/primitives"
@@ -88,6 +90,78 @@ type shopTableRow struct {
 type shopItemIconKey struct {
 	itemID     uint16
 	identified bool
+}
+
+// MobileModel exposes the same server-provided shop state used by the
+// desktop window. It is a projection only; all purchases still go through
+// the existing packet builders and server validation.
+func (w *ShopWindow) MobileModel(state *session.Session, metadata *res.Manager) mobileui.MobileShopModel {
+	model := mobileui.MobileShopModel{}
+	if w == nil || (w.mode == shopModeNone && !w.dealWindow.IsOpen()) {
+		return model
+	}
+	model.Open = true
+	model.NPCID = w.dealNPCID
+	model.Name = "Shop"
+	if state != nil {
+		model.Zeny = int64(state.Inventory.Zeny)
+	}
+	if w.mode == shopModeBuy {
+		for i, item := range w.buyItems {
+			price := shopBuyItemPrice(item)
+			maxQuantity := 999
+			if price > 0 {
+				maxQuantity = int(model.Zeny / int64(price))
+			}
+			name := mobileShopItemName(metadata, item.ItemID)
+			model.Items = append(model.Items, mobileui.ShopItemModel{Index: uint16(i), ItemID: item.ItemID, Name: name, Price: int64(price), SellPrice: int64(price), MaxQuantity: maxQuantity, CanBuy: maxQuantity > 0})
+		}
+	}
+	if w.mode == shopModeSell {
+		indexes := make([]int, 0, len(w.sellable))
+		for index := range w.sellable {
+			indexes = append(indexes, int(index))
+		}
+		sort.Ints(indexes)
+		for _, rawIndex := range indexes {
+			index := uint16(rawIndex)
+			item := w.sellable[index]
+			name := "Item"
+			if state != nil {
+				if inventoryItem, ok := findInventoryItemByIndex(state, index); ok {
+					name = mobileShopItemName(metadata, inventoryItem.ItemID)
+					model.SellItems = append(model.SellItems, mobileui.ShopItemModel{Index: index, ItemID: inventoryItem.ItemID, Name: name, Price: int64(item.Price), SellPrice: int64(item.OverchargePrice), Quantity: int(inventoryItem.Amount), MaxQuantity: int(inventoryItem.Amount), CanSell: inventoryItem.Amount > 0})
+				}
+			}
+		}
+	}
+	return model
+}
+
+func (w *ShopWindow) MobileBuyRequest(index, amount uint16) (network.BuyRequestItem, bool) {
+	if w == nil || w.mode != shopModeBuy || amount == 0 || int(index) >= len(w.buyItems) {
+		return network.BuyRequestItem{}, false
+	}
+	return network.BuyRequestItem{ItemID: w.buyItems[index].ItemID, Amount: amount}, true
+}
+
+func (w *ShopWindow) MobileSellRequest(index, amount uint16) (network.SellRequestItem, bool) {
+	if w == nil || w.mode != shopModeSell || amount == 0 {
+		return network.SellRequestItem{}, false
+	}
+	if _, ok := w.sellable[index]; !ok {
+		return network.SellRequestItem{}, false
+	}
+	return network.SellRequestItem{Index: index, Amount: amount}, true
+}
+
+func mobileShopItemName(metadata *res.Manager, itemID uint16) string {
+	if metadata != nil {
+		if name, ok := metadata.ItemDisplayName(int(itemID), true); ok && name != "" {
+			return name
+		}
+	}
+	return fmt.Sprintf("Item %d", itemID)
 }
 
 func (w *ShopWindow) OpenDeal(selection network.ShopDealSelection, ctx Context) {

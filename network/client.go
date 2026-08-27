@@ -47,6 +47,7 @@ const sendQueueSize = 256
 type outboundPacket struct {
 	data     []byte
 	enqueued time.Time
+	done     chan error
 }
 
 func NewClient(clientDate int, trace bool) *Client {
@@ -194,6 +195,42 @@ func (c *Client) SendQuitGame() error {
 		glog.Debugf("sent CZ_REQ_DISCONNECT opcode=0x%04X client_date=%d", ID(packet), c.clientDate)
 	} else {
 		glog.Warnf("send CZ_REQ_DISCONNECT failed opcode=0x%04X len=%d client_date=%d: %v", ID(packet), len(packet), c.clientDate, err)
+	}
+	return err
+}
+
+// SendQuitGameAndClose sends the explicit world disconnect packet and waits
+// for the write loop to flush it before closing the connection. A plain Close
+// is still used for transport failures, but clean user disconnects should not
+// turn a queued CZ_REQ_DISCONNECT into a bare TCP close.
+func (c *Client) SendQuitGameAndClose() error {
+	packet := BuildQuitGamePacket()
+	done := make(chan error, 1)
+	start := time.Now()
+
+	c.mu.Lock()
+	sendCh := c.sendCh
+	if c.conn == nil || sendCh == nil {
+		c.mu.Unlock()
+		return fmt.Errorf("not connected")
+	}
+	select {
+	case sendCh <- outboundPacket{data: packet, enqueued: start, done: done}:
+		c.mu.Unlock()
+	case <-time.After(time.Second):
+		c.mu.Unlock()
+		return fmt.Errorf("send queue blocked")
+	}
+
+	var err error
+	select {
+	case err = <-done:
+	case <-time.After(time.Second):
+		err = fmt.Errorf("disconnect write timeout")
+	}
+	c.Close()
+	if err == nil {
+		glog.Debugf("sent and flushed CZ_REQ_DISCONNECT opcode=0x%04X client_date=%d", ID(packet), c.clientDate)
 	}
 	return err
 }
@@ -561,6 +598,9 @@ func (c *Client) DrainErrors() []error {
 
 func (c *Client) readLoop(conn net.Conn) {
 	buf := make([]byte, 4096)
+	// Framing is connection-local. A reconnect must never inherit a partial
+	// packet from the socket that was closed before it.
+	framer := NewFramer(PacketLengths2008())
 	for {
 		n, err := conn.Read(buf)
 		if n > 0 {
@@ -568,7 +608,7 @@ func (c *Client) readLoop(conn net.Conn) {
 				headLen := min(n, 32)
 				glog.Debugf("network read n=%d head=%s", n, hex.EncodeToString(buf[:headLen]))
 			}
-			packets, frameErr := c.framer.Push(buf[:n])
+			packets, frameErr := framer.Push(buf[:n])
 			c.mu.Lock()
 			c.packets = append(c.packets, packets...)
 			if frameErr != nil {
@@ -595,11 +635,17 @@ func (c *Client) writeLoop(conn net.Conn, sendCh <-chan outboundPacket) {
 		queued := time.Since(packet.enqueued)
 		start := time.Now()
 		if _, err := conn.Write(packet.data); err != nil {
+			if packet.done != nil {
+				packet.done <- err
+			}
 			if c.isCurrentConn(conn) {
 				c.addError(err)
 			}
 			c.clearConn(conn)
 			return
+		}
+		if packet.done != nil {
+			packet.done <- nil
 		}
 		elapsed := time.Since(start)
 		if c.trace || queued > 2*time.Millisecond || elapsed > 2*time.Millisecond {

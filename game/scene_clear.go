@@ -19,6 +19,11 @@ func worldSceneClearColor(mapName string) color.RGBA {
 }
 
 var robrSkyClearColors = map[string]color.RGBA{
+	// Prontera's source map does not carry a separate sky texture in the
+	// mobile closure. Keep the clear region in the authored sky family rather
+	// than the old opaque-white diagnostic default; GND diagnostics still
+	// identify any actual missing surface or texture.
+	"prontera.rsw":    {R: 0x78, G: 0x9f, B: 0xc2, A: 255},
 	"airplane.rsw":    {R: 0x66, G: 0x99, B: 0xcc, A: 255},
 	"airplane_01.rsw": {R: 0x66, G: 0x99, B: 0xcc, A: 255},
 	"gonryun.rsw":     {R: 0x66, G: 0x99, B: 0xcc, A: 255},

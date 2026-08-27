@@ -1698,6 +1698,7 @@ func (m *WorldMode) drawDamageFloaters(screen *render.Frame, ctx client.Context,
 		}
 		progress := damageFloaterProgress(floater, now)
 		dx, dy, zLift, scale, alpha := damageFloaterPlacement(floater.kind, progress)
+		renderScale := damageFloaterRenderScale(scale)
 		floaterColor := damageFloaterColor(floater.kind, floater.color)
 		terrainZ := terrainHeightAt(ctx.World, x, y)
 		worldX := cellCenter(x) + dx
@@ -1705,21 +1706,28 @@ func (m *WorldMode) drawDamageFloaters(screen *render.Frame, ctx client.Context,
 		screenScale := actorBillboardScreenScale(projection, worldX, worldY, terrainZ)
 		if floater.kind == damageFloaterMiss {
 			if billboard, ok := m.damageMessageBillboard(ctx, 0, 0); ok {
-				drawSpriteBillboardTintAlphaOverlay3D(screen, projection, billboard, worldX, worldY, terrainZ+zLift, screenScale*scale, alpha, 1, floaterColor)
+				drawSpriteBillboardTintAlphaOverlay3D(screen, projection, billboard, worldX, worldY, terrainZ+zLift, screenScale*renderScale, alpha, 1, floaterColor)
 				continue
 			}
 		}
 		if floater.kind == damageFloaterCritical {
 			if billboard, ok := m.damageMessageBillboard(ctx, 2, 0); ok {
-				drawSpriteBillboardTintAlphaOverlay3D(screen, projection, billboard, worldX, worldY, terrainZ+zLift+0.05, screenScale*scale*0.6, alpha, 1, color.RGBA{R: 168, G: 168, B: 168, A: 255})
+				drawSpriteBillboardTintAlphaOverlay3D(screen, projection, billboard, worldX, worldY, terrainZ+zLift+0.05, screenScale*renderScale*0.6, alpha, 1, color.RGBA{R: 168, G: 168, B: 168, A: 255})
 			}
 		}
 		if billboard, ok := m.damageNumberBillboard(ctx, floater.text); ok {
-			drawSpriteBillboardTintAlphaOverlay3D(screen, projection, billboard, worldX, worldY, terrainZ+zLift, screenScale*scale, alpha, 1, floaterColor)
+			drawSpriteBillboardTintAlphaOverlay3D(screen, projection, billboard, worldX, worldY, terrainZ+zLift, screenScale*renderScale, alpha, 1, floaterColor)
 			continue
 		}
 		point := projection.Project(worldX, worldY, terrainZ+zLift)
-		render.DrawBitmapTextAtColor(screen, floater.text, int(point.x)-8, int(point.y)-40, withAlpha(floaterColor, alpha))
+		textWidth, _ := render.BitmapTextSize(floater.text)
+		fallbackScale := damageFloaterDisplayScale
+		fallbackWidth := int(math.Ceil(float64(textWidth) * fallbackScale))
+		textX := int(point.x) - fallbackWidth/2
+		textY := int(point.y) - int(math.Ceil(40*fallbackScale))
+		shadowColor := withAlpha(color.RGBA{R: 0, G: 0, B: 0, A: 220}, alpha)
+		render.DrawBitmapTextScaledAtColor(screen, floater.text, textX+1, textY+1, shadowColor, fallbackScale)
+		render.DrawBitmapTextScaledAtColor(screen, floater.text, textX, textY, withAlpha(floaterColor, alpha), fallbackScale)
 	}
 	m.damageFloaters = active
 }

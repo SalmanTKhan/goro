@@ -4,6 +4,7 @@ import (
 	"image"
 	"image/color"
 	"math"
+	"time"
 
 	"github.com/kivutar/goro/render"
 	"github.com/kivutar/goro/res"
@@ -122,6 +123,11 @@ func (m *WorldMode) drawGNDMeshes(screen *render.Frame, manager *res.Manager, gn
 }
 
 func (m *WorldMode) buildGNDMeshChunk(manager *res.Manager, gnd *res.GND, rsw *res.RSW, lightmapAtlas gndLightmapAtlas, startX, endX, startY, endY int) []retainedWorldMesh {
+	started := time.Now()
+	defer func() {
+		m.metrics.TerrainBuildDuration += time.Since(started)
+		m.metrics.TerrainChunkBuilds++
+	}()
 	if gnd == nil {
 		return nil
 	}
@@ -231,6 +237,7 @@ func (m *WorldMode) buildGNDMeshChunk(manager *res.Manager, gnd *res.GND, rsw *r
 							addTextured(texture, verts, uvs, quadIndices012023, surfaceVertexTints(baseTints, cell.Heights, normals, lighting), groundTextureDrawOptions())
 						}
 					} else {
+						m.terrainTextureFallbacks++
 						addColored(verts, quadIndices012023, groundSurfaceVertexColors(gndTextureName(gnd, surface.TextureID), surface.Color, cell.Heights, normals, lighting), worldOpaqueTriangleDrawOptions(render.FilterNearest, render.AddressUnsafe))
 					}
 				}
@@ -356,4 +363,5 @@ func addGNDRetainedSurface(m *WorldMode, manager *res.Manager, gnd *res.GND, sur
 		return
 	}
 	addColored(verts, quadIndices012023, groundSurfaceVertexColors(textureName, surface.Color, heights, normals, lighting), worldOpaqueTriangleDrawOptions(render.FilterNearest, render.AddressUnsafe))
+	m.terrainTextureFallbacks++
 }

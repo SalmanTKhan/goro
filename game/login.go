@@ -26,6 +26,7 @@ type LoginMode struct {
 	console           gameui.ChatConsole
 	autoAttempted     bool
 	autoCharAttempted bool
+	connectRequested  bool
 	fade              loginFadeState
 	username          string
 	password          string
@@ -53,6 +54,7 @@ type LoginMode struct {
 	cursor            roCursorState
 	quitConfirm       gameui.ConfirmModal
 	disconnectDialog  gameui.ConfirmModal
+	pendingMapChange  *network.MapChange
 }
 
 type loginPhase int
@@ -88,6 +90,13 @@ const charServerPingInterval = 10 * time.Second
 
 func NewLoginMode() *LoginMode {
 	return &LoginMode{status: "select a server", maxSlots: 9}
+}
+
+func (m *LoginMode) Status() string {
+	if m == nil || strings.TrimSpace(m.status) == "" {
+		return "waiting for login"
+	}
+	return m.status
 }
 
 func NewCharacterSelectMode(ctx client.Context, console gameui.ChatConsole) *LoginMode {
@@ -138,6 +147,17 @@ func (m *LoginMode) Update(ctx client.Context) (Mode, error) {
 	if m.updateFade(ctx, now) {
 		return m.nextWorldMode(ctx), nil
 	}
+	if m.pendingMapChange != nil && ctx.Assets != nil {
+		requirement := ctx.Assets.RequireMap(m.pendingMapChange.MapName)
+		if requirement.Ready {
+			change := *m.pendingMapChange
+			m.pendingMapChange = nil
+			m.applyLoginMapChange(ctx, change)
+		} else {
+			_ = ctx.Assets.RequestPack(m.pendingMapChange.MapName)
+			m.status = fmt.Sprintf("waiting for map assets: %s", m.pendingMapChange.MapName)
+		}
+	}
 
 	conns := ctx.Resources.ClientInfo.Connections
 	fading := m.fade.phase != loginFadeNone
@@ -167,7 +187,7 @@ func (m *LoginMode) Update(ctx client.Context) (Mode, error) {
 		return nil, nil
 	}
 
-	if ctx.Config.Login.AutoLogin && !m.autoAttempted {
+	if (ctx.Config.Login.AutoLogin || m.connectRequested) && !m.autoAttempted {
 		m.autoAttempted = true
 		m.connectAndMaybeLogin(ctx, conns[m.selected], false)
 	}
@@ -242,6 +262,21 @@ func (m *LoginMode) Update(ctx client.Context) (Mode, error) {
 					m.connectCharServer(ctx, login.CharServer[0])
 				}
 			}
+		}
+		if pkt.ID == 0x006A {
+			refuse, err := network.ParseAccountLoginRefuse(pkt)
+			if err != nil {
+				m.status = "login refused: " + err.Error()
+				m.packets = append(m.packets, m.status)
+			} else {
+				m.status = describeAccountLoginRefuse(refuse.Code, refuse.Message)
+				m.packets = append(m.packets, m.status)
+				glog.Warnf("account login refused code=%d message=%q", refuse.Code, refuse.Message)
+			}
+			if ctx.Network != nil {
+				ctx.Network.Close()
+			}
+			continue
 		}
 		if pkt.ID == 0x006B {
 			list, err := network.ParseCharList(pkt)
@@ -425,6 +460,21 @@ func (m *LoginMode) Update(ctx client.Context) (Mode, error) {
 	return nil, nil
 }
 
+func describeAccountLoginRefuse(code uint8, message string) string {
+	message = strings.TrimSpace(message)
+	if message != "" {
+		return fmt.Sprintf("login refused (%d): %s", code, message)
+	}
+	switch code {
+	case 0:
+		return "login refused: account not found"
+	case 1:
+		return "login refused: incorrect password"
+	default:
+		return fmt.Sprintf("login refused (code %d)", code)
+	}
+}
+
 func (m *LoginMode) applyLoginParameterChange(ctx client.Context, pkt network.Packet) bool {
 	change, ok, err := network.ParseParameterChange(pkt)
 	if err != nil {
@@ -511,6 +561,17 @@ func (m *LoginMode) applyLoginCartPacket(ctx client.Context, pkt network.Packet)
 }
 
 func (m *LoginMode) applyLoginMapChange(ctx client.Context, change network.MapChange) {
+	if ctx.Assets != nil {
+		requirement := ctx.Assets.RequireMap(change.MapName)
+		if !requirement.Ready {
+			pending := change
+			m.pendingMapChange = &pending
+			_ = ctx.Assets.RequestPack(change.MapName)
+			m.status = fmt.Sprintf("waiting for map assets: %s", change.MapName)
+			glog.Infof("login map transition waiting for assets map=%s missing=%v", change.MapName, requirement.Missing)
+			return
+		}
+	}
 	ctx.World.ResetMapProperty()
 	ctx.World.MapName = change.MapName
 	ctx.Session.Zone.MapName = change.MapName
@@ -742,23 +803,24 @@ func (m *LoginMode) moveToNextCharacterSlot() {
 	m.moveSelectedSlot(1)
 }
 
-func (m *LoginMode) submitSelectedCharacter(ctx client.Context) {
+func (m *LoginMode) submitSelectedCharacter(ctx client.Context) bool {
 	character, ok := characterBySlot(ctx.Session.Characters, m.selectedSlot)
 	if !ok {
 		m.status = "empty character slot"
-		return
+		return false
 	}
 	if ctx.Network == nil {
 		m.status = "select character failed: not connected"
-		return
+		return false
 	}
 	if err := ctx.Network.SendSelectCharacter(character.Slot); err != nil {
 		m.status = "select character failed: " + err.Error()
-		return
+		return false
 	}
 	m.playConfirmSFX(ctx)
 	ctx.Session.SelectCharacter(character)
 	m.status = fmt.Sprintf("selected character %s", character.Name)
+	return true
 }
 
 func (m *LoginMode) drawBackground(ctx client.Context, screen *render.Frame) {

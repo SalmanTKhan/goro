@@ -4,8 +4,10 @@ import (
 	"image"
 	"image/color"
 	"math"
+	"time"
 
 	"github.com/kivutar/goro/client"
+	"github.com/kivutar/goro/input"
 	"github.com/kivutar/goro/render"
 	"github.com/kivutar/goro/res"
 )
@@ -24,6 +26,29 @@ func (m *WorldMode) drawTileCursor(screen *render.Frame, ctx client.Context, pro
 	}
 	x, y, ok := m.hoveredWalkCell(ctx, projection, ctx.Input.MouseX, ctx.Input.MouseY)
 	if !ok {
+		return
+	}
+	m.drawTileCursorCell(screen, ctx, projection, x, y)
+}
+
+// DrawMobileTileCursor draws the classic green walk-cell highlight for a
+// mobile ground target. The mobile presentation resolves screen coordinates
+// through PickMobileTarget first, so this renderer only receives the selected
+// world cell and never needs touch coordinates.
+func (m *WorldMode) DrawMobileTileCursor(ctx client.Context, screen *render.Frame, position input.WorldPosition) {
+	if m == nil || screen == nil || ctx.World == nil || ctx.World.GAT == nil {
+		return
+	}
+	if !isFinite(position.X) || !isFinite(position.Y) {
+		return
+	}
+	width, height := ctx.ScreenSize()
+	projection := m.sceneProjection(ctx, width, height, time.Now())
+	m.drawTileCursorCell(screen, ctx, projection, int(math.Floor(position.X)), int(math.Floor(position.Y)))
+}
+
+func (m *WorldMode) drawTileCursorCell(screen *render.Frame, ctx client.Context, projection sceneProjection, x, y int) {
+	if screen == nil || ctx.World == nil || ctx.World.GAT == nil {
 		return
 	}
 	verts, ok := tileCursorCellVerts(ctx.World.GAT, x, y)

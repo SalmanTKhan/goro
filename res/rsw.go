@@ -5,6 +5,11 @@ import (
 	"fmt"
 	"image/color"
 	"math"
+	"strings"
+	"unicode/utf8"
+
+	"golang.org/x/text/encoding/korean"
+	"golang.org/x/text/transform"
 )
 
 type RSW struct {
@@ -137,11 +142,11 @@ func ParseRSW(data []byte) (*RSW, error) {
 		_ = reader.u8()
 	}
 
-	rsw.Files.INI = fixedBinaryString(reader.bytes(40))
-	rsw.Files.GND = fixedBinaryString(reader.bytes(40))
-	rsw.Files.GAT = fixedBinaryString(reader.bytes(40))
+	rsw.Files.INI = fixedResourceString(reader.bytes(40))
+	rsw.Files.GND = fixedResourceString(reader.bytes(40))
+	rsw.Files.GAT = fixedResourceString(reader.bytes(40))
 	if rsw.versionAtLeast(1, 4) {
-		rsw.Files.SRC = fixedBinaryString(reader.bytes(40))
+		rsw.Files.SRC = fixedResourceString(reader.bytes(40))
 	}
 
 	if !rsw.versionAtLeast(2, 6) {
@@ -220,7 +225,7 @@ func (r *RSW) versionAtLeast(major, minor byte) bool {
 func readRSWModel(reader *rswReader, rsw *RSW) RSWModel {
 	var model RSWModel
 	if rsw.versionAtLeast(1, 3) {
-		model.Name = fixedBinaryString(reader.bytes(40))
+		model.Name = fixedResourceString(reader.bytes(40))
 		model.AnimType = reader.i32()
 		model.AnimSpeed = reader.f32()
 		model.BlockType = reader.i32()
@@ -231,12 +236,24 @@ func readRSWModel(reader *rswReader, rsw *RSW) RSWModel {
 	if rsw.versionAtLeast(2, 7) {
 		model.UnknownInt = reader.i32()
 	}
-	model.Filename = fixedBinaryString(reader.bytes(80))
-	model.NodeName = fixedBinaryString(reader.bytes(80))
+	model.Filename = fixedResourceString(reader.bytes(80))
+	model.NodeName = fixedResourceString(reader.bytes(80))
 	model.Position = reader.scaledPosition3(5)
 	model.Rotation = reader.vector3()
 	model.Scale = reader.scaledVector3(5)
 	return model
+}
+
+func fixedResourceString(data []byte) string {
+	value := fixedBinaryString(data)
+	if utf8.Valid(data) && !strings.ContainsRune(value, '\uFFFD') {
+		return value
+	}
+	decoded, _, err := transform.Bytes(korean.EUCKR.NewDecoder(), data)
+	if err == nil {
+		return fixedBinaryString(decoded)
+	}
+	return value
 }
 
 func readRSWObjectLight(reader *rswReader) RSWObjectLight {

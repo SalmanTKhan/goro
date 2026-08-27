@@ -2,9 +2,11 @@ package ui
 
 import (
 	"image/color"
+	"strings"
 	"testing"
 
 	"github.com/kivutar/goro/input"
+	"github.com/kivutar/goro/mobileui"
 	"github.com/kivutar/goro/network"
 )
 
@@ -144,6 +146,50 @@ func TestNPCDialogMenuChoiceRequiresSelection(t *testing.T) {
 	dialog.chooseSelected(Context{})
 	if dialog.status != "not connected" {
 		t.Fatalf("status = %q, want submit attempt after selection", dialog.status)
+	}
+}
+
+func TestNPCDialogMobileModelProjectsServerActions(t *testing.T) {
+	dialog := NPCDialog{}
+	dialog.Apply(network.NPCDialog{Kind: network.NPCDialogMenu, NPCID: 77, Message: "Choose", Options: []string{"^00AAFFUse Storage^000000", "Leave"}})
+	model := dialog.MobileModel(Context{})
+	if !model.Open || model.NPCID != 77 || len(model.Options) != 3 || model.Options[0].Action != mobileui.DialogMenuChoice || model.Options[0].Value != 1 {
+		t.Fatalf("unexpected mobile NPC model: %+v", model)
+	}
+	if model.Options[0].Label != "^00AAFFUse Storage^000000" {
+		t.Fatalf("mobile NPC model discarded RO color controls: %q", model.Options[0].Label)
+	}
+	if model.Options[2].Action != mobileui.DialogNPCClose {
+		t.Fatalf("mobile menu close action = %+v", model.Options[2])
+	}
+}
+
+func TestNPCDialogMobileModelProjectsBracketedSpeakers(t *testing.T) {
+	dialog := NPCDialog{}
+	dialog.Apply(network.NPCDialog{Kind: network.NPCDialogSay, NPCID: 77, Message: "[PrivateMvpRoom] Please select a private MVP room."})
+	dialog.Apply(network.NPCDialog{Kind: network.NPCDialogSay, NPCID: 77, Message: "[PrivateMvpRoom] You can only use the room for 0 minutes."})
+	dialog.Apply(network.NPCDialog{Kind: network.NPCDialogSay, NPCID: 77, Message: "[Tine] Some married chocolate lovers almost double their experience at trainings!<br/>But everything isn't so simply..."})
+
+	model := dialog.MobileModel(Context{})
+	if model.Title != "PrivateMvpRoom" {
+		t.Fatalf("mobile dialog title = %q, want first bracketed speaker", model.Title)
+	}
+	if len(model.Messages) != 3 {
+		t.Fatalf("mobile dialog messages = %#v, want three speaker turns", model.Messages)
+	}
+	if model.Messages[0].Speaker != "PrivateMvpRoom" || model.Messages[0].Text != "Please select a private MVP room." {
+		t.Fatalf("first mobile dialog message = %#v", model.Messages[0])
+	}
+	if model.Messages[1].Speaker != "PrivateMvpRoom" || model.Messages[2].Speaker != "Tine" {
+		t.Fatalf("mobile dialog speakers = %#v", model.Messages)
+	}
+	if model.Messages[2].Text != "Some married chocolate lovers almost double their experience at trainings!\nBut everything isn't so simply..." {
+		t.Fatalf("mobile dialog body changed RO break: %q", model.Messages[2].Text)
+	}
+	for _, message := range model.Messages {
+		if strings.HasPrefix(strings.TrimSpace(message.Text), "[") {
+			t.Fatalf("speaker prefix leaked into mobile dialog body: %#v", message)
+		}
 	}
 }
 

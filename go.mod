@@ -6,6 +6,7 @@ require (
 	github.com/charmbracelet/log v1.0.0
 	github.com/ebitengine/oto/v3 v3.5.0-alpha.8
 	github.com/go-fonts/dejavu v0.3.4
+	github.com/klauspost/compress v1.19.2
 	github.com/gogpu/gogpu v0.44.6
 	github.com/gogpu/gpucontext v0.21.1
 	github.com/gogpu/gputypes v0.5.1
@@ -13,6 +14,7 @@ require (
 	github.com/gogpu/ui v0.1.36
 	github.com/gogpu/wgpu v0.30.19
 	github.com/yuin/gopher-lua v1.1.2
+	gopkg.in/yaml.v3 v3.0.1
 	golang.org/x/image v0.43.0
 	golang.org/x/text v0.38.0
 )

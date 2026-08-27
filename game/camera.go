@@ -206,7 +206,7 @@ func (m *WorldMode) updateCameraRotation(ctx client.Context) {
 		delta = cameraDragYawDelta(ctx.Input.MouseDX, screenW)
 	}
 	if delta != 0 {
-		m.camera.Rotate(delta)
+		m.ApplyPlayerCommand(ctx, input.PlayerCommand{Kind: input.CommandRotateCamera, DeltaX: delta})
 	}
 }
 
@@ -216,7 +216,7 @@ func (m *WorldMode) updateCameraZoom(ctx client.Context) {
 	}
 	factor := 1.0
 	if ctx.Input.WheelY != 0 {
-		m.camera.ZoomByDelta(cameraWheelZoomDelta(ctx.Input.WheelY))
+		m.ApplyPlayerCommand(ctx, input.PlayerCommand{Kind: input.CommandZoomCamera, DeltaY: cameraWheelZoomDelta(ctx.Input.WheelY)})
 	}
 	if ctx.Input.PinchDelta != 0 {
 		factor *= cameraPinchZoomFactor(ctx.Input.PinchDelta)

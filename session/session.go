@@ -46,8 +46,10 @@ type Session struct {
 	Hotkeys              Hotkeys
 	Statuses             Statuses
 	Friends              Friends
+	PendingFriendRequest *PendingFriendRequest
 	Whisper              WhisperSettings
 	Party                Party
+	PendingPartyInvite   *PendingPartyInvite
 	Movement             Movement
 	Homunculus           Companion
 	Mercenary            Companion
@@ -87,7 +89,9 @@ func (s *Session) SelectCharacter(character Character) {
 	s.Hotkeys = Hotkeys{}
 	s.Statuses = Statuses{}
 	s.Friends = Friends{}
+	s.PendingFriendRequest = nil
 	s.Party = Party{}
+	s.PendingPartyInvite = nil
 	s.Movement = Movement{}
 	s.Homunculus = Companion{}
 	s.Mercenary = Companion{}
@@ -440,6 +444,15 @@ type Friends struct {
 	List []Friend
 }
 
+// PendingFriendRequest is transient online-session state projected to mobile
+// presentation. It is intentionally a domain value rather than a network
+// packet so the mobile layer cannot depend on packet layout.
+type PendingFriendRequest struct {
+	AccountID uint32
+	CharID    uint32
+	Name      string
+}
+
 type WhisperSettings struct {
 	OpenStrangers bool
 	OpenFriends   bool
@@ -474,6 +487,14 @@ type Party struct {
 	ItemPickupRule   uint8
 	ItemDivisionRule uint8
 	RefuseInvites    bool
+}
+
+// PendingPartyInvite is transient online-session state projected to mobile
+// presentation. RequestID is the server-issued identity required when the
+// player accepts or rejects the invitation.
+type PendingPartyInvite struct {
+	RequestID uint32
+	Name      string
 }
 
 func (p Party) Active() bool {

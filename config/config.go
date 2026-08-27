@@ -10,20 +10,25 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/kivutar/goro/input"
 )
 
 type Config struct {
-	DataDir  string
-	Window   WindowConfig
-	Packet   PacketConfig
-	Login    LoginConfig
-	Audio    AudioConfig
-	Render   RenderConfig
-	Network  NetworkConfig
-	Fog      FogConfig
-	Gameplay GameplayConfig
-	Script   ScriptConfig
-	Log      LogConfig
+	DataDir       string
+	Window        WindowConfig
+	Packet        PacketConfig
+	Login         LoginConfig
+	Audio         AudioConfig
+	Render        RenderConfig
+	Network       NetworkConfig
+	MobileSession MobileSessionConfig
+	Fog           FogConfig
+	Gameplay      GameplayConfig
+	Mobile        input.MobileControls
+	MobileDisplay input.MobileDisplaySettings
+	Script        ScriptConfig
+	Log           LogConfig
 }
 
 type WindowConfig struct {
@@ -70,6 +75,11 @@ type NetworkConfig struct {
 	Trace bool
 }
 
+type MobileSessionConfig struct {
+	Mode   SessionMode
+	Server ServerConfig
+}
+
 type FogConfig struct {
 	Enabled bool
 }
@@ -114,16 +124,18 @@ func LoadConfig(args []string) (Config, error) {
 }
 
 type UserSettings struct {
-	Fullscreen  bool
-	VSync       bool
-	FPS         bool
-	BGMVolume   float64
-	SFXVolume   float64
-	NoShift     bool
-	NoCtrl      bool
-	LessEffects bool
-	SnapTargets bool
-	SnapItems   bool
+	Fullscreen    bool
+	VSync         bool
+	FPS           bool
+	BGMVolume     float64
+	SFXVolume     float64
+	NoShift       bool
+	NoCtrl        bool
+	LessEffects   bool
+	SnapTargets   bool
+	SnapItems     bool
+	Mobile        *input.MobileControls
+	MobileDisplay *input.MobileDisplaySettings
 }
 
 func UserConfigPath() (string, error) {
@@ -140,6 +152,45 @@ func UserDataDir() (string, error) {
 		return "", err
 	}
 	return filepath.Join(dir, "goro"), nil
+}
+
+// LoadUserMobileControls reads only the mobile controls portion of the user
+// configuration. Android uses this because it constructs its platform host
+// configuration separately from the desktop command-line configuration.
+func LoadUserMobileControls() (input.MobileControls, error) {
+	cfg := defaultConfig()
+	path, err := UserConfigPath()
+	if err != nil {
+		return cfg.Mobile, err
+	}
+	if err := applyINIFile(&cfg, path, false); err != nil {
+		return input.MobileControls{}, err
+	}
+	return cfg.Mobile, nil
+}
+
+// LoadUserMobileSettings reads the complete set of settings exposed by the
+// mobile page. It starts from the same validated defaults as LoadConfig, so a
+// legacy INI without newer mobile keys remains safe.
+func LoadUserMobileSettings() (input.MobileSettings, error) {
+	cfg := defaultConfig()
+	path, err := UserConfigPath()
+	if err != nil {
+		return input.DefaultMobileSettings(), err
+	}
+	if err := applyINIFile(&cfg, path, false); err != nil {
+		return input.MobileSettings{}, err
+	}
+	return input.MobileSettings{
+		Controls: cfg.Mobile,
+		Audio: input.MobileAudioSettings{
+			BGMEnabled: cfg.Audio.BGM,
+			BGMVolume:  cfg.Audio.BGMVolume,
+			SFXVolume:  cfg.Audio.SFXVolume,
+		},
+		Display:  cfg.MobileDisplay,
+		Gameplay: input.MobileGameplaySettings{NoShift: cfg.Gameplay.NoShift, NoCtrl: cfg.Gameplay.NoCtrl, LessEffects: cfg.Gameplay.LessEffects, SnapTargets: cfg.Gameplay.SnapTargets, SnapItems: cfg.Gameplay.SnapItems},
+	}.Normalized(), nil
 }
 
 func NextScreenshotPath(now time.Time) (string, error) {
@@ -198,6 +249,21 @@ func SaveUserSettings(settings UserSettings) (string, error) {
 			"itemsnap":     formatINIValueBool(settings.SnapItems),
 		},
 	}
+	if settings.Mobile != nil {
+		mobile := settings.Mobile.Normalized()
+		values["mobile"] = map[string]string{
+			"movement":           formatINIMobileMovement(mobile.MovementMode),
+			"camera_sensitivity": formatINIValueFloat(mobile.CameraSensitivity),
+			"zoom_sensitivity":   formatINIValueFloat(mobile.ZoomSensitivity),
+			"invert_camera_y":    formatINIValueBool(mobile.InvertCameraY),
+			"long_press_ms":      strconv.Itoa(mobile.LongPressMS),
+			"show_target_names":  formatINIValueBool(mobile.ShowTargetNames),
+		}
+	}
+	if settings.MobileDisplay != nil {
+		values["mobile"] = ensureINISection(values["mobile"])
+		values["mobile"]["show_minimap"] = formatINIValueBool(settings.MobileDisplay.ShowMinimap)
+	}
 	existing, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
 		return "", err
@@ -207,6 +273,90 @@ func SaveUserSettings(settings UserSettings) (string, error) {
 		return "", err
 	}
 	return path, nil
+}
+
+// SaveMobileControls updates only the mobile section of the user INI. This is
+// used by the Android host so changing a touch preference cannot reset
+// unrelated desktop, audio, or login settings.
+func SaveMobileControls(controls input.MobileControls) (string, error) {
+	controls = controls.Normalized()
+	path, err := UserConfigPath()
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", err
+	}
+	existing, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+	values := map[string]map[string]string{"mobile": {
+		"movement":           formatINIMobileMovement(controls.MovementMode),
+		"camera_sensitivity": formatINIValueFloat(controls.CameraSensitivity),
+		"zoom_sensitivity":   formatINIValueFloat(controls.ZoomSensitivity),
+		"invert_camera_y":    formatINIValueBool(controls.InvertCameraY),
+		"long_press_ms":      strconv.Itoa(controls.LongPressMS),
+		"show_target_names":  formatINIValueBool(controls.ShowTargetNames),
+	}}
+	data := upsertINIValues(string(existing), values)
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// SaveMobileSettings updates only the sections represented by the mobile
+// settings page. Existing login/server and unrelated INI entries remain
+// untouched.
+func SaveMobileSettings(settings input.MobileSettings) (string, error) {
+	settings = settings.Normalized()
+	path, err := UserConfigPath()
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", err
+	}
+	existing, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+	values := map[string]map[string]string{
+		"mobile": {
+			"movement":           formatINIMobileMovement(settings.Controls.MovementMode),
+			"camera_sensitivity": formatINIValueFloat(settings.Controls.CameraSensitivity),
+			"zoom_sensitivity":   formatINIValueFloat(settings.Controls.ZoomSensitivity),
+			"invert_camera_y":    formatINIValueBool(settings.Controls.InvertCameraY),
+			"long_press_ms":      strconv.Itoa(settings.Controls.LongPressMS),
+			"show_target_names":  formatINIValueBool(settings.Controls.ShowTargetNames),
+			"show_minimap":       formatINIValueBool(settings.Display.ShowMinimap),
+		},
+		"audio": {
+			"bgm":        formatINIValueBool(settings.Audio.BGMEnabled),
+			"bgm_volume": formatINIValueFloat(settings.Audio.BGMVolume),
+			"sfx_volume": formatINIValueFloat(settings.Audio.SFXVolume),
+		},
+		"gameplay": {
+			"no_shift":     formatINIValueBool(settings.Gameplay.NoShift),
+			"no_ctrl":      formatINIValueBool(settings.Gameplay.NoCtrl),
+			"less_effects": formatINIValueBool(settings.Gameplay.LessEffects),
+			"snap":         formatINIValueBool(settings.Gameplay.SnapTargets),
+			"itemsnap":     formatINIValueBool(settings.Gameplay.SnapItems),
+		},
+	}
+	data := upsertINIValues(string(existing), values)
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func ensureINISection(values map[string]string) map[string]string {
+	if values == nil {
+		return map[string]string{}
+	}
+	return values
 }
 
 func defaultConfig() Config {
@@ -221,6 +371,7 @@ func defaultConfig() Config {
 			ClientDate: 20080910,
 			Profile:    23,
 		},
+		MobileSession: MobileSessionConfig{Mode: SessionModeOffline, Server: ServerConfig{Host: "127.0.0.1", AuthPort: 6900, CharPort: 6121, ZonePort: 5121, ClientDate: 20080910, Profile: 23}},
 		Login: LoginConfig{
 			CharSlot: -1,
 		},
@@ -241,6 +392,8 @@ func defaultConfig() Config {
 		Gameplay: GameplayConfig{
 			NoCtrl: true,
 		},
+		Mobile:        input.DefaultMobileControls(),
+		MobileDisplay: input.MobileDisplaySettings{ShowMinimap: true},
 		Log: LogConfig{
 			Level: "info",
 		},
@@ -314,6 +467,11 @@ func applyCLI(cfg *Config, args []string) error {
 	fs.BoolVar(&cfg.Render.Stats, "render-stats", cfg.Render.Stats, "show render stats")
 	fs.BoolVar(&cfg.Render.WorldDebugStats, "world-debug-stats", cfg.Render.WorldDebugStats, "show world renderer debug stats")
 	fs.BoolVar(&cfg.Network.Trace, "net-trace", cfg.Network.Trace, "log network reads and writes")
+	fs.StringVar((*string)(&cfg.MobileSession.Mode), "mobile-mode", string(cfg.MobileSession.Mode), "mobile session mode: online or offline")
+	fs.StringVar(&cfg.MobileSession.Server.Host, "server-host", cfg.MobileSession.Server.Host, "online server host")
+	fs.IntVar(&cfg.MobileSession.Server.AuthPort, "server-auth-port", cfg.MobileSession.Server.AuthPort, "online auth server port")
+	fs.IntVar(&cfg.MobileSession.Server.CharPort, "server-char-port", cfg.MobileSession.Server.CharPort, "online char server port")
+	fs.IntVar(&cfg.MobileSession.Server.ZonePort, "server-zone-port", cfg.MobileSession.Server.ZonePort, "online zone server port")
 	fs.BoolVar(&cfg.Fog.Enabled, "fog", cfg.Fog.Enabled, "enable map fog")
 	fs.BoolVar(&cfg.Gameplay.NoShift, "no-shift", cfg.Gameplay.NoShift, "allow support skills to target enemies without holding Shift")
 	fs.BoolVar(&cfg.Gameplay.NoCtrl, "no-ctrl", cfg.Gameplay.NoCtrl, "keep attacking with one click without holding Ctrl")
@@ -419,6 +577,22 @@ func applyConfigValue(cfg *Config, section, key, value string) error {
 		return setBool(value, &cfg.Render.WorldDebugStats)
 	case "network.trace":
 		return setBool(value, &cfg.Network.Trace)
+	case "mobile.mode":
+		cfg.MobileSession.Mode = SessionMode(strings.ToLower(strings.TrimSpace(value)))
+	case "server.host":
+		cfg.MobileSession.Server.Host = value
+	case "server.name":
+		cfg.MobileSession.Server.Name = value
+	case "server.authport":
+		return setInt(value, &cfg.MobileSession.Server.AuthPort)
+	case "server.charport":
+		return setInt(value, &cfg.MobileSession.Server.CharPort)
+	case "server.zoneport":
+		return setInt(value, &cfg.MobileSession.Server.ZonePort)
+	case "server.clientdate":
+		return setInt(value, &cfg.MobileSession.Server.ClientDate)
+	case "server.profile":
+		return setInt(value, &cfg.MobileSession.Server.Profile)
 	case "fog.enabled":
 		return setBool(value, &cfg.Fog.Enabled)
 	case "gameplay.noshift":
@@ -433,6 +607,20 @@ func applyConfigValue(cfg *Config, section, key, value string) error {
 		return setBool(value, &cfg.Gameplay.SnapItems)
 	case "gameplay.forceuserai":
 		return setBool(value, &cfg.Gameplay.ForceUserAI)
+	case "mobile.movement":
+		return setMobileMovement(value, &cfg.Mobile.MovementMode)
+	case "mobile.camerasensitivity":
+		return setFloat(value, &cfg.Mobile.CameraSensitivity)
+	case "mobile.zoomsensitivity":
+		return setFloat(value, &cfg.Mobile.ZoomSensitivity)
+	case "mobile.invertcameray":
+		return setBool(value, &cfg.Mobile.InvertCameraY)
+	case "mobile.longpressms":
+		return setInt(value, &cfg.Mobile.LongPressMS)
+	case "mobile.showtargetnames":
+		return setBool(value, &cfg.Mobile.ShowTargetNames)
+	case "mobile.showminimap":
+		return setBool(value, &cfg.MobileDisplay.ShowMinimap)
 	case ".script", "script.path":
 		cfg.Script.Path = value
 	case "log.level":
@@ -458,6 +646,10 @@ func validateConfig(cfg *Config) error {
 	if cfg.Login.CharSlot < -1 || cfg.Login.CharSlot > 8 {
 		return fmt.Errorf("character slot must be between 0 and 8")
 	}
+	if cfg.MobileSession.Mode != SessionModeOnline && cfg.MobileSession.Mode != SessionModeOffline {
+		return fmt.Errorf("mobile session mode must be online or offline")
+	}
+	cfg.MobileSession.Server = cfg.MobileSession.Server.Normalized()
 	if cfg.Audio.BGMVolume < 0 || cfg.Audio.BGMVolume > 1 {
 		return fmt.Errorf("bgm volume must be between 0 and 1")
 	}
@@ -466,6 +658,9 @@ func validateConfig(cfg *Config) error {
 	}
 	if cfg.Render.BenchSeconds < 0 || cfg.Render.BenchWarmupSeconds < 0 {
 		return fmt.Errorf("benchmark durations must be non-negative")
+	}
+	if err := cfg.Mobile.Validate(); err != nil {
+		return err
 	}
 	switch cfg.Log.Level {
 	case "debug", "info", "warn", "warning", "error", "fatal":
@@ -476,7 +671,7 @@ func validateConfig(cfg *Config) error {
 }
 
 func upsertINIValues(src string, values map[string]map[string]string) string {
-	sectionOrder := []string{"window", "render", "audio", "gameplay"}
+	sectionOrder := []string{"window", "render", "audio", "gameplay", "mobile"}
 	seenSections := make(map[string]bool)
 	written := make(map[string]map[string]bool)
 	for section := range values {
@@ -534,7 +729,7 @@ func upsertINIValues(src string, values map[string]map[string]string) string {
 	}
 	flushMissing(currentSection)
 	for _, section := range sectionOrder {
-		if seenSections[section] {
+		if seenSections[section] || values[section] == nil {
 			continue
 		}
 		if len(out) > 0 && strings.TrimSpace(out[len(out)-1]) != "" {
@@ -547,7 +742,7 @@ func upsertINIValues(src string, values map[string]map[string]string) string {
 }
 
 func sortedINIKeys(values map[string]string) []string {
-	preferred := []string{"fullscreen", "vsync", "fps", "bgm_volume", "sfx_volume", "no_shift", "no_ctrl"}
+	preferred := []string{"fullscreen", "vsync", "fps", "bgm", "bgm_volume", "sfx_volume", "no_shift", "no_ctrl", "less_effects", "snap", "itemsnap", "movement", "camera_sensitivity", "zoom_sensitivity", "invert_camera_y", "long_press_ms", "show_target_names", "show_minimap"}
 	keys := make([]string, 0, len(values))
 	seen := make(map[string]bool, len(values))
 	for _, key := range preferred {
@@ -570,6 +765,13 @@ func formatINIValueBool(value bool) string {
 
 func formatINIValueFloat(value float64) string {
 	return strconv.FormatFloat(value, 'f', 2, 64)
+}
+
+func formatINIMobileMovement(value input.MobileMovementMode) string {
+	if value == input.MovementTapToMove {
+		return "tap"
+	}
+	return "hold"
 }
 
 func cleanINIValue(value string) string {
@@ -622,6 +824,18 @@ func setFloat(raw string, dst *float64) error {
 		return fmt.Errorf("invalid float %q", raw)
 	}
 	*dst = value
+	return nil
+}
+
+func setMobileMovement(raw string, dst *input.MobileMovementMode) error {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "hold", "hold_to_move", "holdtomove":
+		*dst = input.MovementHoldToMove
+	case "tap", "tap_to_move", "taptomove":
+		*dst = input.MovementTapToMove
+	default:
+		return fmt.Errorf("invalid mobile movement mode %q", raw)
+	}
 	return nil
 }
 

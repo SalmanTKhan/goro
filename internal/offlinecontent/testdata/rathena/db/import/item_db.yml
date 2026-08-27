@@ -1,0 +1,8 @@
+Header:
+  Type: ITEM_DB
+  Version: 3
+Body:
+  - Id: 909
+    Name: Refined Jellopy
+    Buy: 10
+    Sell: 5

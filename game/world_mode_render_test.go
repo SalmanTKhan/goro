@@ -492,6 +492,9 @@ func TestCursorRotateInfoMatchesRobrowser(t *testing.T) {
 }
 
 func TestWorldSceneClearColorMatchesReferenceDefaults(t *testing.T) {
+	if got := worldSceneClearColor("prontera"); got != (color.RGBA{R: 0x78, G: 0x9f, B: 0xc2, A: 255}) {
+		t.Fatalf("prontera clear color = %#v, want authored sky", got)
+	}
 	if got := worldSceneClearColor("geffen_in"); got != (color.RGBA{A: 255}) {
 		t.Fatalf("default map clear color = %#v, want black", got)
 	}

@@ -93,15 +93,15 @@ func (m *LoginMode) cancelCharacterCreate(now time.Time) {
 	m.startPhaseFade(loginPhaseCharacter, now)
 }
 
-func (m *LoginMode) submitCharacterCreate(ctx client.Context) {
+func (m *LoginMode) submitCharacterCreate(ctx client.Context) bool {
 	name := strings.TrimSpace(m.create.name)
 	if name == "" {
 		m.status = "enter a character name"
-		return
+		return false
 	}
 	if len([]byte(name)) < charCreateNameMinBytes {
 		m.status = "name must be at least 4 characters"
-		return
+		return false
 	}
 	packet := network.MakeCharacter{
 		Name:      name,
@@ -117,10 +117,11 @@ func (m *LoginMode) submitCharacterCreate(ctx client.Context) {
 	}
 	if err := ctx.Network.SendMakeCharacter(packet); err != nil {
 		m.status = "create character failed: " + err.Error()
-		return
+		return false
 	}
 	m.playConfirmSFX(ctx)
 	m.status = "creating character..."
+	return true
 }
 
 func (m *LoginMode) changeCreateHairStyle(delta int) {

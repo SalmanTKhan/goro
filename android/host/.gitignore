@@ -1,0 +1,14 @@
+/\.gradle/
+/local.properties
+/*.hprof
+/app/.cxx/
+/app/build/
+/app/src/main/jniLibs/arm64-v8a/libgoro_android.so
+/app/src/main/jniLibs/arm64-v8a/libgoro_android.h
+/app/src/main/jniLibs/x86_64/libgoro_android.so
+/app/src/main/jniLibs/x86_64/libgoro_android.h
+/app/src/main/assets/goro-fixture/renderer-fixture.grf
+/app/src/main/assets/goro-fixture/*.mobile.grf
+/app/src/main/assets/goro-fixture/*.grf.json
+/app/src/main/assets/goro-fixture/*.pak
+/app/src/main/assets/offline/content.json

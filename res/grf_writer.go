@@ -10,14 +10,25 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"golang.org/x/text/encoding/korean"
 	"golang.org/x/text/transform"
 )
 
 type GRFPackStats struct {
-	Files int
-	Bytes int64
+	Files           int
+	Bytes           int64
+	CompressedBytes int64
+	ArchiveBytes    int64
+}
+
+// GRFPackSource is one logical resource supplied to PackGRFEntries. Open is
+// called once and may stream directly from a source archive or loose file.
+type GRFPackSource struct {
+	Name string
+	Size int64
+	Open func() (io.ReadCloser, error)
 }
 
 type grfPackEntry struct {
@@ -33,53 +44,107 @@ func PackGRF(outputPath, root string) (GRFPackStats, error) {
 	if err != nil {
 		return GRFPackStats{}, err
 	}
+	sources := make([]GRFPackSource, 0, len(files))
+	for _, grfName := range files {
+		name := grfName
+		filePath := filepath.Join(root, filepath.FromSlash(name))
+		info, err := os.Stat(filePath)
+		if err != nil {
+			return GRFPackStats{}, err
+		}
+		sources = append(sources, GRFPackSource{
+			Name: name,
+			Size: info.Size(),
+			Open: func() (io.ReadCloser, error) { return os.Open(filePath) },
+		})
+	}
+	return PackGRFEntries(outputPath, sources)
+}
+
+// PackGRFEntries writes a deterministic GRF from streamed logical resources.
+// It does not create an extracted staging directory and only holds the
+// compressed table in memory.
+func PackGRFEntries(outputPath string, sources []GRFPackSource) (GRFPackStats, error) {
+	sources = append([]GRFPackSource(nil), sources...)
+	sort.SliceStable(sources, func(i, j int) bool {
+		left := strings.ToLower(filepath.ToSlash(sources[i].Name))
+		right := strings.ToLower(filepath.ToSlash(sources[j].Name))
+		if left == right {
+			return sources[i].Name < sources[j].Name
+		}
+		return left < right
+	})
 
 	out, err := os.Create(outputPath)
 	if err != nil {
 		return GRFPackStats{}, err
 	}
-	defer out.Close()
+	closeOutput := true
+	defer func() {
+		if closeOutput {
+			_ = out.Close()
+		}
+	}()
 
 	header := make([]byte, grfHeaderSize)
 	copy(header[:15], []byte("Master of Magic"))
 	binary.LittleEndian.PutUint32(header[34:38], 0)
-	binary.LittleEndian.PutUint32(header[38:42], uint32(len(files)+7))
+	binary.LittleEndian.PutUint32(header[38:42], uint32(len(sources)+7))
 	binary.LittleEndian.PutUint32(header[42:46], grfVersion200)
 	if _, err := out.Write(header); err != nil {
 		return GRFPackStats{}, err
 	}
 
-	var entries []grfPackEntry
+	entries := make([]grfPackEntry, 0, len(sources))
 	var stats GRFPackStats
-	for _, grfName := range files {
-		path := filepath.Join(root, filepath.FromSlash(grfName))
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return GRFPackStats{}, err
+	for _, source := range sources {
+		if source.Name == "" || source.Open == nil {
+			return GRFPackStats{}, fmt.Errorf("invalid GRF source %q", source.Name)
 		}
-		compressed, err := zlibCompress(data)
+		reader, err := source.Open()
 		if err != nil {
-			return GRFPackStats{}, err
+			return GRFPackStats{}, fmt.Errorf("open %s: %w", source.Name, err)
 		}
 		offset, err := out.Seek(0, io.SeekCurrent)
 		if err != nil {
+			_ = reader.Close()
 			return GRFPackStats{}, err
 		}
 		if offset < grfHeaderSize || offset-grfHeaderSize > int64(^uint32(0)) {
-			return GRFPackStats{}, fmt.Errorf("%s: GRF offset overflow", grfName)
+			_ = reader.Close()
+			return GRFPackStats{}, fmt.Errorf("%s: GRF offset overflow", source.Name)
 		}
-		if _, err := out.Write(compressed); err != nil {
+		compressedWriter := zlib.NewWriter(out)
+		copied, copyErr := io.Copy(compressedWriter, reader)
+		closeReaderErr := reader.Close()
+		closeCompressedErr := compressedWriter.Close()
+		if copyErr != nil {
+			return GRFPackStats{}, fmt.Errorf("compress %s: %w", source.Name, copyErr)
+		}
+		if closeReaderErr != nil {
+			return GRFPackStats{}, fmt.Errorf("close %s: %w", source.Name, closeReaderErr)
+		}
+		if closeCompressedErr != nil {
+			return GRFPackStats{}, fmt.Errorf("finish %s: %w", source.Name, closeCompressedErr)
+		}
+		if source.Size > 0 && copied != source.Size {
+			return GRFPackStats{}, fmt.Errorf("%s: streamed size %d does not match declared size %d", source.Name, copied, source.Size)
+		}
+		end, err := out.Seek(0, io.SeekCurrent)
+		if err != nil {
 			return GRFPackStats{}, err
 		}
+		compressedSize := end - offset
 		entries = append(entries, grfPackEntry{
-			name:        grfName,
-			packedSize:  uint32(len(compressed)),
-			alignedSize: uint32(len(compressed)),
-			realSize:    uint32(len(data)),
+			name:        filepath.ToSlash(source.Name),
+			packedSize:  uint32(compressedSize),
+			alignedSize: uint32(compressedSize),
+			realSize:    uint32(copied),
 			offset:      uint32(offset - grfHeaderSize),
 		})
 		stats.Files++
-		stats.Bytes += int64(len(data))
+		stats.Bytes += copied
+		stats.CompressedBytes += compressedSize
 	}
 
 	table, err := buildGRFTable(entries)
@@ -112,7 +177,80 @@ func PackGRF(outputPath, root string) (GRFPackStats, error) {
 	if err := binary.Write(out, binary.LittleEndian, uint32(tableOffset-grfHeaderSize)); err != nil {
 		return GRFPackStats{}, err
 	}
-	return stats, out.Close()
+	if err := out.Close(); err != nil {
+		return GRFPackStats{}, err
+	}
+	closeOutput = false
+	if info, err := os.Stat(outputPath); err == nil {
+		stats.ArchiveBytes = info.Size()
+	}
+	return stats, nil
+}
+
+// EstimateGRFEntries performs the same per-resource zlib pass as the writer
+// but sends compressed bytes to a counting sink instead of a file. It is used
+// by the asset editor for an exact estimate of the current GRF format.
+func EstimateGRFEntries(sources []GRFPackSource) (GRFPackStats, error) {
+	sources = append([]GRFPackSource(nil), sources...)
+	sort.SliceStable(sources, func(i, j int) bool {
+		left := strings.ToLower(filepath.ToSlash(sources[i].Name))
+		right := strings.ToLower(filepath.ToSlash(sources[j].Name))
+		if left == right {
+			return sources[i].Name < sources[j].Name
+		}
+		return left < right
+	})
+	entries := make([]grfPackEntry, 0, len(sources))
+	var stats GRFPackStats
+	offset := int64(grfHeaderSize)
+	for _, source := range sources {
+		if source.Name == "" || source.Open == nil {
+			return GRFPackStats{}, fmt.Errorf("invalid GRF source %q", source.Name)
+		}
+		reader, err := source.Open()
+		if err != nil {
+			return GRFPackStats{}, fmt.Errorf("open %s: %w", source.Name, err)
+		}
+		counter := &countingWriter{}
+		compressedWriter := zlib.NewWriter(counter)
+		copied, copyErr := io.Copy(compressedWriter, reader)
+		closeReaderErr := reader.Close()
+		closeCompressedErr := compressedWriter.Close()
+		if copyErr != nil {
+			return GRFPackStats{}, fmt.Errorf("compress %s: %w", source.Name, copyErr)
+		}
+		if closeReaderErr != nil {
+			return GRFPackStats{}, fmt.Errorf("close %s: %w", source.Name, closeReaderErr)
+		}
+		if closeCompressedErr != nil {
+			return GRFPackStats{}, fmt.Errorf("finish %s: %w", source.Name, closeCompressedErr)
+		}
+		if source.Size > 0 && copied != source.Size {
+			return GRFPackStats{}, fmt.Errorf("%s: streamed size %d does not match declared size %d", source.Name, copied, source.Size)
+		}
+		entries = append(entries, grfPackEntry{name: filepath.ToSlash(source.Name), packedSize: uint32(counter.count), alignedSize: uint32(counter.count), realSize: uint32(copied), offset: uint32(offset - grfHeaderSize)})
+		stats.Files++
+		stats.Bytes += copied
+		stats.CompressedBytes += counter.count
+		offset += counter.count
+	}
+	table, err := buildGRFTable(entries)
+	if err != nil {
+		return GRFPackStats{}, err
+	}
+	compressedTable, err := zlibCompress(table)
+	if err != nil {
+		return GRFPackStats{}, err
+	}
+	stats.ArchiveBytes = offset + 8 + int64(len(compressedTable))
+	return stats, nil
+}
+
+type countingWriter struct{ count int64 }
+
+func (w *countingWriter) Write(data []byte) (int, error) {
+	w.count += int64(len(data))
+	return len(data), nil
 }
 
 func collectGRFFiles(root string) ([]string, error) {
@@ -168,7 +306,14 @@ func encodeGRFTableName(name string) (string, error) {
 	name = strings.ReplaceAll(filepath.ToSlash(name), "/", "\\")
 	encoded, _, err := transform.String(korean.EUCKR.NewEncoder(), name)
 	if err != nil {
-		return "", err
+		// Some modern client fixtures contain UTF-8 resource names that are
+		// outside EUC-KR. The reader already preserves valid UTF-8 GRF names,
+		// so retain the UTF-8 spelling instead of making the fixture impossible
+		// to build or silently renaming a resource.
+		if utf8.ValidString(name) {
+			return name, nil
+		}
+		return "", fmt.Errorf("encode GRF path %q as EUC-KR: %w", name, err)
 	}
 	return encoded, nil
 }

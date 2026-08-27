@@ -15,6 +15,7 @@ import (
 	"github.com/gogpu/ui/primitives"
 	"github.com/gogpu/ui/state"
 	"github.com/gogpu/ui/widget"
+	"github.com/kivutar/goro/mobileui"
 	"github.com/kivutar/goro/network"
 	"github.com/kivutar/goro/ui/rotheme"
 )
@@ -171,6 +172,84 @@ func (d *NPCDialog) ResetPublished(ctx Context) {
 
 func (d *NPCDialog) IsOpen() bool {
 	return d != nil && d.open
+}
+
+// MobileModel exposes the same packet-driven NPC state as the desktop dialog
+// without exposing its widget implementation to the Android presentation.
+func (d *NPCDialog) MobileModel(ctx Context) mobileui.MobileDialogModel {
+	if d == nil || !d.open {
+		return mobileui.MobileDialogModel{}
+	}
+	messages := mobileui.ParseDialogMessages(d.lines)
+	firstSpeaker := ""
+	for _, message := range messages {
+		speaker := message.Speaker
+		if firstSpeaker == "" && speaker != "" {
+			firstSpeaker = speaker
+		}
+	}
+	model := mobileui.MobileDialogModel{
+		Open:     true,
+		NPCID:    d.npcID,
+		Title:    d.title(ctx),
+		Message:  strings.Join(d.lines, "\n\n"),
+		Messages: messages,
+	}
+	if firstSpeaker != "" {
+		model.Title = firstSpeaker
+	}
+	switch d.action {
+	case npcDialogActionNext:
+		model.Options = append(model.Options, mobileui.DialogOption{ID: "next", Label: "Next", Action: mobileui.DialogNext, Enabled: true})
+	case npcDialogActionClose:
+		model.Options = append(model.Options, mobileui.DialogOption{ID: "close", Label: "Close", Action: mobileui.DialogNPCClose, Enabled: true})
+	case npcDialogActionMenu:
+		for i, option := range d.options {
+			// Keep the server's RO color controls in the neutral model. The
+			// mobile renderer owns presentation and can now wrap these labels
+			// without losing their inline colors.
+			model.Options = append(model.Options, mobileui.DialogOption{ID: fmt.Sprintf("menu-%d", i+1), Label: option, Action: mobileui.DialogMenuChoice, Enabled: true, Value: i + 1})
+		}
+		model.Options = append(model.Options, mobileui.DialogOption{ID: "cancel", Label: "Cancel", Action: mobileui.DialogNPCClose, Enabled: true})
+	case npcDialogActionNumberInput, npcDialogActionStringInput:
+		model.Notice = "This NPC input is not available on the mobile surface yet."
+		model.Options = append(model.Options, mobileui.DialogOption{ID: "close", Label: "Close", Action: mobileui.DialogNPCClose, Enabled: true})
+	default:
+		model.Notice = "Waiting for the server."
+	}
+	if d.status != "" {
+		model.Notice = d.status
+	}
+	return model
+}
+
+// ApplyMobileCommand sends an authoritative NPC dialog action using the same
+// packet builders as the desktop dialog.
+func (d *NPCDialog) ApplyMobileCommand(ctx Context, command input.PlayerCommand) bool {
+	if d == nil || !d.open || command.NPCID == 0 || command.NPCID != d.npcID {
+		return false
+	}
+	switch command.Kind {
+	case input.CommandNPCNext:
+		if d.action != npcDialogActionNext {
+			return false
+		}
+		d.next(ctx)
+	case input.CommandNPCMenuChoice:
+		if d.action != npcDialogActionMenu || command.Choice == 0 || int(command.Choice) > len(d.options) {
+			return false
+		}
+		d.choose(ctx, int(command.Choice))
+	case input.CommandNPCClose:
+		if d.action != npcDialogActionClose && d.action != npcDialogActionMenu && d.action != npcDialogActionNumberInput && d.action != npcDialogActionStringInput {
+			return false
+		}
+		d.close(ctx)
+	default:
+		return false
+	}
+	d.publish(ctx)
+	return true
 }
 
 func (d *NPCDialog) Update(ctx Context) bool {

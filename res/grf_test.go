@@ -139,6 +139,30 @@ func TestPackGRFRoundTripWithKoreanPath(t *testing.T) {
 	}
 }
 
+func TestGRFReadAlphaRawEntry(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "alpha.grf")
+	if err := writeTestAlphaGRF(path, `data\alpha.txt`, []byte("alpha data")); err != nil {
+		t.Fatal(err)
+	}
+
+	grf, err := OpenGRF(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer grf.Close()
+	if grf.Count() != 1 || !grf.Has("data/alpha.txt") {
+		t.Fatalf("alpha entries = %d, names = %#v", grf.Count(), grf.Names())
+	}
+	data, err := grf.ReadFile("data/alpha.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "alpha data" {
+		t.Fatalf("alpha data = %q", data)
+	}
+}
+
 func TestGRFRealArchiveWhenConfigured(t *testing.T) {
 	grf := realDataArchive(t)
 	name := "prontera.gat"
@@ -189,6 +213,34 @@ func writeTestGRF(path, name string, content []byte) error {
 	writeU32(&out, uint32(len(table.Bytes())))
 	out.Write(compressedTable)
 
+	return os.WriteFile(path, out.Bytes(), 0o644)
+}
+
+func writeTestAlphaGRF(path, name string, content []byte) error {
+	const dataOffset = 46
+	var table bytes.Buffer
+	nameBytes := []byte(name)
+	if len(nameBytes) > 255 {
+		return errors.New("alpha test name is too long")
+	}
+	table.WriteByte(byte(len(nameBytes)))
+	table.WriteByte(0)
+	writeU32(&table, dataOffset)
+	writeU32(&table, uint32(len(content)))
+	writeU32(&table, uint32(len(content)))
+	for _, value := range nameBytes {
+		table.WriteByte((value << 4) | (value >> 4))
+	}
+	table.WriteByte(0)
+
+	var out bytes.Buffer
+	out.Write(make([]byte, dataOffset))
+	out.Write(content)
+	tableOffset := out.Len()
+	out.Write(table.Bytes())
+	writeU32(&out, uint32(tableOffset))
+	writeU32(&out, 0x00010000)
+	out.WriteByte(0x18)
 	return os.WriteFile(path, out.Bytes(), 0o644)
 }
 

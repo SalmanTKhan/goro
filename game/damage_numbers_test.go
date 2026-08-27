@@ -59,3 +59,12 @@ func TestDamageFloaterProgressUsesAnimationDuration(t *testing.T) {
 		t.Fatalf("progress = %.3f, want 0.500", got)
 	}
 }
+
+func TestDamageFloaterRenderScaleKeepsCombatTextReadable(t *testing.T) {
+	if got, want := damageFloaterRenderScale(2), 3.0; math.Abs(got-want) > 0.001 {
+		t.Fatalf("render scale = %.3f, want %.3f", got, want)
+	}
+	if got := damageFloaterRenderScale(0); got != 0 {
+		t.Fatalf("invalid render scale = %.3f, want 0", got)
+	}
+}

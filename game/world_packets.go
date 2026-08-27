@@ -15,6 +15,9 @@ import (
 // The boolean result stops the current frame when packet handling changes modes
 // or begins a map transition.
 func (m *WorldMode) handleNetworkPackets(ctx client.Context, now time.Time) (Mode, bool) {
+	if ctx.Network == nil {
+		return nil, false
+	}
 	for _, pkt := range ctx.Network.DrainPackets() {
 		if next, stop := m.handleNetworkPacket(ctx, pkt, now); stop {
 			return next, true
@@ -755,22 +758,30 @@ func (m *WorldMode) handleNetworkPacket(ctx client.Context, pkt network.Packet, 
 		glog.Errorf("parse trade item 0x%04X: %v", pkt.ID, err)
 	} else if ok {
 		m.ui.tradeWindow.AddReceivedItem(ctx, tradeItem)
+		m.handleMobileTradeItem(ctx, tradeItem)
 		return nil, false
 	}
 	if tradeAck, ok, err := network.ParseTradeAddItemAck(pkt); err != nil {
 		glog.Errorf("parse trade add item ack 0x%04X: %v", pkt.ID, err)
 	} else if ok {
 		m.ui.tradeWindow.AddOwnItemAck(ctx, tradeAck)
+		m.handleMobileTradeAddAck(tradeAck)
 		return nil, false
 	}
 	if tradeConclude, ok, err := network.ParseTradeConclude(pkt); err != nil {
 		glog.Errorf("parse trade conclude 0x%04X: %v", pkt.ID, err)
 	} else if ok {
 		m.ui.tradeWindow.SetConcluded(ctx, tradeConclude.Other)
+		if tradeConclude.Other {
+			m.mobileTrade.otherConcluded = true
+		} else {
+			m.mobileTrade.selfConcluded = true
+		}
 		return nil, false
 	}
 	if network.ParseTradeCanceled(pkt) {
 		m.ui.tradeWindow.Close(ctx)
+		m.closeMobileTrade()
 		m.ui.console.AddErrorMessage("Trade canceled.")
 		return nil, false
 	}
@@ -782,6 +793,7 @@ func (m *WorldMode) handleNetworkPacket(ctx client.Context, pkt network.Packet, 
 	}
 	if network.ParseTradeUndo(pkt) {
 		m.ui.tradeWindow.Undo(ctx)
+		m.handleMobileTradeUndo()
 		return nil, false
 	}
 	if storageItem, ok, err := network.ParseStorageItemAdded(pkt); err != nil {
@@ -860,6 +872,7 @@ func (m *WorldMode) handleNetworkPacket(ctx client.Context, pkt network.Packet, 
 		if vendList.Own {
 			m.ui.vendingWindow.ApplyOwnList(ctx, vendList)
 		} else {
+			m.applyMobileVendingList(ctx, vendList)
 			m.ui.vendingWindow.OpenBuy(ctx, vendList)
 		}
 		return nil, false
@@ -867,6 +880,7 @@ func (m *WorldMode) handleNetworkPacket(ctx client.Context, pkt network.Packet, 
 	if vendResult, ok, err := network.ParseVendingPurchaseResult(pkt); err != nil {
 		glog.Errorf("parse vending purchase result 0x%04X: %v", pkt.ID, err)
 	} else if ok {
+		m.applyMobileVendingResult(vendResult)
 		m.ui.vendingWindow.ApplyPurchaseResult(ctx, vendResult)
 		return nil, false
 	}

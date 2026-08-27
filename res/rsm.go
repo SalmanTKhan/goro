@@ -226,12 +226,21 @@ func readRSMStringTable(reader *rsmReader, lengthPrefixed bool) []string {
 	for i := range out {
 		if lengthPrefixed {
 			length := reader.i32()
-			out[i] = fixedBinaryString(reader.bytes(int(length)))
+			out[i] = decodeRSMResourceString(reader.bytes(int(length)))
 		} else {
-			out[i] = fixedBinaryString(reader.bytes(40))
+			out[i] = decodeRSMResourceString(reader.bytes(40))
 		}
 	}
 	return out
+}
+
+// RSM texture references in older client data commonly use the same legacy
+// EUC-KR/CP949 encoding as GRF filenames. Keep node identifiers untouched,
+// but decode resource paths before they are passed to Manager.ReadFile so
+// both GRF and PAK lookups use the same Unicode spelling.
+func decodeRSMResourceString(data []byte) string {
+	value := fixedBinaryString(data)
+	return fixedBinaryString([]byte(decodeGRFName([]byte(value))))
 }
 
 func readRSMNode(reader *rsmReader, rsm *RSM, only bool) RSMNode {
@@ -254,7 +263,7 @@ func readRSMNode(reader *rsmReader, rsm *RSM, only bool) RSMNode {
 		for i := range node.TextureRefs {
 			if rsm.versionAtLeast(2, 3) {
 				length := reader.i32()
-				node.TextureRefs[i].Name = fixedBinaryString(reader.bytes(int(length)))
+				node.TextureRefs[i].Name = decodeRSMResourceString(reader.bytes(int(length)))
 			} else {
 				node.TextureRefs[i].Index = reader.i32()
 			}

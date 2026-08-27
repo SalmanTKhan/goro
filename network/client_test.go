@@ -123,3 +123,39 @@ func TestClientSendPingQueuesCharKeepalive(t *testing.T) {
 
 	client.Close()
 }
+
+func TestClientSendQuitGameAndCloseFlushesBeforeClose(t *testing.T) {
+	client := NewClient(20080910, false)
+	local, remote := net.Pipe()
+	defer remote.Close()
+
+	sendCh := make(chan outboundPacket, sendQueueSize)
+	client.mu.Lock()
+	client.conn = local
+	client.sendCh = sendCh
+	client.mu.Unlock()
+	go client.writeLoop(local, sendCh)
+
+	done := make(chan error, 1)
+	go func() { done <- client.SendQuitGameAndClose() }()
+
+	if err := remote.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	packet := make([]byte, 4)
+	if _, err := io.ReadFull(remote, packet); err != nil {
+		t.Fatalf("reading disconnect packet: %v", err)
+	}
+	if binary.LittleEndian.Uint16(packet) != PacketCZQuitGame {
+		t.Fatalf("opcode = 0x%04x, want 0x%04x", binary.LittleEndian.Uint16(packet), PacketCZQuitGame)
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("SendQuitGameAndClose returned error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("SendQuitGameAndClose did not complete")
+	}
+}

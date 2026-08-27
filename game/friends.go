@@ -17,24 +17,36 @@ func (m *WorldMode) openFriendRequest(ctx client.Context, request network.Friend
 	if name == "" {
 		name = "Someone"
 	}
+	if ctx.Session != nil {
+		ctx.Session.PendingFriendRequest = &session.PendingFriendRequest{
+			AccountID: request.AccountID,
+			CharID:    request.CharID,
+			Name:      request.Name,
+		}
+	}
 	glog.Debugf("friend request aid=%d gid=%d name=%q", request.AccountID, request.CharID, request.Name)
 	m.ui.friendRequest.Open(ctx, "Friend Request", fmt.Sprintf("%s wants to be friends with you.", name), func() {
-		if ctx.Network == nil {
-			glog.Warnf("friend request accept failed: not connected")
-			return
-		}
-		if err := ctx.Network.SendFriendRequestAck(request.AccountID, request.CharID, true); err != nil {
-			glog.Warnf("friend request accept failed aid=%d gid=%d: %v", request.AccountID, request.CharID, err)
-		}
+		m.respondFriendRequest(ctx, request, true)
 	}, func() {
-		if ctx.Network == nil {
-			glog.Warnf("friend request reject failed: not connected")
-			return
-		}
-		if err := ctx.Network.SendFriendRequestAck(request.AccountID, request.CharID, false); err != nil {
-			glog.Warnf("friend request reject failed aid=%d gid=%d: %v", request.AccountID, request.CharID, err)
-		}
+		m.respondFriendRequest(ctx, request, false)
 	})
+}
+
+func (m *WorldMode) respondFriendRequest(ctx client.Context, request network.FriendRequest, accepted bool) bool {
+	if ctx.Network == nil {
+		glog.Warnf("friend request response failed: not connected")
+		return false
+	}
+	if err := ctx.Network.SendFriendRequestAck(request.AccountID, request.CharID, accepted); err != nil {
+		glog.Warnf("friend request response failed aid=%d gid=%d accepted=%t: %v", request.AccountID, request.CharID, accepted, err)
+		return false
+	}
+	if ctx.Session != nil && ctx.Session.PendingFriendRequest != nil &&
+		ctx.Session.PendingFriendRequest.AccountID == request.AccountID &&
+		ctx.Session.PendingFriendRequest.CharID == request.CharID {
+		ctx.Session.PendingFriendRequest = nil
+	}
+	return true
 }
 
 func (m *WorldMode) addFriendResultMessage(result network.FriendAddResult) {

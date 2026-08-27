@@ -17,9 +17,11 @@ type Context struct {
 	Config            config.Config
 	Input             *input.State
 	Resources         *res.Manager
+	Assets            AssetAvailability
 	Session           *session.Session
 	World             *world.World
 	Network           *network.Client
+	Offline           *session.OfflineSession
 	Audio             *audio.BGM
 	Started           time.Time
 	ScreenW           int
@@ -29,6 +31,37 @@ type Context struct {
 	RequestScreenshot func() (string, error)
 	UIApp             UIApp
 	UIManager         UIManager
+}
+
+type PackState string
+
+const (
+	PackUnknown     PackState = "unknown"
+	PackAvailable   PackState = "available"
+	PackDownloading PackState = "downloading"
+	PackFailed      PackState = "failed"
+)
+
+type AssetRequirement struct {
+	MapName string
+	Ready   bool
+	Missing []string
+}
+
+type AssetEvent struct {
+	Pack  string
+	State PackState
+	Error string
+}
+
+// AssetAvailability lets the game gate a transition without coupling game
+// modes to Android's downloader. A completed overlay changes the resource
+// view and the same requirement becomes ready on the next update.
+type AssetAvailability interface {
+	PackState(name string) PackState
+	RequireMap(mapName string) AssetRequirement
+	RequestPack(name string) error
+	Subscribe(func(AssetEvent))
 }
 
 type UIApp interface {

@@ -1,0 +1,12 @@
+Header:
+  Type: SKILL_DB
+  Version: 4
+Body:
+  - Id: 5
+    Name: Bash
+    MaxLevel: 10
+    TargetType: Attack
+    Range: 6
+    Requires:
+      SpCost: [8, 8, 8, 8, 8, 8, 8, 8, 8, 8]
+    Cooldown: 350ms

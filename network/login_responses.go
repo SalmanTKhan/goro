@@ -16,6 +16,11 @@ type AccountAcceptLogin struct {
 	CharServer []CharServer
 }
 
+type AccountLoginRefuse struct {
+	Code    uint8
+	Message string
+}
+
 type Character struct {
 	ID        uint32
 	Exp       int64
@@ -73,6 +78,20 @@ type CharServer struct {
 	UserCount uint16
 	State     uint16
 	Property  uint16
+}
+
+func ParseAccountLoginRefuse(packet Packet) (AccountLoginRefuse, error) {
+	if packet.ID != 0x006A {
+		return AccountLoginRefuse{}, fmt.Errorf("unexpected packet 0x%04X", packet.ID)
+	}
+	if len(packet.Data) < 3 {
+		return AccountLoginRefuse{}, fmt.Errorf("AC_REFUSE_LOGIN too short: %d", len(packet.Data))
+	}
+	message := ""
+	if len(packet.Data) > 3 {
+		message = fixedString(packet.Data[3:])
+	}
+	return AccountLoginRefuse{Code: packet.Data[2], Message: message}, nil
 }
 
 func ParseAccountAcceptLogin(packet Packet) (AccountAcceptLogin, error) {

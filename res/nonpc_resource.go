@@ -22,6 +22,17 @@ var jobNameLuaCandidates = []string{
 	"lua files\\datainfo\\jobname.lub",
 }
 
+// NonPCResourceNameTableCandidates returns the client tables that map NPC and
+// monster job IDs to their sprite/model resource names. Mobile resource
+// packs use the same candidates so the runtime lookup remains identical to a
+// normal client data root.
+func NonPCResourceNameTableCandidates() [][]string {
+	return [][]string{
+		append([]string(nil), npcIdentityLuaCandidates...),
+		append([]string(nil), jobNameLuaCandidates...),
+	}
+}
+
 func (m *Manager) NonPCResourceName(job int) (string, bool) {
 	if !m.nonPCResourceNamesLoaded {
 		m.loadNonPCResourceNames()

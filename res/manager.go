@@ -15,7 +15,15 @@ type Manager struct {
 	Root       string
 	ClientInfo ClientInfo
 	FoundFiles []string
+	Packs      []*PAK
 	Archives   []*GRF
+	Overlays   []AssetOverlay
+	overlays   []mountedOverlay
+
+	// PreferOptimizedTextures is enabled when a deterministic mobile pack
+	// contains the optional decoded-texture closure. The source resources
+	// remain available as the fallback path.
+	PreferOptimizedTextures bool
 
 	accessoryNames           map[int]string
 	accessoryNamesLoaded     bool
@@ -74,6 +82,9 @@ func NewManager(root string) (*Manager, error) {
 
 	m := &Manager{Root: filepath.Clean(root)}
 	m.scanKnownFiles()
+	if _, err := m.ReadFile("mobile/optimized/manifest.json"); err == nil {
+		m.PreferOptimizedTextures = true
+	}
 	m.ClientInfo = ClientInfo{
 		Connections: []Connection{
 			{Display: "Local rAthena", Address: "127.0.0.1", Port: 6900, Version: 55, LangType: 0},
@@ -95,6 +106,17 @@ func NewManager(root string) (*Manager, error) {
 
 func (m *Manager) Find(name string) (string, bool) {
 	normalized := normalizePath(name)
+	lookup := pakLookupName(normalized)
+	for _, overlay := range m.overlays {
+		if overlayTombstones(overlay.config.Tombstones, lookup, true) {
+			return "", false
+		}
+		if overlay.root != "" {
+			if filePath, ok := overlayLooseFile(overlay.root, lookup); ok {
+				return filePath, true
+			}
+		}
+	}
 	candidates := []string{
 		filepath.Join(m.Root, normalized),
 		filepath.Join(m.Root, strings.ReplaceAll(normalized, "\\", string(filepath.Separator))),
@@ -110,11 +132,37 @@ func (m *Manager) Find(name string) (string, bool) {
 }
 
 func (m *Manager) ReadFile(name string) ([]byte, error) {
+	if data, found, masked, err := m.readOverlay(name, false); err != nil {
+		return nil, err
+	} else if found {
+		return data, nil
+	} else if masked {
+		return nil, fmt.Errorf("resource masked by overlay: %s", name)
+	}
 	path, ok := m.Find(name)
 	if ok {
 		return os.ReadFile(path)
 	}
 
+	for _, pack := range m.Packs {
+		data, err := pack.ReadFile(name)
+		if err == nil {
+			return data, nil
+		}
+		if errors.Is(err, ErrPAKNotFound) {
+			for _, match := range pack.NamesWithSuffix(name) {
+				data, err := pack.ReadFile(match)
+				if err == nil {
+					return data, nil
+				}
+				if !errors.Is(err, ErrPAKNotFound) {
+					return nil, err
+				}
+			}
+			continue
+		}
+		return nil, err
+	}
 	for _, archive := range m.Archives {
 		data, err := archive.ReadFile(name)
 		if err == nil {
@@ -138,11 +186,27 @@ func (m *Manager) ReadFile(name string) ([]byte, error) {
 }
 
 func (m *Manager) ReadFileExact(name string) ([]byte, error) {
+	if data, found, masked, err := m.readOverlay(name, true); err != nil {
+		return nil, err
+	} else if found {
+		return data, nil
+	} else if masked {
+		return nil, fmt.Errorf("resource masked by overlay: %s", name)
+	}
 	path, ok := m.Find(name)
 	if ok {
 		return os.ReadFile(path)
 	}
 
+	for _, pack := range m.Packs {
+		data, err := pack.ReadFile(name)
+		if err == nil {
+			return data, nil
+		}
+		if !errors.Is(err, ErrPAKNotFound) {
+			return nil, err
+		}
+	}
 	for _, archive := range m.Archives {
 		data, err := archive.ReadFile(name)
 		if err == nil {
@@ -154,6 +218,33 @@ func (m *Manager) ReadFileExact(name string) ([]byte, error) {
 		return nil, err
 	}
 	return nil, fmt.Errorf("resource not found: %s", name)
+}
+
+// HasResourceExact checks the active layered view without reading resource
+// bytes. It intentionally does not use legacy suffix lookup.
+func (m *Manager) HasResourceExact(name string) bool {
+	if _, found, masked, err := m.readOverlay(name, true); err == nil {
+		if found {
+			return true
+		}
+		if masked {
+			return false
+		}
+	}
+	if _, ok := m.Find(name); ok {
+		return true
+	}
+	for _, pack := range m.Packs {
+		if pack.Has(name) {
+			return true
+		}
+	}
+	for _, archive := range m.Archives {
+		if archive.Has(name) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Manager) FindFirst(names []string) (string, bool) {
@@ -364,31 +455,46 @@ func (m *Manager) scanKnownFiles() {
 	}
 
 	archivePaths := make([]string, 0)
-	seen := make(map[string]struct{})
-	if entries, err := os.ReadDir(m.Root); err == nil {
-		for _, entry := range entries {
-			if entry.IsDir() {
-				continue
-			}
-			name := entry.Name()
-			ext := strings.ToLower(filepath.Ext(name))
-			if ext != ".grf" && ext != ".gpf" {
-				continue
-			}
-			path := filepath.Join(m.Root, name)
-			archivePaths = append(archivePaths, path)
-			seen[strings.ToLower(path)] = struct{}{}
+	packPaths := make([]string, 0)
+	seenArchives := make(map[string]struct{})
+	seenPacks := make(map[string]struct{})
+	_ = filepath.WalkDir(m.Root, func(filePath string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
 		}
-	}
-	for _, name := range []string{"data.grf", "rdata.grf", "fdata.grf", "event.grf"} {
-		path := filepath.Join(m.Root, name)
-		if _, ok := seen[strings.ToLower(path)]; ok {
+		if entry.IsDir() {
+			if strings.EqualFold(entry.Name(), ".goro-overlays") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !entry.Type().IsRegular() {
+			return nil
+		}
+		ext := strings.ToLower(filepath.Ext(entry.Name()))
+		key := strings.ToLower(filepath.Clean(filePath))
+		switch ext {
+		case ".pak":
+			if _, exists := seenPacks[key]; !exists {
+				seenPacks[key] = struct{}{}
+				packPaths = append(packPaths, filePath)
+			}
+		case ".grf", ".gpf":
+			if _, exists := seenArchives[key]; !exists {
+				seenArchives[key] = struct{}{}
+				archivePaths = append(archivePaths, filePath)
+			}
+		}
+		return nil
+	})
+	sort.Strings(packPaths)
+	for _, path := range packPaths {
+		pack, err := OpenPAK(path)
+		if err != nil {
 			continue
 		}
-		if _, err := os.Stat(path); err != nil {
-			continue
-		}
-		archivePaths = append(archivePaths, path)
+		m.FoundFiles = append(m.FoundFiles, path)
+		m.Packs = append(m.Packs, pack)
 	}
 	sort.SliceStable(archivePaths, func(i, j int) bool {
 		return archivePriority(archivePaths[i]) < archivePriority(archivePaths[j])
@@ -406,13 +512,13 @@ func archivePriority(path string) string {
 	name := strings.ToLower(filepath.Base(path))
 	switch name {
 	case "data.grf":
-		return "z-data.grf"
+		return "z-data.grf:" + strings.ToLower(path)
 	case "rdata.grf":
-		return "y-rdata.grf"
+		return "y-rdata.grf:" + strings.ToLower(path)
 	case "fdata.grf":
-		return "x-fdata.grf"
+		return "x-fdata.grf:" + strings.ToLower(path)
 	default:
-		return name
+		return name + ":" + strings.ToLower(path)
 	}
 }
 

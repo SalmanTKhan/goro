@@ -1,0 +1,19 @@
+Header:
+  Type: MOB_DB
+  Version: 5
+Body:
+  - Id: 1002
+    AegisName: PORING
+    Name: Poring
+    Level: 1
+    Hp: 50
+    BaseExp: 2
+    JobExp: 1
+    Attack: 7
+    Attack2: 10
+    Defense: 1
+    WalkSpeed: 400
+    AttackDelay: 1872
+    Drops:
+      - Item: Jellopy
+        Rate: 7000

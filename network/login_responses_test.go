@@ -37,6 +37,21 @@ func TestParseAccountAcceptLogin(t *testing.T) {
 	}
 }
 
+func TestParseAccountLoginRefuse(t *testing.T) {
+	data := make([]byte, 23)
+	data[0] = 0x6a
+	data[2] = 1
+	copy(data[3:], []byte("wrong password"))
+
+	refuse, err := ParseAccountLoginRefuse(Packet{ID: 0x006A, Data: data})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refuse.Code != 1 || refuse.Message != "wrong password" {
+		t.Fatalf("refuse = %+v", refuse)
+	}
+}
+
 func TestParseCharListLegacy108(t *testing.T) {
 	data := make([]byte, 24+108)
 	binary.LittleEndian.PutUint16(data[0:2], 0x006B)
