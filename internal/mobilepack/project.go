@@ -648,11 +648,9 @@ func resolvePack(manager *res.Manager, spec PackSpec, role, defaultMap string, b
 			}
 		}
 	}
-	if baseNames != nil {
-		for name := range baseNames {
-			if !hasAssetOverride(spec.Overrides, name) {
-				delete(selected, name)
-			}
+	for name := range baseNames {
+		if !hasAssetOverride(spec.Overrides, name) {
+			delete(selected, name)
 		}
 	}
 	if role == "base" && strings.Contains(strings.Join(presets, ","), "runtime-core") {

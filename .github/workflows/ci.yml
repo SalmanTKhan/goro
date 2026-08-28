@@ -15,6 +15,7 @@ jobs:
     env:
       CGO_ENABLED: "0"
       GOFLAGS: "-tags=nofakecgo"
+      GOTOOLCHAIN: local
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -24,3 +25,29 @@ jobs:
       - run: go vet ./...
       - run: go install honnef.co/go/tools/cmd/staticcheck@latest
       - run: staticcheck ./...
+
+  android:
+    runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      # Production gate: the arm64-v8a shared library must cross-compile against
+      # the NDK. The x86_64 emulator ABI and the Gradle APK assembly depend on
+      # untracked local vendor dirs / fixture assets and are not gated here.
+      - name: Cross-compile Android native library (arm64-v8a)
+        working-directory: android/host/go
+        env:
+          GOOS: android
+          GOARCH: arm64
+          CGO_ENABLED: "1"
+        run: |
+          NDK="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
+          export CC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang"
+          export CXX="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang++"
+          go build -tags nofakecgo -buildmode=c-shared -trimpath \
+            -o "$RUNNER_TEMP/libgoro_android_arm64.so" .

@@ -801,13 +801,6 @@ func (r *OfflineRuntime) withdraw(index uint16, quantity int) bool {
 	return false
 }
 
-func (r *OfflineRuntime) playerID() uint32 {
-	if r.state.CharID != 0 {
-		return r.state.CharID
-	}
-	return 1
-}
-
 func (r *OfflineRuntime) distanceToPlayer(x, y int) int {
 	return distance(r.state.PlayerX, r.state.PlayerY, x, y)
 }

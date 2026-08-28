@@ -184,15 +184,6 @@ func ScrollExtentForLayout(model MobileInventoryModel, state InventoryInteractio
 	return InventoryScrollState{ViewportExtent: layout.GridViewport.H, ContentExtent: grid.Scroll.ContentExtent, Offset: state.Scroll.Offset, RowExtent: grid.Scroll.RowExtent}
 }
 
-func portraitInventoryColumns(width float32) int {
-	switch {
-	case width >= 720:
-		return 5
-	default:
-		return 4
-	}
-}
-
 func LayoutEquipment(viewport Viewport, tokens InventoryTokens, model MobileEquipmentModel, state InventoryInteractionState) MobileInventoryLayout {
 	if tokens.Edge <= 0 {
 		tokens = DefaultInventoryTokens()

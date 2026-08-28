@@ -330,7 +330,7 @@ func mutateOfflineEquip(ctx client.Context, index, slot uint16, equipped bool) b
 			continue
 		}
 		item.Equipped = equipped
-		item.Equip = equipped || db.ItemTypeIsUsable(item.Type) == false
+		item.Equip = equipped || !db.ItemTypeIsUsable(item.Type)
 		if equipped && slot != 0 {
 			item.Location = slot
 		}

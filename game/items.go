@@ -680,14 +680,6 @@ func (m *WorldMode) skillIconTexture(manager *res.Manager, skill session.Skill) 
 	return texture
 }
 
-func (m *WorldMode) drawFallbackInventoryItemIcon(screen *render.Frame, x, y int) {
-	m.drawFallbackInventoryItemIconSized(screen, x, y, inventoryIconSize)
-}
-
-func (m *WorldMode) drawFallbackInventoryItemIconSized(screen *render.Frame, x, y, size int) {
-	m.drawFallbackInventoryItemIconSizedWithFilter(screen, x, y, size, spriteDrawFilter())
-}
-
 func (m *WorldMode) drawFallbackInventoryItemIconSizedWithFilter(screen *render.Frame, x, y, size int, filter render.Filter) {
 	if size <= 0 {
 		return

@@ -886,11 +886,6 @@ func locationMask(value any) uint16 {
 	return mask
 }
 
-func durationMS(value any) int {
-	parsed, _ := durationMSOK(value)
-	return parsed
-}
-
 func durationMSOK(value any) (int, bool) {
 	if value == nil {
 		return 0, true
@@ -1122,24 +1117,6 @@ func fingerprint(commit, profile string, packetver int, maps []string, files map
 		_, _ = hash.Write(files[name])
 	}
 	return hex.EncodeToString(hash.Sum(nil))
-}
-
-func sortedStringKeys(values map[string]any) []string {
-	result := make([]string, 0, len(values))
-	for key := range values {
-		result = append(result, key)
-	}
-	sort.Strings(result)
-	return result
-}
-
-func sortedStringKeysString(values map[string]string) []string {
-	result := make([]string, 0, len(values))
-	for key := range values {
-		result = append(result, key)
-	}
-	sort.Strings(result)
-	return result
 }
 
 func sortedStringKeysBytes(values map[string][]byte) []string {

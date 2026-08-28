@@ -175,19 +175,6 @@ func dialogMessagesForLayout(model MobileDialogModel) []DialogMessage {
 	return []DialogMessage{{Text: model.Message}}
 }
 
-func dialogMessageSpeakerCount(messages []DialogMessage) int {
-	count := 0
-	previous := ""
-	for _, message := range messages {
-		speaker := strings.TrimSpace(message.Speaker)
-		if speaker != "" && speaker != previous {
-			count++
-		}
-		previous = speaker
-	}
-	return count
-}
-
 func dialogMessageContentHeight(messages []DialogMessage, maxChars int, lineAdvance float32) float32 {
 	height := float32(0)
 	previousSpeaker := ""
