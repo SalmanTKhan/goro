@@ -957,6 +957,12 @@ h2 em {
   color: var(--muted);
 }
 
+.contribute-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.9rem;
+}
+
 .site-footer {
   width: min(1180px, calc(100% - 3rem));
   margin: 0 auto;

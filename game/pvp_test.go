@@ -2,6 +2,7 @@ package game
 
 import (
 	"testing"
+	"time"
 
 	"github.com/kivutar/goro/client"
 	"github.com/kivutar/goro/db"
@@ -68,6 +69,79 @@ func TestPvPTargetsLegacyPlayerEntryWithoutObjectType(t *testing.T) {
 	moveOnly := worldstate.Actor{ID: 400, Job: db.JobNovice}
 	if actorRepresentsPlayer(moveOnly) || actorCanBeAttackClicked(ctx, moveOnly) {
 		t.Fatal("movement-only actor was classified as a player from its zero-value job")
+	}
+}
+
+func TestWoETargetingUsesGuildRelationship(t *testing.T) {
+	world := worldstate.New()
+	world.MapProperty = worldstate.MapPropertyAgitZone
+	ctx := client.Context{
+		Session: &session.Session{AccountID: 100, CharID: 200, Guild: session.Guild{ID: 10}},
+		World:   world,
+	}
+	enemy := worldstate.Actor{ID: 300, GuildID: 20, ObjectType: actorObjectTypePC, HasObjectType: true}
+	guildless := worldstate.Actor{ID: 301, ObjectType: actorObjectTypePC, HasObjectType: true}
+	mate := worldstate.Actor{ID: 302, GuildID: 10, ObjectType: actorObjectTypePC, HasObjectType: true}
+
+	for _, actor := range []worldstate.Actor{enemy, guildless} {
+		if !actorCanBeAttackClicked(ctx, actor) || !actorCanBeSkillTargeted(ctx, session.Skill{Type: skillTargetEnemy}, actor) {
+			t.Fatalf("WoE enemy was not targetable: %+v", actor)
+		}
+	}
+	if actorCanBeAttackClicked(ctx, mate) || actorCanBeSkillTargeted(ctx, session.Skill{Type: skillTargetEnemy}, mate) {
+		t.Fatal("guild member was targetable as a WoE enemy")
+	}
+}
+
+func TestWoETargetingIncludesEnemyCompanions(t *testing.T) {
+	world := worldstate.New()
+	world.MapProperty = worldstate.MapPropertyAgitZone
+	ctx := client.Context{
+		Session: &session.Session{
+			Guild:      session.Guild{ID: 10},
+			Homunculus: session.Companion{ID: 400},
+			Mercenary:  session.Companion{ID: 500},
+		},
+		World: world,
+	}
+	for _, tc := range []struct {
+		name       string
+		objectType byte
+		ownID      uint32
+		enemyID    uint32
+	}{
+		{name: "homunculus", objectType: actorObjectTypeHomunculus, ownID: 400, enemyID: 401},
+		{name: "mercenary", objectType: actorObjectTypeMercenary, ownID: 500, enemyID: 501},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			enemy := worldstate.Actor{ID: tc.enemyID, GuildID: 20, ObjectType: tc.objectType, HasObjectType: true}
+			guildmate := worldstate.Actor{ID: tc.enemyID + 100, GuildID: 10, ObjectType: tc.objectType, HasObjectType: true}
+			own := worldstate.Actor{ID: tc.ownID, GuildID: 20, ObjectType: tc.objectType, HasObjectType: true}
+
+			if !actorCanBeAttackClicked(ctx, enemy) || !actorCanBeSkillTargeted(ctx, session.Skill{Type: skillTargetEnemy}, enemy) {
+				t.Fatalf("enemy %s was not targetable in WoE", tc.name)
+			}
+			if actorCanBeAttackClicked(ctx, guildmate) || actorCanBeSkillTargeted(ctx, session.Skill{Type: skillTargetEnemy}, guildmate) {
+				t.Fatalf("guild member's %s was targetable in WoE", tc.name)
+			}
+			if actorCanBeAttackClicked(ctx, own) || actorCanBeSkillTargeted(ctx, session.Skill{Type: skillTargetEnemy}, own) {
+				t.Fatalf("local %s was targetable in WoE", tc.name)
+			}
+		})
+	}
+}
+
+func TestWoEShowsPlayerNameLabels(t *testing.T) {
+	state := worldstate.New()
+	ctx := client.Context{World: state}
+	actor := worldstate.Actor{Name: "Enemy", ObjectType: actorObjectTypePC, HasObjectType: true}
+	mode := &WorldMode{}
+	if labels := mode.hoveredActorDisplayLabels(ctx, actor, time.Time{}); len(labels) == 0 || labels[0] != "Enemy" {
+		t.Fatalf("ordinary-map player labels = %q", labels)
+	}
+	state.MapProperty = worldstate.MapPropertyAgitZone
+	if labels := mode.hoveredActorDisplayLabels(ctx, actor, time.Time{}); len(labels) == 0 || labels[0] != "Enemy" {
+		t.Fatalf("siege player labels = %q", labels)
 	}
 }
 

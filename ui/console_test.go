@@ -33,6 +33,16 @@ func TestConsoleNoShiftCommandTogglesSessionPreference(t *testing.T) {
 	}
 }
 
+func TestConsoleDiscardTextInputRemovesShortcutRune(t *testing.T) {
+	console := &ChatConsole{input: "draftg"}
+
+	console.DiscardTextInput("g")
+
+	if console.input != "draft" {
+		t.Fatalf("console input = %q, want draft", console.input)
+	}
+}
+
 func TestConsoleNoCtrlCommandTogglesSessionPreference(t *testing.T) {
 	console := &ChatConsole{input: "/nc", active: true}
 	sessionState := &session.Session{}
@@ -111,6 +121,20 @@ func TestConsoleMemoCommandWithoutNetwork(t *testing.T) {
 
 	if !console.SubmitCommand(client.Context{}, "/memo") {
 		t.Fatal("memo command was not handled")
+	}
+	if console.active || console.input != "" {
+		t.Fatalf("console active=%t input=%q, want closed empty input", console.active, console.input)
+	}
+	if len(console.messages) != 1 || console.messages[0].Text != "send failed: not connected" {
+		t.Fatalf("console messages = %+v", console.messages)
+	}
+}
+
+func TestConsoleBreakGuildCommandIsHandledLocally(t *testing.T) {
+	console := &ChatConsole{input: `/breakguild "Mandala"`, active: true}
+
+	if !console.SubmitCommand(client.Context{}, `/breakguild "Mandala"`) {
+		t.Fatal("breakguild command was not handled")
 	}
 	if console.active || console.input != "" {
 		t.Fatalf("console active=%t input=%q, want closed empty input", console.active, console.input)

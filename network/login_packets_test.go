@@ -10,7 +10,7 @@ func TestBuildAccountLoginPacket(t *testing.T) {
 		Version:    55,
 		Username:   "alice",
 		Password:   "secret",
-		ClientType: 0,
+		ClientType: 1,
 	})
 
 	if len(packet) != 55 {
@@ -21,6 +21,9 @@ func TestBuildAccountLoginPacket(t *testing.T) {
 	}
 	if packet[6] != 'a' || packet[30] != 's' {
 		t.Fatalf("username/password offsets are wrong")
+	}
+	if packet[54] != 1 {
+		t.Fatalf("client type = %d, want 1", packet[54])
 	}
 }
 
@@ -36,6 +39,19 @@ func TestBuildCharServerEnterPacket(t *testing.T) {
 	}
 	if packet[0] != 0x65 || packet[1] != 0x00 || packet[16] != 1 {
 		t.Fatalf("unexpected packet bytes: % x", packet)
+	}
+}
+
+func TestBuildLoginServerKeepalivePacket(t *testing.T) {
+	packet := BuildLoginServerKeepalivePacket("Kivutar")
+	if len(packet) != 26 {
+		t.Fatalf("packet length = %d, want 26", len(packet))
+	}
+	if binary.LittleEndian.Uint16(packet[:2]) != PacketCAConnectInfoChanged {
+		t.Fatalf("opcode = 0x%04X", binary.LittleEndian.Uint16(packet[:2]))
+	}
+	if got := string(packet[2:9]); got != "Kivutar" {
+		t.Fatalf("username = %q, want Kivutar", got)
 	}
 }
 

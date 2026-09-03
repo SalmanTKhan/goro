@@ -33,6 +33,7 @@ var (
 	consoleColorChat        = color.RGBA{R: 235, G: 242, B: 250, A: 255}
 	consoleColorSystem      = color.RGBA{R: 252, G: 221, B: 128, A: 255}
 	consoleColorBlue        = color.RGBA{R: 0, G: 255, B: 255, A: 255}
+	consoleColorGuildChat   = color.RGBA{R: 180, G: 255, B: 180, A: 255}
 	consoleColorGuild       = color.RGBA{R: 255, G: 255, B: 99, A: 255}
 	consoleColorError       = color.RGBA{R: 255, G: 132, B: 132, A: 255}
 	consoleColorPlaceholder = color.RGBA{R: 150, G: 165, B: 182, A: 255}
@@ -84,6 +85,18 @@ type ChatConsole struct {
 
 func (c *ChatConsole) Active() bool {
 	return c != nil && c.active
+}
+
+// DiscardTextInput removes text emitted for a keyboard shortcut before the
+// frame is dispatched. UI text events arrive before the game's key handling.
+func (c *ChatConsole) DiscardTextInput(text string) {
+	if c == nil || text == "" {
+		return
+	}
+	current := c.currentInput()
+	if strings.HasSuffix(current, text) {
+		c.setInput(strings.TrimSuffix(current, text))
+	}
 }
 
 func (c *ChatConsole) Update(ctx client.Context) bool {
@@ -207,6 +220,10 @@ func (c *ChatConsole) AddSystemMessage(format string, args ...any) {
 
 func (c *ChatConsole) AddBlueMessage(format string, args ...any) {
 	c.addMessageColor(consoleColorBlue, format, args...)
+}
+
+func (c *ChatConsole) AddGuildChatMessage(format string, args ...any) {
+	c.addMessageColor(consoleColorGuildChat, format, args...)
 }
 
 func (c *ChatConsole) AddGuildMessage(format string, args ...any) {
@@ -343,6 +360,9 @@ func (c *ChatConsole) SubmitCommand(ctx client.Context, text string) bool {
 		return true
 	case "/guild":
 		c.submitCreateGuild(ctx, text)
+		return true
+	case "/breakguild":
+		c.submitDisbandGuild(ctx, text)
 		return true
 	case "/guildwindow", "/guildinfo":
 		if c.OnGuildWindow != nil {
@@ -517,6 +537,27 @@ func (c *ChatConsole) submitCreateGuild(ctx client.Context, text string) {
 		return
 	}
 	ctx.Session.PendingGuildName = name
+	c.setInput("")
+	c.setActive(false)
+}
+
+func (c *ChatConsole) submitDisbandGuild(ctx client.Context, text string) {
+	name := strings.Trim(consoleCommandArgs(text), `"`)
+	if name == "" {
+		c.AddErrorMessage(`usage: /breakguild "Guild Name"`)
+		c.setInput("")
+		c.setActive(false)
+		return
+	}
+	if ctx.Network == nil {
+		c.AddErrorMessage("send failed: not connected")
+		c.setInput("")
+		c.setActive(false)
+		return
+	}
+	if err := ctx.Network.SendDisbandGuild(name); err != nil {
+		c.AddErrorMessage("send failed: %s", err)
+	}
 	c.setInput("")
 	c.setActive(false)
 }

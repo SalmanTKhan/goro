@@ -14,6 +14,7 @@ type tabWidgetConfig struct {
 	label         string
 	labelRotation rotheme.TextRotation
 	active        bool
+	disabled      bool
 	width         int
 	height        int
 	onClick       func()
@@ -53,20 +54,28 @@ func (w *tabWidget) Layout(ctx widget.Context, constraints geometry.Constraints)
 func (w *tabWidget) Draw(ctx widget.Context, canvas widget.Canvas) {
 	bounds := w.Bounds()
 	fill := rotheme.Default.Colors.Button
+	textColor := rotheme.Default.Colors.Text
 	if w.cfg.active {
 		fill = rotheme.Default.Colors.WindowBody
+	} else if w.cfg.disabled {
+		textColor = rotheme.Default.Colors.MutedText
 	} else if w.hovered {
 		fill = rotheme.Default.Colors.ButtonHover
 	}
 	canvas.DrawRect(bounds, fill)
 	canvas.StrokeRect(bounds, rotheme.Default.Colors.WindowBorder, 1)
-	rotheme.DrawRotatedText(canvas, w.cfg.label, bounds, rotheme.Default.Typography.TextSize, rotheme.Default.Colors.Text, false, w.cfg.labelRotation)
+	rotheme.DrawRotatedText(canvas, w.cfg.label, bounds, rotheme.Default.Typography.TextSize, textColor, false, w.cfg.labelRotation)
 }
 
 func (w *tabWidget) Event(ctx widget.Context, e event.Event) bool {
 	mouse, ok := e.(*event.MouseEvent)
 	if !ok {
 		return false
+	}
+	if w.cfg.disabled {
+		w.hovered = false
+		ctx.SetCursor(widget.CursorDefault)
+		return true
 	}
 	switch mouse.MouseType {
 	case event.MouseEnter:

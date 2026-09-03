@@ -118,9 +118,13 @@ func skillTargetFlagsForActor(ctx client.Context, actor worldstate.Actor) (uint3
 }
 
 func skillTargetMapStateAllowsMismatch(ctx client.Context, actor worldstate.Actor) bool {
-	return ctx.World != nil &&
-		ctx.World.MapProperty.PlayerCombatEnabled() &&
-		actorRepresentsPlayer(actor)
+	if ctx.World == nil {
+		return false
+	}
+	if actorRepresentsPlayer(actor) {
+		return actorCanBePlayerCombatTarget(ctx, actor)
+	}
+	return actorCanBeEnemyWoECompanion(ctx, actor)
 }
 
 func actorCanOpenPlayerContext(ctx client.Context, actor worldstate.Actor) bool {
@@ -135,9 +139,50 @@ func actorCanBeAttackClicked(ctx client.Context, actor worldstate.Actor) bool {
 		return false
 	}
 	if actorRepresentsPlayer(actor) {
-		return ctx.World != nil && ctx.World.MapProperty.PlayerCombatEnabled()
+		return actorCanBePlayerCombatTarget(ctx, actor)
+	}
+	if actorCanBeEnemyWoECompanion(ctx, actor) {
+		return true
 	}
 	return actorHasMobObjectType(actor)
+}
+
+func actorCanBePlayerCombatTarget(ctx client.Context, actor worldstate.Actor) bool {
+	if ctx.World == nil || !actorRepresentsPlayer(actor) || isLocalActor(ctx, actor.ID) {
+		return false
+	}
+	if ctx.World.MapProperty.IsPvP() {
+		return true
+	}
+	if !ctx.World.MapProperty.IsGvG() {
+		return false
+	}
+	return actor.GuildID == 0 || localGuildID(ctx) == 0 || actor.GuildID != localGuildID(ctx)
+}
+
+func actorCanBeEnemyWoECompanion(ctx client.Context, actor worldstate.Actor) bool {
+	if ctx.World == nil || !ctx.World.MapProperty.IsGvG() || !actor.HasObjectType {
+		return false
+	}
+	if actor.ObjectType != actorObjectTypeHomunculus && actor.ObjectType != actorObjectTypeMercenary {
+		return false
+	}
+	if ctx.Session != nil {
+		if actor.ID == ctx.Session.Homunculus.ID || actor.ID == ctx.Session.Mercenary.ID {
+			return false
+		}
+	}
+	return actor.GuildID == 0 || localGuildID(ctx) == 0 || actor.GuildID != localGuildID(ctx)
+}
+
+func localGuildID(ctx client.Context) uint32 {
+	if ctx.Session == nil {
+		return 0
+	}
+	if ctx.Session.Guild.ID != 0 {
+		return ctx.Session.Guild.ID
+	}
+	return ctx.Session.GuildID
 }
 
 func actorRepresentsPlayer(actor worldstate.Actor) bool {
@@ -644,6 +689,7 @@ func worldActorForSelectedCharacter(ctx client.Context) worldstate.Actor {
 		Level:         ctx.Session.Progress.BaseLevel,
 		HasLevel:      ctx.Session.Progress.BaseLevel > 0,
 		AttackRange:   ctx.Session.AttackRange,
+		PartyName:     ctx.Session.Party.Name,
 		GuildID:       ctx.Session.GuildID,
 		EmblemVersion: ctx.Session.EmblemVersion,
 		GuildName:     ctx.Session.GuildName,
@@ -662,14 +708,30 @@ func applyActorNameAck(ctx client.Context, ack network.ActorNameAck) {
 		return
 	}
 	guildName := strings.TrimSpace(ack.GuildName)
+	partyName := strings.TrimSpace(ack.PartyName)
 	if isLocalActor(ctx, ack.ID) {
 		ctx.World.Player.Name = name
-		if guildName != "" {
+		ctx.World.Player.PartyName = partyName
+		if ack.HasGuildName || guildName != "" {
 			ctx.World.Player.GuildName = guildName
+			if guildName == "" {
+				ctx.World.Player.GuildID = 0
+				ctx.World.Player.EmblemVersion = 0
+			}
 		}
-		if ctx.Session != nil && guildName != "" {
-			ctx.Session.GuildName = guildName
-			ctx.Session.PendingGuildName = ""
+		if ctx.Session != nil {
+			if ack.HasGuildName || guildName != "" {
+				ctx.Session.GuildName = guildName
+				if guildName == "" {
+					ctx.Session.GuildID = 0
+					ctx.Session.EmblemVersion = 0
+					ctx.Session.Guild = session.Guild{}
+					ctx.Session.PendingGuildName = ""
+				}
+			}
+			if guildName != "" {
+				ctx.Session.PendingGuildName = ""
+			}
 		}
 		return
 	}
@@ -678,7 +740,12 @@ func applyActorNameAck(ctx client.Context, ack network.ActorNameAck) {
 		return
 	}
 	actor.Name = name
+	actor.PartyName = partyName
 	actor.GuildName = guildName
+	if ack.HasGuildName && guildName == "" {
+		actor.GuildID = 0
+		actor.EmblemVersion = 0
+	}
 	ctx.World.Actors[ack.ID] = actor
 }
 
@@ -744,6 +811,7 @@ func (m *WorldMode) drawSceneActors(screen *render.Frame, ctx client.Context, pr
 }
 
 func (m *WorldMode) drawSceneActorOverlays(screen *render.Frame, ctx client.Context, projection sceneProjection, now time.Time, entries []sceneActorDrawEntry) {
+	m.drawSiegeGuildEmblems(screen, ctx, projection, now, entries)
 	for _, entry := range entries {
 		m.drawActorCastBar(screen, entry, now)
 		m.drawActorLifeBar(screen, ctx, entry)
@@ -802,7 +870,7 @@ func (m *WorldMode) collectSceneActorEntries(screen *render.Frame, ctx client.Co
 	}
 	if ctx.Session != nil {
 		if player.GuildID == 0 {
-			player.GuildID = ctx.Session.GuildID
+			player.GuildID = localGuildID(ctx)
 		}
 		if player.EmblemVersion == 0 {
 			player.EmblemVersion = ctx.Session.EmblemVersion
@@ -1076,38 +1144,21 @@ func actorCanDisplayGuildName(actor worldstate.Actor, isPlayer bool) bool {
 
 func actorDisplayNameWithParty(ctx client.Context, actor worldstate.Actor, name string, isPlayer bool) string {
 	name = strings.TrimSpace(name)
-	partyName := actorPartyDisplayName(ctx, actor, name, isPlayer)
+	partyName := actorPartyDisplayName(ctx, actor, isPlayer)
 	if name == "" || partyName == "" {
 		return name
 	}
 	return name + " (" + partyName + ")"
 }
 
-func actorPartyDisplayName(ctx client.Context, actor worldstate.Actor, actorName string, isPlayer bool) string {
-	if ctx.Session == nil || !ctx.Session.Party.Active() {
-		return ""
-	}
-	name := strings.TrimSpace(ctx.Session.Party.Name)
-	if name == "" {
-		return ""
-	}
-	if isPlayer {
+func actorPartyDisplayName(ctx client.Context, actor worldstate.Actor, isPlayer bool) string {
+	if name := strings.TrimSpace(actor.PartyName); name != "" {
 		return name
 	}
-	if !actorCanDisplayPartyName(actor) {
-		return ""
+	if isPlayer && ctx.Session != nil {
+		return strings.TrimSpace(ctx.Session.Party.Name)
 	}
-	if !actorIsPartyMember(ctx.Session, actor, actorName) {
-		return ""
-	}
-	return name
-}
-
-func actorCanDisplayPartyName(actor worldstate.Actor) bool {
-	if actor.HasObjectType {
-		return actor.ObjectType == actorObjectTypePC
-	}
-	return res.HasPlayerJobToken(int(actor.Job))
+	return ""
 }
 
 func actorIsPartyMember(s *session.Session, actor worldstate.Actor, actorName string) bool {

@@ -1,6 +1,7 @@
 package game
 
 import (
+	"encoding/binary"
 	"image/color"
 	"os"
 	"path/filepath"
@@ -25,10 +26,13 @@ func TestApplyActorNameAckUpdatesWorldActor(t *testing.T) {
 		World:   world,
 	}
 
-	applyActorNameAck(ctx, network.ActorNameAck{ID: 300, Name: "Guide#prontera", GuildName: "Knights"})
+	applyActorNameAck(ctx, network.ActorNameAck{ID: 300, Name: "Guide#prontera", PartyName: "Adventurers", GuildName: "Knights"})
 
 	if got := world.Actors[300].Name; got != "Guide" {
 		t.Fatalf("actor name = %q, want Guide", got)
+	}
+	if got := world.Actors[300].PartyName; got != "Adventurers" {
+		t.Fatalf("actor party = %q, want Adventurers", got)
 	}
 	if got := world.Actors[300].GuildName; got != "Knights" {
 		t.Fatalf("actor guild = %q, want Knights", got)
@@ -42,10 +46,13 @@ func TestApplyActorNameAckUpdatesLocalPlayer(t *testing.T) {
 		World:   world,
 	}
 
-	applyActorNameAck(ctx, network.ActorNameAck{ID: 200, Name: "Kivutar", GuildName: "Goro"})
+	applyActorNameAck(ctx, network.ActorNameAck{ID: 200, Name: "Kivutar", PartyName: "Adventurers", GuildName: "Goro"})
 
 	if got := world.Player.Name; got != "Kivutar" {
 		t.Fatalf("player name = %q, want Kivutar", got)
+	}
+	if got := world.Player.PartyName; got != "Adventurers" {
+		t.Fatalf("player party = %q, want Adventurers", got)
 	}
 	if got := world.Player.GuildName; got != "Goro" {
 		t.Fatalf("player guild = %q, want Goro", got)
@@ -67,6 +74,48 @@ func TestApplyActorNameAckPreservesLocalGuildOnEmptyNameAck(t *testing.T) {
 	}
 	if got := ctx.Session.GuildName; got != "Goro" {
 		t.Fatalf("session guild = %q, want Goro", got)
+	}
+}
+
+func TestApplyActorNameAckClearsGuildStateFromAuthoritativeEmptyGuildName(t *testing.T) {
+	s := &session.Session{AccountID: 200, GuildID: 9, GuildName: "Goro", EmblemVersion: 4, Guild: session.Guild{ID: 9, Name: "Goro"}}
+	w := &worldstate.World{Player: worldstate.Actor{ID: 200, GuildID: 9, GuildName: "Goro", EmblemVersion: 4}}
+	ctx := client.Context{Session: s, World: w}
+
+	applyActorNameAck(ctx, network.ActorNameAck{ID: 200, Name: "Kivutar", HasGuildName: true})
+
+	if w.Player.GuildID != 0 || w.Player.GuildName != "" || w.Player.EmblemVersion != 0 {
+		t.Fatalf("player guild state = %+v, want cleared", w.Player)
+	}
+	if s.GuildID != 0 || s.GuildName != "" || s.EmblemVersion != 0 || s.Guild.ID != 0 {
+		t.Fatalf("session guild id=%d name=%q emblem=%d nested=%+v, want cleared", s.GuildID, s.GuildName, s.EmblemVersion, s.Guild)
+	}
+}
+
+func TestApplyActorNameAckClearsRemotePartyName(t *testing.T) {
+	world := worldstate.New()
+	world.UpsertActor(worldstate.Actor{ID: 300, Name: "Alice", PartyName: "Old Party"})
+	ctx := client.Context{
+		Session: &session.Session{AccountID: 100, CharID: 200},
+		World:   world,
+	}
+
+	applyActorNameAck(ctx, network.ActorNameAck{ID: 300, Name: "Alice"})
+
+	if got := world.Actors[300].PartyName; got != "" {
+		t.Fatalf("actor party = %q, want cleared", got)
+	}
+}
+
+func TestApplyActorNameAckClearsRemoteGuildFromAuthoritativeEmptyName(t *testing.T) {
+	world := worldstate.New()
+	world.UpsertActor(worldstate.Actor{ID: 300, Name: "Alice", GuildID: 9, GuildName: "Goro", EmblemVersion: 4})
+	ctx := client.Context{Session: &session.Session{AccountID: 100, CharID: 200}, World: world}
+
+	applyActorNameAck(ctx, network.ActorNameAck{ID: 300, Name: "Alice", HasGuildName: true})
+
+	if actor := world.Actors[300]; actor.GuildID != 0 || actor.GuildName != "" || actor.EmblemVersion != 0 {
+		t.Fatalf("remote actor guild state = %+v, want cleared", actor)
 	}
 }
 
@@ -378,14 +427,14 @@ func TestActorDisplayNameIncludesPartyName(t *testing.T) {
 		},
 	}}
 
-	if got := actorDisplayName(ctx, worldstate.Actor{Name: "Player"}, true); got != "Kivutar (Goro)" {
+	if got := actorDisplayName(ctx, worldstate.Actor{Name: "Player", PartyName: "Goro"}, true); got != "Kivutar (Goro)" {
 		t.Fatalf("local display name = %q, want Kivutar (Goro)", got)
 	}
-	if got := actorDisplayName(ctx, worldstate.Actor{ID: 300, Name: "Alice"}, false); got != "Alice (Goro)" {
-		t.Fatalf("party member display name = %q, want Alice (Goro)", got)
+	if got := actorDisplayName(ctx, worldstate.Actor{ID: 300, Name: "Alice", PartyName: "Other Party"}, false); got != "Alice (Other Party)" {
+		t.Fatalf("remote display name = %q, want Alice (Other Party)", got)
 	}
 	if got := actorDisplayName(ctx, worldstate.Actor{ID: 400, Name: "Bob"}, false); got != "Bob" {
-		t.Fatalf("non-party display name = %q, want Bob", got)
+		t.Fatalf("remote without packet party name = %q, want Bob", got)
 	}
 }
 
@@ -418,16 +467,39 @@ func TestActorNameLabelColorUsesYellowForAdmin(t *testing.T) {
 	}
 }
 
-func TestGuildCreationResultAppliesPendingLocalGuildName(t *testing.T) {
+func TestGuildCreationWaitsForBelongingBeforeOpeningGuildWindow(t *testing.T) {
 	world := worldstate.New()
 	ctx := client.Context{
 		Session: &session.Session{PendingGuildName: "Knights"},
 		World:   world,
+		ScreenW: 800,
+		ScreenH: 600,
 	}
 	var mode WorldMode
 
 	mode.handleGuildCreationResult(ctx, network.GuildCreationResult{Result: 0})
 
+	if got := ctx.Session.GuildName; got != "" {
+		t.Fatalf("session guild = %q before belonging, want empty", got)
+	}
+	if got := world.Player.GuildName; got != "" {
+		t.Fatalf("player guild = %q before belonging, want empty", got)
+	}
+	if got := ctx.Session.PendingGuildName; got != "Knights" {
+		t.Fatalf("pending guild = %q before belonging, want Knights", got)
+	}
+	if !mode.guildOpenPending {
+		t.Fatal("guild window open was not deferred")
+	}
+	if mode.ui.guildWindow.IsOpen() {
+		t.Fatal("guild window opened before belonging")
+	}
+
+	mode.handleGuildBelonging(ctx, network.GuildBelonging{GuildID: 9, GuildName: "Knights"})
+
+	if got := ctx.Session.GuildID; got != 9 {
+		t.Fatalf("session guild ID = %d, want 9", got)
+	}
 	if got := ctx.Session.GuildName; got != "Knights" {
 		t.Fatalf("session guild = %q, want Knights", got)
 	}
@@ -435,7 +507,31 @@ func TestGuildCreationResultAppliesPendingLocalGuildName(t *testing.T) {
 		t.Fatalf("player guild = %q, want Knights", got)
 	}
 	if got := ctx.Session.PendingGuildName; got != "" {
-		t.Fatalf("pending guild = %q, want empty", got)
+		t.Fatalf("pending guild = %q after belonging, want empty", got)
+	}
+	if mode.guildOpenPending {
+		t.Fatal("deferred guild window open was not consumed")
+	}
+	if !mode.ui.guildWindow.IsOpen() {
+		t.Fatal("guild window did not open after belonging")
+	}
+}
+
+func TestGuildCreationOpensWhenBelongingArrivedFirst(t *testing.T) {
+	ctx := client.Context{
+		Session: &session.Session{GuildID: 9, GuildName: "Knights"},
+		ScreenW: 800,
+		ScreenH: 600,
+	}
+	var mode WorldMode
+
+	mode.handleGuildCreationResult(ctx, network.GuildCreationResult{Result: 0})
+
+	if mode.guildOpenPending {
+		t.Fatal("guild window open remained pending after membership was known")
+	}
+	if !mode.ui.guildWindow.IsOpen() {
+		t.Fatal("guild window did not open with known membership")
 	}
 }
 
@@ -480,6 +576,21 @@ func TestHandleGuildNoticeSkipsEmptyConsoleLines(t *testing.T) {
 	messages := mode.ui.console.Messages()
 	if len(messages) != 2 || messages[0].Text != "[ Guild event tonight. ]" || messages[1].Text != "[ Meet in Prontera. ]" {
 		t.Fatalf("console messages = %+v", messages)
+	}
+}
+
+func TestApplyGuildChatAddsGuildConsoleMessage(t *testing.T) {
+	mode := &WorldMode{}
+
+	applyGuildChat(network.GuildChat{Message: " Kivutar : hello guild "}, &mode.ui.console)
+
+	messages := mode.ui.console.Messages()
+	if len(messages) != 1 || messages[0].Text != "Kivutar : hello guild" {
+		t.Fatalf("console messages = %+v", messages)
+	}
+	wantColor := color.RGBA{R: 180, G: 255, B: 180, A: 255}
+	if messages[0].Color != wantColor {
+		t.Fatalf("guild chat color = %+v, want %+v", messages[0].Color, wantColor)
 	}
 }
 
@@ -921,6 +1032,33 @@ func TestLegacyUseItemAckClearsConsumedItemShortcut(t *testing.T) {
 	}
 	if got := sessionState.Hotkeys.Slots[0]; got.ID != 0 {
 		t.Fatalf("shortcut hotkey = %+v, want empty", got)
+	}
+}
+
+func TestAutoSpellListPacketOpensModalChooser(t *testing.T) {
+	uiManager := &worldModeTestUIManager{}
+	ctx := client.Context{
+		ScreenW:   800,
+		ScreenH:   600,
+		UIManager: uiManager,
+	}
+	mode := &WorldMode{}
+	data := make([]byte, 30)
+	binary.LittleEndian.PutUint16(data[0:2], network.PacketZCAutoSpellList)
+	binary.LittleEndian.PutUint32(data[2:6], 11)
+	binary.LittleEndian.PutUint32(data[6:10], 14)
+
+	if next, stop := mode.handleNetworkPacket(ctx, network.Packet{ID: network.PacketZCAutoSpellList, Data: data}, time.Now()); next != nil || stop {
+		t.Fatalf("auto spell list changed mode: next=%T stop=%t", next, stop)
+	}
+	if !mode.ui.autoSpellWindow.IsOpen() {
+		t.Fatal("auto spell list did not open the chooser")
+	}
+	if !mode.ui.interactionModalOpen() {
+		t.Fatal("auto spell chooser did not block world interactions")
+	}
+	if len(uiManager.overlays) != 1 {
+		t.Fatalf("auto spell overlays = %d, want 1", len(uiManager.overlays))
 	}
 }
 

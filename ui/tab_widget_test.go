@@ -4,12 +4,29 @@ import (
 	"image"
 	"testing"
 
+	"github.com/gogpu/ui/event"
 	"github.com/gogpu/ui/geometry"
 	"github.com/gogpu/ui/primitives"
 	"github.com/gogpu/ui/uitest"
 	"github.com/gogpu/ui/widget"
 	"github.com/kivutar/goro/ui/rotheme"
 )
+
+func TestDisabledTabDoesNotRunClickHandler(t *testing.T) {
+	clicked := false
+	tab := newTabWidget(tabWidgetConfig{
+		disabled: true,
+		onClick:  func() { clicked = true },
+	})
+
+	press := event.NewMouseEvent(event.MousePress, event.ButtonLeft, event.ButtonStateLeft, geometry.Pt(1, 1), geometry.Pt(1, 1), 0)
+	if !tab.Event(widget.NewContext(), press) {
+		t.Fatal("disabled tab did not consume the click")
+	}
+	if clicked {
+		t.Fatal("disabled tab ran its click handler")
+	}
+}
 
 func TestTabWidgetKeepsHorizontalLabelsByDefault(t *testing.T) {
 	tab := newTabWidget(tabWidgetConfig{label: "Friends", width: 72, height: 24})

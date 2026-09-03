@@ -133,6 +133,8 @@ type WorldMode struct {
 	ui                         worldUI
 	pendingChatRoom            network.ChatRoomCreate
 	pendingTradeName           string
+	guildAction                gameui.GuildMemberAction
+	guildOpenPending           bool
 	mobileTradeRequest         *mobileTradeRequestState
 	mobileTrade                mobileTradeState
 	mobileVending              mobileVendingState
@@ -171,68 +173,76 @@ func (m *WorldMode) RenderMetrics() RenderMetrics {
 }
 
 type worldUI struct {
-	minimap           gameui.Minimap
-	statusIcons       gameui.StatusIcons
-	pvpCounter        gameui.PvPCounter
-	console           gameui.ChatConsole
-	npcDialog         gameui.NPCDialog
-	escapeMenu        gameui.EscapeMenu
-	teleportModal     gameui.TeleportModal
-	disconnectDialog  gameui.ConfirmModal
-	friendRequest     gameui.ConfirmModal
-	friendConfirm     gameui.ConfirmModal
-	partyRequest      gameui.ConfirmModal
-	guildRequest      gameui.ConfirmModal
-	tradeRequest      gameui.ConfirmModal
-	adoptionRequest   gameui.ConfirmModal
-	characterWindow   gameui.CharacterWindow
-	basicMenu         gameui.BasicMenu
-	inventoryBag      gameui.InventoryBagWindow
-	equipmentWindow   gameui.EquipmentWindow
-	viewEquipWindow   gameui.ViewEquipmentWindow
-	storageWindow     gameui.StorageWindow
-	cartWindow        gameui.CartWindow
-	changeCartWindow  gameui.ChangeCartWindow
-	itemPickup        gameui.ItemPickupNotification
-	shopWindow        gameui.ShopWindow
-	vendingWindow     gameui.VendingWindow
-	itemInfoWindow    gameui.ItemInfoWindow
-	identifyWindow    gameui.IdentifyWindow
-	cardWindow        gameui.CardCompositionWindow
-	makingArrow       gameui.MakingArrowWindow
-	makingItem        gameui.MakingItemWindow
-	repairItem        gameui.RepairItemWindow
-	weaponRefine      gameui.WeaponRefineWindow
-	petEggWindow      gameui.PetEggWindow
-	petInfoWindow     gameui.PetInfoWindow
-	petContext        gameui.PetContextMenu
-	petConfirm        gameui.ConfirmModal
-	homunculusInfo    gameui.HomunculusInfoWindow
-	homunculusSkill   gameui.HomunculusSkillWindow
-	homunculusContext gameui.HomunculusContextMenu
-	homunculusConfirm gameui.ConfirmModal
-	mercenaryInfo     gameui.MercenaryInfoWindow
-	mercenarySkill    gameui.MercenarySkillWindow
-	mercenaryContext  gameui.MercenaryContextMenu
-	mercenaryConfirm  gameui.ConfirmModal
-	statsWindow       gameui.StatsWindow
-	skillWindow       gameui.SkillWindow
-	emoteWindow       gameui.EmoteWindow
-	friendsWindow     gameui.FriendsWindow
-	guildWindow       gameui.GuildWindow
-	friendSettings    gameui.FriendSettingsWindow
-	whisperWindow     gameui.WhisperWindow
-	chatRoomCreate    gameui.ChatRoomCreateWindow
-	chatRoom          gameui.ChatRoomWindow
-	partySettings     gameui.PartySettingsWindow
-	partyCreate       gameui.PartyCreateWindow
-	partyInvite       gameui.PartyInviteWindow
-	partyInfo         gameui.ConfirmModal
-	skillTextPrompt   gameui.TextPromptWindow
-	playerContext     gameui.PlayerContextMenu
-	tradeWindow       gameui.TradeWindow
-	settingsWindow    gameui.SettingsWindow
-	shortcutBar       gameui.ShortcutBar
+	minimap              gameui.Minimap
+	statusIcons          gameui.StatusIcons
+	pvpCounter           gameui.PvPCounter
+	levelUpNotifications gameui.LevelUpNotifications
+	announcement         gameui.Announcement
+	console              gameui.ChatConsole
+	npcDialog            gameui.NPCDialog
+	npcCutin             gameui.NPCCutinOverlay
+	escapeMenu           gameui.EscapeMenu
+	teleportModal        gameui.TeleportModal
+	autoSpellWindow      gameui.AutoSpellWindow
+	disconnectDialog     gameui.ConfirmModal
+	friendRequest        gameui.ConfirmModal
+	friendConfirm        gameui.ConfirmModal
+	partyRequest         gameui.ConfirmModal
+	guildRequest         gameui.ConfirmModal
+	guildAllianceRequest gameui.ConfirmModal
+	guildRelationConfirm gameui.ConfirmModal
+	guildMemberPrompt    gameui.TextPromptWindow
+	tradeRequest         gameui.ConfirmModal
+	adoptionRequest      gameui.ConfirmModal
+	starPlaceConfirm     gameui.ConfirmModal
+	characterWindow      gameui.CharacterWindow
+	basicMenu            gameui.BasicMenu
+	inventoryBag         gameui.InventoryBagWindow
+	equipmentWindow      gameui.EquipmentWindow
+	viewEquipWindow      gameui.ViewEquipmentWindow
+	storageWindow        gameui.StorageWindow
+	cartWindow           gameui.CartWindow
+	changeCartWindow     gameui.ChangeCartWindow
+	itemPickup           gameui.ItemPickupNotification
+	shopWindow           gameui.ShopWindow
+	vendingWindow        gameui.VendingWindow
+	itemInfoWindow       gameui.ItemInfoWindow
+	identifyWindow       gameui.IdentifyWindow
+	cardWindow           gameui.CardCompositionWindow
+	makingArrow          gameui.MakingArrowWindow
+	makingItem           gameui.MakingItemWindow
+	repairItem           gameui.RepairItemWindow
+	weaponRefine         gameui.WeaponRefineWindow
+	petEggWindow         gameui.PetEggWindow
+	petInfoWindow        gameui.PetInfoWindow
+	petContext           gameui.PetContextMenu
+	petConfirm           gameui.ConfirmModal
+	homunculusInfo       gameui.HomunculusInfoWindow
+	homunculusSkill      gameui.HomunculusSkillWindow
+	homunculusContext    gameui.HomunculusContextMenu
+	homunculusConfirm    gameui.ConfirmModal
+	mercenaryInfo        gameui.MercenaryInfoWindow
+	mercenarySkill       gameui.MercenarySkillWindow
+	mercenaryContext     gameui.MercenaryContextMenu
+	mercenaryConfirm     gameui.ConfirmModal
+	statsWindow          gameui.StatsWindow
+	skillWindow          gameui.SkillWindow
+	emoteWindow          gameui.EmoteWindow
+	friendsWindow        gameui.FriendsWindow
+	guildWindow          gameui.GuildWindow
+	friendSettings       gameui.FriendSettingsWindow
+	whisperWindow        gameui.WhisperWindow
+	chatRoomCreate       gameui.ChatRoomCreateWindow
+	chatRoom             gameui.ChatRoomWindow
+	partySettings        gameui.PartySettingsWindow
+	partyCreate          gameui.PartyCreateWindow
+	partyInvite          gameui.PartyInviteWindow
+	partyInfo            gameui.ConfirmModal
+	skillTextPrompt      gameui.TextPromptWindow
+	playerContext        gameui.PlayerContextMenu
+	tradeWindow          gameui.TradeWindow
+	settingsWindow       gameui.SettingsWindow
+	shortcutBar          gameui.ShortcutBar
 }
 
 func (u *worldUI) KeyboardShortcutsBlocked(ctx client.Context) bool {
@@ -243,22 +253,24 @@ func (u *worldUI) keyboardInputBlocked(ctx client.Context) bool {
 	if u == nil {
 		return false
 	}
-	return u.console.Active() ||
-		u.npcDialog.IsOpen() ||
+	return u.console.Active() || u.nonConsoleKeyboardInputBlocked(ctx)
+}
+
+func (u *worldUI) nonConsoleKeyboardInputBlocked(ctx client.Context) bool {
+	if u == nil {
+		return false
+	}
+	return u.npcDialog.IsOpen() ||
 		u.escapeMenu.IsOpen() ||
-		u.teleportModal.IsOpen() ||
 		u.disconnectDialog.IsOpen() ||
-		u.friendRequest.IsOpen() ||
-		u.friendConfirm.IsOpen() ||
-		u.partyRequest.IsOpen() ||
-		u.guildRequest.IsOpen() ||
-		u.tradeRequest.IsOpen() ||
-		u.adoptionRequest.IsOpen() ||
+		u.interactionModalOpen() ||
 		u.partyInfo.IsOpen() ||
 		u.petConfirm.IsOpen() ||
 		u.homunculusConfirm.IsOpen() ||
 		u.mercenaryConfirm.IsOpen() ||
+		u.starPlaceConfirm.IsOpen() ||
 		u.settingsWindow.IsOpen() ||
+		u.autoSpellWindow.IsOpen() ||
 		u.identifyWindow.IsOpen() ||
 		u.cardWindow.IsOpen() ||
 		u.makingArrow.IsOpen() ||
@@ -283,6 +295,24 @@ func (u *worldUI) keyboardInputBlocked(ctx client.Context) bool {
 		u.partyCreate.IsOpen() ||
 		u.partyInvite.IsOpen() ||
 		u.skillTextPrompt.IsOpen()
+}
+
+func (u *worldUI) interactionModalOpen() bool {
+	if u == nil {
+		return false
+	}
+	return u.teleportModal.IsOpen() ||
+		u.autoSpellWindow.IsOpen() ||
+		u.friendRequest.IsOpen() ||
+		u.friendConfirm.IsOpen() ||
+		u.partyRequest.IsOpen() ||
+		u.guildRequest.IsOpen() ||
+		u.guildAllianceRequest.IsOpen() ||
+		u.guildRelationConfirm.IsOpen() ||
+		u.guildMemberPrompt.IsOpen() ||
+		u.tradeRequest.IsOpen() ||
+		u.adoptionRequest.IsOpen() ||
+		u.starPlaceConfirm.IsOpen()
 }
 
 func (m *WorldMode) KeyboardShortcutsBlocked(ctx client.Context) bool {
@@ -368,7 +398,9 @@ var (
 )
 
 func NewWorldMode() *WorldMode {
-	return &WorldMode{}
+	m := &WorldMode{}
+	m.bindNPCDialogLifecycle()
+	return m
 }
 
 func (m *WorldMode) Name() string {
@@ -377,6 +409,7 @@ func (m *WorldMode) Name() string {
 
 func (m *WorldMode) Enter(ctx client.Context) {
 	now := time.Now()
+	m.bindNPCDialogLifecycle()
 	m.startMapPrewarm()
 	m.camera.ResetTracking()
 	ctx.World.GAT = nil
@@ -440,6 +473,9 @@ func (m *WorldMode) Enter(ctx client.Context) {
 	m.mobileTradeRequest = nil
 	m.mobileTrade = mobileTradeState{}
 	m.mobileVending = mobileVendingState{}
+	m.guildAction = gameui.GuildMemberAction{}
+	m.guildOpenPending = false
+	m.ui.guildMemberPrompt.Close()
 	m.lockedAttackID = 0
 	m.clearAttackFocus()
 	m.clearScriptHighlight()
@@ -460,6 +496,7 @@ func (m *WorldMode) Enter(ctx client.Context) {
 	m.speechBubbles = make(map[uint32]speechBubble)
 	m.syncCurrentActorEffectStateEffects(ctx)
 	m.ui.npcDialog.ResetPublished(ctx)
+	m.ui.npcCutin.Clear()
 	ctx.World.Items = make(map[uint32]worldstate.FloorItem)
 	playerStatus := ""
 	character := ctx.Session.SelectedCharacter()
@@ -558,11 +595,13 @@ func (m *WorldMode) rebindPersistentUI(ctx client.Context) {
 	m.ui.itemInfoWindow.Rebind(ctx, m)
 	m.ui.statsWindow.Rebind(ctx)
 	m.ui.skillWindow.Rebind(ctx, m)
+	m.ui.levelUpNotifications.Rebind(ctx)
 	m.ui.emoteWindow.Rebind(ctx, &m.ui.console)
 	m.ui.homunculusSkill.Rebind(ctx, m)
 	m.ui.mercenarySkill.Rebind(ctx, m)
 	m.ui.friendsWindow.Rebind(ctx)
 	m.ui.guildWindow.Rebind(ctx)
+	m.ui.guildMemberPrompt.Rebind(ctx)
 	m.ui.friendSettings.Rebind(ctx)
 	m.ui.partySettings.Rebind(ctx)
 	m.ui.partyCreate.Rebind(ctx)
@@ -641,6 +680,11 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 		m.syncOfflineProjection(ctx)
 	}
 	m.ui.pvpCounter.Update(ctx)
+	if m.handleLevelUpNotificationAction(ctx, m.ui.levelUpNotifications.Update(ctx)) {
+		// The notification click belongs exclusively to the UI. Returning here
+		// prevents the same press from reaching the map after the icon closes.
+		return nil, nil
+	}
 
 	m.updatePendingAttack(ctx, "update", false)
 	m.processPendingAttack(ctx)
@@ -678,6 +722,12 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 	keyboardBlocked := m.ui.keyboardInputBlocked(ctx)
 	m.updateBotInput(ctx, !dead && !keyboardBlocked)
 	if m.updatePetSlotMachine(ctx) {
+		return nil, nil
+	}
+	// Window.Update consumes pointer hover so that map input does not pass
+	// through the UI. Handle keyboard-only window shortcuts before pointer
+	// dispatch, otherwise their JustPressed event can be lost.
+	if m.toggleEmoteWindowFromInput(ctx) || m.toggleGuildWindowFromInput(ctx) {
 		return nil, nil
 	}
 	if dead {
@@ -750,6 +800,12 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 	case gameui.PlayerContextActionInviteGuild:
 		m.sendGuildInvite(ctx, action.ActorID, action.Name)
 		return nil, nil
+	case gameui.PlayerContextActionGuildAlliance:
+		m.sendGuildAllianceRequest(ctx, action.ActorID, action.Name)
+		return nil, nil
+	case gameui.PlayerContextActionGuildHostility:
+		m.sendGuildHostilityRequest(ctx, action.ActorID, action.Name)
+		return nil, nil
 	case gameui.PlayerContextActionTrade:
 		m.sendTradeRequest(ctx, action.ActorID, action.Name)
 		return nil, nil
@@ -769,7 +825,7 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 	if !dead && m.openPlayerContextFromInput(ctx, now) {
 		return nil, nil
 	}
-	if !m.petSlotMachine.active && !m.ui.escapeMenu.IsOpen() && !m.ui.teleportModal.IsOpen() && !m.ui.friendRequest.IsOpen() && !m.ui.friendConfirm.IsOpen() && !m.ui.partyRequest.IsOpen() && !m.ui.guildRequest.IsOpen() && !m.ui.tradeRequest.IsOpen() && !m.ui.adoptionRequest.IsOpen() && !m.ui.settingsWindow.IsOpen() && !m.ui.identifyWindow.IsOpen() && !m.ui.petEggWindow.IsOpen() && !m.ui.petInfoWindow.IsOpen() && !m.ui.petConfirm.IsOpen() && !m.ui.homunculusInfo.IsOpen() && !m.ui.homunculusSkill.IsOpen() && !m.ui.homunculusConfirm.IsOpen() && !m.ui.mercenaryInfo.IsOpen() && !m.ui.mercenarySkill.IsOpen() && !m.ui.mercenaryConfirm.IsOpen() {
+	if !m.petSlotMachine.active && !m.npcCutinPointerBlocked(ctx) && !m.ui.escapeMenu.IsOpen() && !m.ui.interactionModalOpen() && !m.ui.settingsWindow.IsOpen() && !m.ui.identifyWindow.IsOpen() && !m.ui.petEggWindow.IsOpen() && !m.ui.petInfoWindow.IsOpen() && !m.ui.petConfirm.IsOpen() && !m.ui.homunculusInfo.IsOpen() && !m.ui.homunculusSkill.IsOpen() && !m.ui.homunculusConfirm.IsOpen() && !m.ui.mercenaryInfo.IsOpen() && !m.ui.mercenarySkill.IsOpen() && !m.ui.mercenaryConfirm.IsOpen() {
 		m.updateCameraRotation(ctx)
 	}
 	if !dead && m.ui.escapeMenu.IsOpen() {
@@ -790,6 +846,12 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 	if m.ui.guildRequest.Update(ctx) {
 		return nil, nil
 	}
+	if m.ui.guildAllianceRequest.Update(ctx) {
+		return nil, nil
+	}
+	if m.ui.guildRelationConfirm.Update(ctx) {
+		return nil, nil
+	}
 	if m.ui.partyInfo.Update(ctx) {
 		return nil, nil
 	}
@@ -797,6 +859,9 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 		return nil, nil
 	}
 	if m.ui.adoptionRequest.Update(ctx) {
+		return nil, nil
+	}
+	if m.ui.starPlaceConfirm.Update(ctx) {
 		return nil, nil
 	}
 	if m.ui.petConfirm.Update(ctx) {
@@ -826,7 +891,13 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 	if m.ui.teleportModal.Update(ctx, m) {
 		return nil, nil
 	}
+	if m.updateAutoSpellWindow(ctx) {
+		return nil, nil
+	}
 	if m.ui.npcDialog.Update(ctx) {
+		return nil, nil
+	}
+	if m.ui.npcCutin.Update(ctx) {
 		return nil, nil
 	}
 	if m.updateWhisperWindow(ctx) {
@@ -839,6 +910,9 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 		return nil, nil
 	}
 	if m.updateSkillTextPrompt(ctx) {
+		return nil, nil
+	}
+	if m.updateGuildMemberPrompt(ctx) {
 		return nil, nil
 	}
 	if m.ui.makingArrow.Update(ctx) {
@@ -940,13 +1014,7 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 	if m.ui.mercenarySkill.Update(ctx, &m.ui.shortcutBar, m) {
 		return nil, nil
 	}
-	if m.toggleEmoteWindowFromInput(ctx) {
-		return nil, nil
-	}
 	if m.ui.emoteWindow.Update(ctx, &m.ui.console) {
-		return nil, nil
-	}
-	if m.toggleGuildWindowFromInput(ctx) {
 		return nil, nil
 	}
 	if m.ui.friendsWindow.Update(ctx) {
@@ -1000,6 +1068,10 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 			m.updateGuildPositions(ctx, action.Positions)
 		} else if action.UpdateNotice {
 			m.updateGuildNotice(ctx, action.NoticeSubject, action.Notice)
+		} else if action.DeleteRelation != nil {
+			m.openDeleteGuildRelationConfirm(ctx, action.DeleteRelation.Relation)
+		} else if action.MemberAction != nil {
+			m.openGuildMemberPrompt(ctx, *action.MemberAction)
 		}
 		return nil, nil
 	}
@@ -1032,16 +1104,21 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 	m.updateBot(ctx, now)
 
 	leftClick := !pointerBlocked && ctx.Input.MouseJustPressed(input.MouseButtonLeft)
-	if leftClick && m.pendingSkill.skill.ID != 0 {
+	if leftClick {
+		// One-shot interactions must not be delayed by the short throttle used
+		// for repeated walk requests. Scheduling the held-click repeat here also
+		// prevents a throttled ground click from turning into a walk on the next
+		// frame merely because the button is still down.
 		m.nextHeldWalkAt = now.Add(heldWalkRepeatInterval)
+	}
+	if leftClick && m.pendingSkill.skill.ID != 0 {
 		screenW, screenH := ctx.ScreenSize()
 		projection := m.sceneProjection(ctx, screenW, screenH, now)
 		m.skills().HandleClick(ctx, projection, now)
 		return nil, nil
 	}
 
-	if leftClick && m.walkReady(now) {
-		m.nextHeldWalkAt = now.Add(heldWalkRepeatInterval)
+	if leftClick {
 		screenW, screenH := ctx.ScreenSize()
 		projection := m.sceneProjection(ctx, screenW, screenH, now)
 		if m.handlePetCaptureClick(ctx, projection, now) {
@@ -1087,7 +1164,7 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 			m.ApplyPlayerCommand(ctx, input.PlayerCommand{Kind: input.CommandInteractActor, ActorID: actor.ID})
 			return nil, nil
 		}
-		if targetX, targetY, ok := clickedWalkTarget(ctx, projection, ctx.Input.MouseX, ctx.Input.MouseY); ok {
+		if targetX, targetY, ok := clickedWalkTarget(ctx, projection, ctx.Input.MouseX, ctx.Input.MouseY); ok && m.walkReady(now) {
 			glog.Debugf("click walk target mouse=%d,%d player=%d,%d target=%d,%d", ctx.Input.MouseX, ctx.Input.MouseY, playerX, playerY, targetX, targetY)
 			m.cancelAttackIntent()
 			if shouldUseTurnOnlyGroundClick(ctx) {
@@ -1167,7 +1244,7 @@ func (m *WorldMode) openEscapeMenuFromInput(ctx client.Context) bool {
 	if ctx.Input == nil || m.ui.escapeMenu.IsOpen() || !ctx.Input.JustPressed(input.KeyEscape) {
 		return false
 	}
-	if m.ui.teleportModal.IsOpen() || m.ui.friendRequest.IsOpen() || m.ui.friendConfirm.IsOpen() || m.ui.partyRequest.IsOpen() || m.ui.guildRequest.IsOpen() || m.ui.tradeRequest.IsOpen() || m.ui.adoptionRequest.IsOpen() {
+	if m.ui.interactionModalOpen() {
 		return false
 	}
 	m.ui.escapeMenu.Toggle(ctx)
@@ -1188,33 +1265,58 @@ func (m *WorldMode) basicMenuCallbacks(ctx client.Context) gameui.BasicMenuCallb
 }
 
 func (m *WorldMode) toggleEmoteWindowFromInput(ctx client.Context) bool {
-	if ctx.Input == nil || m.ui.keyboardInputBlocked(ctx) {
+	if ctx.Input == nil || m.ui.nonConsoleKeyboardInputBlocked(ctx) {
 		return false
 	}
 	if !ctx.Input.Pressed(input.KeyAlt) || !ctx.Input.JustPressed(input.KeyL) {
 		return false
 	}
+	m.discardConsoleShortcutText(ctx)
 	m.ui.emoteWindow.Toggle(ctx, &m.ui.console)
 	return true
 }
 
 func (m *WorldMode) toggleGuildWindowFromInput(ctx client.Context) bool {
-	if ctx.Input == nil || m.ui.console.Active() {
+	if ctx.Input == nil || m.ui.nonConsoleKeyboardInputBlocked(ctx) {
 		return false
 	}
 	if !ctx.Input.Pressed(input.KeyAlt) || !ctx.Input.JustPressed(input.KeyG) {
 		return false
 	}
+	m.discardConsoleShortcutText(ctx)
 	m.toggleGuildWindow(ctx)
 	return true
 }
 
+func (m *WorldMode) discardConsoleShortcutText(ctx client.Context) {
+	if ctx.Input != nil && m.ui.console.Active() {
+		m.ui.console.DiscardTextInput(ctx.Input.TextInput())
+	}
+}
+
 func (m *WorldMode) toggleGuildWindow(ctx client.Context) {
-	wasOpen := m.ui.guildWindow.IsOpen()
-	m.setGuildEmblemOptions(ctx)
-	m.ui.guildWindow.Toggle(ctx)
-	if wasOpen || !m.ui.guildWindow.IsOpen() || ctx.Network == nil {
+	if localGuildIDFromSession(ctx.Session) == 0 {
 		return
+	}
+	if m.ui.guildWindow.IsOpen() {
+		m.ui.guildWindow.Close()
+		return
+	}
+	m.openGuildWindow(ctx)
+}
+
+func (m *WorldMode) openGuildWindow(ctx client.Context) {
+	if localGuildIDFromSession(ctx.Session) == 0 || m.ui.guildWindow.IsOpen() {
+		return
+	}
+	m.setGuildEmblemOptions(ctx)
+	m.ui.guildWindow.OpenWindow(ctx)
+	if ctx.Network == nil {
+		return
+	}
+	if err := ctx.Network.SendGuildMenuInterfaceRequest(); err != nil {
+		m.ui.console.AddErrorMessage("Guild access request failed.")
+		glog.Warnf("guild menu access request failed: %v", err)
 	}
 	m.requestGuildWindowTab(ctx, 0)
 }
@@ -1268,7 +1370,12 @@ func (m *WorldMode) handleMapChange(ctx client.Context, change network.MapChange
 	m.clearLocalActorAction(ctx)
 	m.scheduledStops = nil
 	m.ui.npcDialog.ResetPublished(ctx)
+	m.ui.npcCutin.Clear()
 	m.ui.teleportModal = gameui.TeleportModal{}
+	m.ui.autoSpellWindow.Reset(ctx)
+	if m.ui.starPlaceConfirm.IsOpen() {
+		m.ui.starPlaceConfirm.Close(ctx)
+	}
 	m.clearLocalDeathState(ctx)
 	currentMap := ctx.World.MapName
 	if ctx.Offline != nil {
@@ -1319,6 +1426,16 @@ func (m *WorldMode) handleMapChange(ctx client.Context, change network.MapChange
 	return m.nextWorldMode()
 }
 
+func (m *WorldMode) handleLevelUpNotificationAction(ctx client.Context, action gameui.LevelUpNotificationAction) bool {
+	if action&gameui.LevelUpNotificationBase != 0 {
+		m.ui.statsWindow.OpenWindow(ctx)
+	}
+	if action&gameui.LevelUpNotificationJob != 0 {
+		m.ui.skillWindow.OpenWindow(ctx)
+	}
+	return action != gameui.LevelUpNotificationNone
+}
+
 func (m *WorldMode) nextWorldMode() *WorldMode {
 	next := NewWorldMode()
 	next.camera.yawOffset = m.camera.yawOffset
@@ -1361,6 +1478,7 @@ func (m *WorldMode) nextWorldMode() *WorldMode {
 	next.ui.shortcutBar = m.ui.shortcutBar
 	next.ui.minimap = m.ui.minimap
 	next.ui.pvpCounter = m.ui.pvpCounter
+	next.ui.levelUpNotifications = m.ui.levelUpNotifications
 	m.companionAI.close()
 	return next
 }
@@ -1465,6 +1583,7 @@ func (m *WorldMode) Draw(ctx client.Context, screen *render.Frame) {
 	m.drawDamageFloaters(screen, ctx, projection, now)
 
 	if !ctx.Config.Render.NoUI {
+		m.ui.npcCutin.Draw(screen)
 		m.ui.inventoryBag.Draw(screen, ctx, m)
 		m.ui.storageWindow.Draw(screen, ctx, m)
 		m.ui.cartWindow.Draw(screen, ctx, m)
@@ -1497,6 +1616,8 @@ func (m *WorldMode) DrawUIOverlay(ctx client.Context, screen *render.Frame) {
 	if ctx.Config.Render.NoUI {
 		return
 	}
+	now := time.Now()
+	m.ui.announcement.Draw(screen, now)
 	m.ui.inventoryBag.DrawTooltip(ctx, screen)
 	m.ui.equipmentWindow.DrawTooltip(ctx, screen)
 	m.ui.cartWindow.DrawTooltip(ctx, screen)
@@ -1506,7 +1627,7 @@ func (m *WorldMode) DrawUIOverlay(ctx client.Context, screen *render.Frame) {
 	m.ui.mercenarySkill.DrawTooltip(ctx, screen)
 	m.ui.guildWindow.DrawTooltip(ctx, screen)
 	m.ui.shortcutBar.DrawTooltip(ctx, screen)
-	m.ui.itemPickup.Draw(screen, ctx, m, time.Now())
+	m.ui.itemPickup.Draw(screen, ctx, m, now)
 }
 
 func (m *WorldMode) drawUIDragGhosts(screen *render.Frame, ctx client.Context) {

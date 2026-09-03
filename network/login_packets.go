@@ -31,6 +31,8 @@ const (
 	PacketCZEnter2         uint16 = 0x0436
 )
 
+const PacketCAConnectInfoChanged uint16 = 0x0200
+
 type nameRequestPacketLayout struct {
 	date   int
 	opcode uint16
@@ -108,6 +110,13 @@ func BuildCharServerEnterPacket(enter CharServerEnter) []byte {
 	w.Uint32(enter.UserLevel)
 	w.Uint16(0)
 	w.Uint8(enter.Sex)
+	return w.Bytes()
+}
+
+func BuildLoginServerKeepalivePacket(username string) []byte {
+	var w Writer
+	w.Uint16(PacketCAConnectInfoChanged)
+	w.CString(username, 24)
 	return w.Bytes()
 }
 

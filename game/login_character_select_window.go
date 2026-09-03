@@ -255,7 +255,12 @@ func (m *LoginMode) reconnectCharacterServer(ctx client.Context) {
 	if ctx.Network == nil || ctx.Session == nil || len(ctx.Session.CharServers) == 0 {
 		return
 	}
-	server := ctx.Session.CharServers[0]
+	index := ctx.Session.CharServerIndex
+	if index < 0 || index >= len(ctx.Session.CharServers) {
+		index = 0
+		ctx.Session.CharServerIndex = 0
+	}
+	server := ctx.Session.CharServers[index]
 	m.connectCharServer(ctx, network.CharServer{
 		Address:   server.Address,
 		Port:      server.Port,

@@ -7,6 +7,11 @@ import (
 )
 
 func TestBuildGuildPackets(t *testing.T) {
+	menuInterface := BuildGuildMenuInterfaceRequestPacket()
+	if len(menuInterface) != 2 || ID(menuInterface) != PacketCZReqGuildMenuInterface {
+		t.Fatalf("BuildGuildMenuInterfaceRequestPacket len=%d id=0x%04x", len(menuInterface), ID(menuInterface))
+	}
+
 	create := BuildCreateGuildPacket(0x01020304, "Knights")
 	if len(create) != 30 || ID(create) != PacketCZReqMakeGuild {
 		t.Fatalf("BuildCreateGuildPacket len=%d id=0x%04x", len(create), ID(create))
@@ -32,6 +37,33 @@ func TestBuildGuildPackets(t *testing.T) {
 	}
 	if got := binary.LittleEndian.Uint32(reply[6:10]); got != 1 {
 		t.Fatalf("reply accept = %d", got)
+	}
+
+	leave := BuildLeaveGuildPacket(0x01020304, 0x11111111, 0x22222222, "Moving on")
+	if len(leave) != 54 || ID(leave) != PacketCZReqLeaveGuild {
+		t.Fatalf("BuildLeaveGuildPacket len=%d id=0x%04x", len(leave), ID(leave))
+	}
+	if got := binary.LittleEndian.Uint32(leave[2:6]); got != 0x01020304 {
+		t.Fatalf("leave guild id = 0x%08x", got)
+	}
+	if got := binary.LittleEndian.Uint32(leave[6:10]); got != 0x11111111 {
+		t.Fatalf("leave account id = 0x%08x", got)
+	}
+	if got := binary.LittleEndian.Uint32(leave[10:14]); got != 0x22222222 {
+		t.Fatalf("leave char id = 0x%08x", got)
+	}
+	if got := decodeROFixedString(leave[14:54]); got != "Moving on" {
+		t.Fatalf("leave reason = %q", got)
+	}
+
+	expel := BuildExpelGuildMemberPacket(0x01020304, 0x33333333, 0x44444444, "Inactive")
+	if len(expel) != 54 || ID(expel) != PacketCZReqExpelGuildMember || decodeROFixedString(expel[14:54]) != "Inactive" {
+		t.Fatalf("BuildExpelGuildMemberPacket = %x", expel)
+	}
+
+	disband := BuildDisbandGuildPacket("Mandala")
+	if len(disband) != 42 || ID(disband) != PacketCZReqDisbandGuild || decodeROFixedString(disband[2:42]) != "Mandala" {
+		t.Fatalf("BuildDisbandGuildPacket = %x", disband)
 	}
 
 	menu := BuildGuildMenuRequestPacket(3)
@@ -111,7 +143,40 @@ func TestBuildGuildPackets(t *testing.T) {
 	}
 }
 
+func TestParseGuildChat(t *testing.T) {
+	message := []byte("Kivutar : hello guild\x00")
+	data := make([]byte, 4+len(message))
+	binary.LittleEndian.PutUint16(data[0:2], PacketZCGuildChat)
+	binary.LittleEndian.PutUint16(data[2:4], uint16(len(data)))
+	copy(data[4:], message)
+
+	chat, ok, err := ParseGuildChat(Packet{ID: PacketZCGuildChat, Data: data})
+	if !ok || err != nil {
+		t.Fatalf("ParseGuildChat ok=%t err=%v", ok, err)
+	}
+	if chat.Message != "Kivutar : hello guild" {
+		t.Fatalf("guild chat message = %q", chat.Message)
+	}
+	if _, ok, err := ParseGuildChat(Packet{ID: PacketZCGuildChat, Data: data[:4]}); !ok || err == nil {
+		t.Fatalf("short guild chat ok=%t err=%v", ok, err)
+	}
+	if _, ok, err := ParseGuildChat(Packet{ID: PacketZCGuildNotice, Data: data}); ok || err != nil {
+		t.Fatalf("unrelated packet ok=%t err=%v", ok, err)
+	}
+}
+
 func TestParseGuildPackets(t *testing.T) {
+	menuAccessData := make([]byte, 6)
+	binary.LittleEndian.PutUint16(menuAccessData[0:2], PacketZCAckGuildMenuInterface)
+	binary.LittleEndian.PutUint32(menuAccessData[2:6], 0xD7)
+	menuAccess, ok, err := ParseGuildMenuAccess(Packet{ID: PacketZCAckGuildMenuInterface, Data: menuAccessData})
+	if !ok || err != nil || menuAccess.Mask != 0xD7 {
+		t.Fatalf("ParseGuildMenuAccess ok=%t err=%v access=%+v", ok, err, menuAccess)
+	}
+	if _, ok, err := ParseGuildMenuAccess(Packet{ID: PacketZCAckGuildMenuInterface, Data: menuAccessData[:5]}); !ok || err == nil {
+		t.Fatalf("short guild menu access ok=%t err=%v", ok, err)
+	}
+
 	info := make([]byte, 110)
 	binary.LittleEndian.PutUint16(info[0:2], PacketZCGuildInfo)
 	binary.LittleEndian.PutUint32(info[2:6], 0x01020304)
@@ -238,6 +303,33 @@ func TestParseGuildPackets(t *testing.T) {
 		t.Fatalf("ParseGuildExpelHistory ok=%t err=%v history=%+v", ok, err, parsedExpelHistory)
 	}
 
+	departure := make([]byte, 66)
+	binary.LittleEndian.PutUint16(departure[0:2], PacketZCAckLeaveGuild)
+	copyFixedName(departure[2:26], "Alice")
+	copyFixedName(departure[26:66], "A new adventure")
+	parsedDeparture, ok, err := ParseGuildMemberDeparture(Packet{ID: PacketZCAckLeaveGuild, Data: departure})
+	if !ok || err != nil || parsedDeparture != (GuildMemberDeparture{CharName: "Alice", Reason: "A new adventure"}) {
+		t.Fatalf("ParseGuildMemberDeparture ok=%t err=%v departure=%+v", ok, err, parsedDeparture)
+	}
+
+	expulsion := make([]byte, 90)
+	binary.LittleEndian.PutUint16(expulsion[0:2], PacketZCAckExpelGuildMember)
+	copyFixedName(expulsion[2:26], "Bob")
+	copyFixedName(expulsion[26:66], "Inactive")
+	copyFixedName(expulsion[66:90], "bob_account")
+	parsedExpulsion, ok, err := ParseGuildMemberExpulsion(Packet{ID: PacketZCAckExpelGuildMember, Data: expulsion})
+	if !ok || err != nil || parsedExpulsion != (GuildMemberExpulsion{CharName: "Bob", Reason: "Inactive", Account: "bob_account"}) {
+		t.Fatalf("ParseGuildMemberExpulsion ok=%t err=%v expulsion=%+v", ok, err, parsedExpulsion)
+	}
+
+	disbandResult := make([]byte, 6)
+	binary.LittleEndian.PutUint16(disbandResult[0:2], PacketZCAckDisbandGuild)
+	binary.LittleEndian.PutUint32(disbandResult[2:6], 2)
+	parsedDisband, ok, err := ParseGuildDisbandResult(Packet{ID: PacketZCAckDisbandGuild, Data: disbandResult})
+	if !ok || err != nil || parsedDisband.Result != 2 {
+		t.Fatalf("ParseGuildDisbandResult ok=%t err=%v result=%+v", ok, err, parsedDisband)
+	}
+
 	notice := make([]byte, 182)
 	binary.LittleEndian.PutUint16(notice[0:2], PacketZCGuildNotice)
 	copyFixedName(notice[2:62], "Maintenance")
@@ -304,30 +396,35 @@ func TestParseGuildPackets(t *testing.T) {
 
 func TestGuildPacketDirections(t *testing.T) {
 	lengths := PacketLengths2008()
-	for _, id := range []uint16{PacketCZReqMakeGuild, PacketCZReqJoinGuild, PacketCZJoinGuild, PacketCZReqGuildMenu, PacketCZReqChangeMember, PacketCZReqOpenMember, PacketCZRegGuildPosInfo, PacketCZGuildNotice, PacketCZReqGuildMember, PacketCZReqGuildEmblem, PacketCZRegGuildEmblem} {
+	for _, id := range []uint16{PacketCZReqMakeGuild, PacketCZReqJoinGuild, PacketCZJoinGuild, PacketCZReqGuildMenuInterface, PacketCZReqGuildMenu, PacketCZReqChangeMember, PacketCZReqOpenMember, PacketCZReqLeaveGuild, PacketCZReqExpelGuildMember, PacketCZReqDisbandGuild, PacketCZRegGuildPosInfo, PacketCZGuildNotice, PacketCZReqGuildMember, PacketCZGuildMessage, PacketCZReqGuildEmblem, PacketCZRegGuildEmblem} {
 		if _, ok := lengths[id]; ok {
 			t.Fatalf("0x%04X is client-to-server and must not be in the receive framer", id)
 		}
 	}
 	for id, want := range map[uint16]int{
-		PacketZCGuildInfo:       110,
-		PacketZCGuildInfo2:      114,
-		PacketZCResultMakeGuild: 3,
-		PacketZCAckReqJoinGuild: 3,
-		PacketZCReqJoinGuild:    30,
-		PacketZCGuildMembers:    -1,
-		PacketZCAckChangeMember: -1,
-		PacketZCAckOpenMember:   2,
-		PacketZCGuildPositions:  -1,
-		PacketZCGuildSkillInfo:  -1,
-		PacketZCGuildBanList:    -1,
-		PacketZCGuildPosNames:   -1,
-		PacketZCGuildNotice:     182,
-		PacketZCUpdateGuildID:   43,
-		PacketZCAckGuildPosInfo: -1,
-		PacketZCGuildMemberInfo: 106,
-		PacketZCGuildEmblem:     -1,
-		PacketZCChangeGuild:     12,
+		PacketZCAckGuildMenuInterface: 6,
+		PacketZCGuildInfo:             110,
+		PacketZCGuildInfo2:            114,
+		PacketZCResultMakeGuild:       3,
+		PacketZCAckReqJoinGuild:       3,
+		PacketZCReqJoinGuild:          30,
+		PacketZCGuildMembers:          -1,
+		PacketZCAckChangeMember:       -1,
+		PacketZCAckOpenMember:         2,
+		PacketZCAckLeaveGuild:         66,
+		PacketZCAckExpelGuildMember:   90,
+		PacketZCAckDisbandGuild:       6,
+		PacketZCGuildPositions:        -1,
+		PacketZCGuildSkillInfo:        -1,
+		PacketZCGuildBanList:          -1,
+		PacketZCGuildPosNames:         -1,
+		PacketZCGuildNotice:           182,
+		PacketZCUpdateGuildID:         43,
+		PacketZCAckGuildPosInfo:       -1,
+		PacketZCGuildMemberInfo:       106,
+		PacketZCGuildChat:             -1,
+		PacketZCGuildEmblem:           -1,
+		PacketZCChangeGuild:           12,
 	} {
 		if got := lengths[id]; got != want {
 			t.Fatalf("0x%04X receive length = %d, want %d", id, got, want)

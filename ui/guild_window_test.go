@@ -87,6 +87,216 @@ func TestGuildSkillLevelUpStaysPendingUntilConfirm(t *testing.T) {
 	}
 }
 
+func TestGuildRelationRowUsesRightClickForDeletion(t *testing.T) {
+	relation := session.GuildRelation{Relation: session.GuildRelationAlliance, GuildID: 10, Name: "Allies"}
+	window := &GuildWindow{}
+	row := &guildRelationRowWidget{
+		relation:  relation,
+		canDelete: true,
+		onDelete: func() {
+			window.action.DeleteRelation = &GuildRelationDelete{Relation: relation}
+		},
+	}
+	row.Event(widget.NewContext(), event.NewMouseEvent(event.MousePress, event.ButtonRight, 0, geometry.Point{}, geometry.Point{}, 0))
+	action := window.PopAction()
+	if action.DeleteRelation == nil || action.DeleteRelation.Relation != relation {
+		t.Fatalf("delete relation action = %+v", action)
+	}
+}
+
+func TestGuildMemberRowRightClickOpensClassicLifecycleMenu(t *testing.T) {
+	member := session.GuildMember{AccountID: 20, CharID: 21, CharName: "Alice"}
+	ctx := Context{
+		Session: &session.Session{AccountID: 10, CharID: 11},
+		ScreenW: 800,
+		ScreenH: 600,
+	}
+	window := &GuildWindow{}
+	guild := session.Guild{Right: 0x10}
+	mouse := event.NewMouseEvent(event.MousePress, event.ButtonRight, event.ButtonStateRight, geometry.Pt(4, 4), geometry.Pt(40, 40), 0)
+
+	if !window.handleGuildMemberRowEvent(ctx, guild, []session.GuildMember{member}, 0, mouse) {
+		t.Fatal("expellable guild member row did not handle right click")
+	}
+	if !window.memberContext.IsOpen() {
+		t.Fatal("expellable guild member row did not open context menu")
+	}
+}
+
+func TestGuildMasterCanOpenExpelMenuBeforeRightsArrive(t *testing.T) {
+	member := session.GuildMember{AccountID: 20, CharID: 21, CharName: "Alice"}
+	ctx := Context{
+		Session: &session.Session{AccountID: 10, CharID: 11},
+		ScreenW: 800,
+		ScreenH: 600,
+	}
+	window := &GuildWindow{}
+	mouse := event.NewMouseEvent(event.MousePress, event.ButtonRight, event.ButtonStateRight, geometry.Pt(4, 4), geometry.Pt(240, 180), 0)
+
+	if !window.handleGuildMemberRowEvent(ctx, session.Guild{IsMaster: true}, []session.GuildMember{member}, 0, mouse) {
+		t.Fatal("guild master could not open expel menu before rights arrived")
+	}
+	if !window.memberContext.IsOpen() {
+		t.Fatal("guild master expel menu did not open")
+	}
+}
+
+func TestGuildMemberMenuUsesLiveInputPositionLikePartyMenu(t *testing.T) {
+	member := session.GuildMember{AccountID: 20, CharID: 21, CharName: "Alice"}
+	inputState := input.NewState()
+	inputState.SetMousePosition(240, 180)
+	ctx := Context{
+		Input:   inputState,
+		Session: &session.Session{AccountID: 10, CharID: 11},
+		ScreenW: 800,
+		ScreenH: 600,
+	}
+	window := &GuildWindow{}
+	mouse := event.NewMouseEvent(event.MousePress, event.ButtonRight, event.ButtonStateRight, geometry.Pt(4, 4), geometry.Point{}, 0)
+
+	if !window.handleGuildMemberRowEvent(ctx, session.Guild{Right: guildMemberPermissionExpel}, []session.GuildMember{member}, 0, mouse) {
+		t.Fatal("guild member row did not handle right click")
+	}
+	if window.memberContext.x != 240 || window.memberContext.y != 180 {
+		t.Fatalf("member menu position = %d,%d, want live input position 240,180", window.memberContext.x, window.memberContext.y)
+	}
+}
+
+func TestGuildMemberTableRightClickOpensClassicLifecycleMenu(t *testing.T) {
+	member := session.GuildMember{AccountID: 20, CharID: 21, CharName: "Alice"}
+	ctx := Context{
+		Session: &session.Session{
+			AccountID: 10,
+			CharID:    11,
+			Guild: session.Guild{
+				Right:   guildMemberPermissionExpel,
+				Members: []session.GuildMember{member},
+			},
+		},
+		ScreenW: 800,
+		ScreenH: 600,
+	}
+	window := &GuildWindow{}
+	root := window.membersTab(ctx)
+	widgetCtx := widget.NewContext()
+	root.Layout(widgetCtx, geometry.Tight(geometry.Sz(guildWindowWidth, 200)))
+	position := geometry.Pt(180, guildTableHeaderH+guildTableRowH/2)
+
+	if !root.Event(widgetCtx, event.NewMouseEvent(event.MousePress, event.ButtonRight, event.ButtonStateRight, position, position, 0)) {
+		t.Fatal("guild member table did not consume right click")
+	}
+	if !window.memberContext.IsOpen() {
+		t.Fatal("guild member table did not open context menu")
+	}
+}
+
+func TestPublishedGuildMemberTableRightClickOpensClassicLifecycleMenu(t *testing.T) {
+	member := session.GuildMember{AccountID: 20, CharID: 21, CharName: "Alice"}
+	inputState := input.NewState()
+	manager := NewManager()
+	ctx := Context{
+		Input: inputState,
+		Session: &session.Session{
+			AccountID: 10,
+			CharID:    11,
+			Guild: session.Guild{
+				Right:      guildMemberPermissionExpel,
+				MenuAccess: 0x01,
+				Members:    []session.GuildMember{member},
+			},
+		},
+		UIManager: manager,
+		ScreenW:   800,
+		ScreenH:   600,
+	}
+	window := &GuildWindow{tab: guildWindowTabMembers}
+	window.OpenWindow(ctx)
+	manager.root.Layout(widget.NewContext(), geometry.Tight(geometry.Sz(800, 600)))
+	position := geometry.Pt(
+		float32(window.x+8),
+		float32(window.y+ROWindowTitleHeight+guildWindowTabHeight+2)+guildTableHeaderH+guildTableRowH/2,
+	)
+	inputState.SetMousePosition(int(position.X), int(position.Y))
+	inputState.SetMouseButton(input.MouseButtonRight, true)
+
+	if !manager.root.Event(widget.NewContext(), event.NewMouseEvent(event.MousePress, event.ButtonRight, event.ButtonStateRight, position, position, 0)) {
+		t.Fatal("published guild member table did not consume right click")
+	}
+	if !window.memberContext.IsOpen() {
+		t.Fatal("published guild member table did not open context menu")
+	}
+}
+
+func TestGuildMasterCannotLeaveThroughMemberMenu(t *testing.T) {
+	member := session.GuildMember{AccountID: 10, CharID: 11, CharName: "Leader"}
+	ctx := Context{Session: &session.Session{AccountID: 10, CharID: 11}, ScreenW: 800, ScreenH: 600}
+	window := &GuildWindow{}
+	mouse := event.NewMouseEvent(event.MousePress, event.ButtonRight, event.ButtonStateRight, geometry.Pt(4, 4), geometry.Pt(40, 40), 0)
+
+	if window.handleGuildMemberRowEvent(ctx, session.Guild{IsMaster: true, Right: 0x10}, []session.GuildMember{member}, 0, mouse) {
+		t.Fatal("guild master's own row should not offer a lifecycle context menu")
+	}
+	if window.memberContext.IsOpen() {
+		t.Fatal("guild master leave context menu opened")
+	}
+}
+
+func TestGuildWindowSnapshotIncludesLocalRights(t *testing.T) {
+	s := &session.Session{Guild: session.Guild{Right: 1}}
+	before := guildWindowSnapshot(s)
+	s.Guild.Right = 0x10
+	if after := guildWindowSnapshot(s); after == before {
+		t.Fatal("guild rights change did not invalidate guild window snapshot")
+	}
+}
+
+func TestGuildWindowSnapshotIncludesMenuAccess(t *testing.T) {
+	s := &session.Session{Guild: session.Guild{MenuAccess: 0x57}}
+	before := guildWindowSnapshot(s)
+	s.Guild.MenuAccess = 0xD7
+	if after := guildWindowSnapshot(s); after == before {
+		t.Fatal("guild menu access change did not invalidate guild window snapshot")
+	}
+}
+
+func TestGuildWindowTabsUseServerAccessMask(t *testing.T) {
+	member := &session.Session{Guild: session.Guild{MenuAccess: 0x57}}
+	for _, tab := range []guildWindowTab{guildWindowTabInfo, guildWindowTabMembers, guildWindowTabPositions, guildWindowTabSkills, guildWindowTabHistory} {
+		if !guildWindowTabAllowed(member, tab) {
+			t.Fatalf("member access mask rejected tab %d", tab)
+		}
+	}
+	if guildWindowTabAllowed(member, guildWindowTabNotice) {
+		t.Fatal("member access mask allowed the notice tab")
+	}
+
+	master := &session.Session{Guild: session.Guild{MenuAccess: 0xD7}}
+	if !guildWindowTabAllowed(master, guildWindowTabNotice) {
+		t.Fatal("master access mask rejected the notice tab")
+	}
+}
+
+func TestGuildWindowReturnsToInfoWhenAccessRevokesCurrentTab(t *testing.T) {
+	ctx := Context{Session: &session.Session{Guild: session.Guild{MenuAccess: 0x57}}}
+	window := &GuildWindow{tab: guildWindowTabNotice}
+
+	if !window.ensureAuthorizedTab(ctx) {
+		t.Fatal("unauthorized tab was not changed")
+	}
+	if window.tab != guildWindowTabInfo {
+		t.Fatalf("guild tab = %d, want info", window.tab)
+	}
+}
+
+func TestGuildWindowSnapshotIncludesRelations(t *testing.T) {
+	s := &session.Session{Guild: session.Guild{Relations: []session.GuildRelation{{Relation: 0, GuildID: 10, Name: "Allies"}}}}
+	before := guildWindowSnapshot(s)
+	s.Guild.Relations[0].Name = "New Allies"
+	if after := guildWindowSnapshot(s); after == before {
+		t.Fatal("guild relation change did not invalidate guild window snapshot")
+	}
+}
+
 func TestGuildMemberPositionChangeStaysPendingUntilConfirm(t *testing.T) {
 	s := &session.Session{Guild: session.Guild{
 		IsMaster: true,

@@ -13,6 +13,13 @@ import (
 const skillInfoEntryLen = 37
 const skillGroundMessageLen = 80
 
+const (
+	PacketZCAutoSpellList   uint16 = 0x01CD
+	PacketCZSelectAutoSpell uint16 = 0x01CE
+
+	autoSpellChoiceCount = 7
+)
+
 type SkillInfo struct {
 	ID         uint16
 	Type       uint32
@@ -33,6 +40,10 @@ type SkillInfoUpdate struct {
 
 type AutoRunSkill struct {
 	Skill SkillInfo
+}
+
+type AutoSpellList struct {
+	SkillIDs []uint16
 }
 
 type SkillNoDamageNotify struct {
@@ -148,6 +159,29 @@ func ParseAutoRunSkill(packet Packet) (AutoRunSkill, bool, error) {
 		return AutoRunSkill{}, false, fmt.Errorf("ZC_AUTORUN_SKILL too short: %d", len(packet.Data))
 	}
 	return AutoRunSkill{Skill: parseSkillInfoEntry(packet.Data[2:39], 0)}, true, nil
+}
+
+func ParseAutoSpellList(packet Packet) (AutoSpellList, bool, error) {
+	if packet.ID != PacketZCAutoSpellList {
+		return AutoSpellList{}, false, nil
+	}
+	const packetLen = 2 + autoSpellChoiceCount*4
+	if len(packet.Data) < packetLen {
+		return AutoSpellList{}, true, fmt.Errorf("ZC_AUTOSPELLLIST too short: %d", len(packet.Data))
+	}
+	skillIDs := make([]uint16, 0, autoSpellChoiceCount)
+	for i := 0; i < autoSpellChoiceCount; i++ {
+		offset := 2 + i*4
+		skillID := binary.LittleEndian.Uint32(packet.Data[offset : offset+4])
+		if skillID == 0 {
+			continue
+		}
+		if skillID > uint32(^uint16(0)) {
+			return AutoSpellList{}, true, fmt.Errorf("ZC_AUTOSPELLLIST invalid skill id: %d", skillID)
+		}
+		skillIDs = append(skillIDs, uint16(skillID))
+	}
+	return AutoSpellList{SkillIDs: skillIDs}, true, nil
 }
 
 func ParseSkillNoDamageNotify(packet Packet) (SkillNoDamageNotify, bool, error) {
@@ -328,6 +362,13 @@ func BuildSkillLevelUpPacket(skillID uint16) []byte {
 func BuildRememberWarpPointPacket() []byte {
 	packet := make([]byte, 2)
 	binary.LittleEndian.PutUint16(packet[0:2], 0x011D)
+	return packet
+}
+
+func BuildSelectAutoSpellPacket(skillID uint16) []byte {
+	packet := make([]byte, 6)
+	binary.LittleEndian.PutUint16(packet[0:2], PacketCZSelectAutoSpell)
+	binary.LittleEndian.PutUint32(packet[2:6], uint32(skillID))
 	return packet
 }
 

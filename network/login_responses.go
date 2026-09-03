@@ -16,9 +16,9 @@ type AccountAcceptLogin struct {
 	CharServer []CharServer
 }
 
-type AccountLoginRefuse struct {
-	Code    uint8
-	Message string
+type AccountRefuseLogin struct {
+	ErrorCode   uint8
+	UnblockTime string
 }
 
 type Character struct {
@@ -80,20 +80,6 @@ type CharServer struct {
 	Property  uint16
 }
 
-func ParseAccountLoginRefuse(packet Packet) (AccountLoginRefuse, error) {
-	if packet.ID != 0x006A {
-		return AccountLoginRefuse{}, fmt.Errorf("unexpected packet 0x%04X", packet.ID)
-	}
-	if len(packet.Data) < 3 {
-		return AccountLoginRefuse{}, fmt.Errorf("AC_REFUSE_LOGIN too short: %d", len(packet.Data))
-	}
-	message := ""
-	if len(packet.Data) > 3 {
-		message = fixedString(packet.Data[3:])
-	}
-	return AccountLoginRefuse{Code: packet.Data[2], Message: message}, nil
-}
-
 func ParseAccountAcceptLogin(packet Packet) (AccountAcceptLogin, error) {
 	if packet.ID != 0x0069 {
 		return AccountAcceptLogin{}, fmt.Errorf("unexpected packet 0x%04X", packet.ID)
@@ -140,6 +126,20 @@ func ParseAccountAcceptLogin(packet Packet) (AccountAcceptLogin, error) {
 	}
 
 	return out, nil
+}
+
+func ParseAccountRefuseLogin(packet Packet) (AccountRefuseLogin, error) {
+	if packet.ID != 0x006A {
+		return AccountRefuseLogin{}, fmt.Errorf("unexpected packet 0x%04X", packet.ID)
+	}
+	if len(packet.Data) < 23 {
+		return AccountRefuseLogin{}, fmt.Errorf("AC_REFUSE_LOGIN too short: %d", len(packet.Data))
+	}
+
+	return AccountRefuseLogin{
+		ErrorCode:   packet.Data[2],
+		UnblockTime: fixedString(packet.Data[3:23]),
+	}, nil
 }
 
 func ParseCharList(packet Packet) (CharList, error) {

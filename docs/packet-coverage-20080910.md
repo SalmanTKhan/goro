@@ -277,7 +277,8 @@ email check.
 | `0x0147` | S->C | referenced | `0x0147` | `39` | `-` | packet.go, skill_packets.go |
 | `0x0149` | C->S | missing | `0x0149` | `9` | `clif_parse_GMReqNoChat` | - |
 | `0x014A` | S->C | referenced | `0x014a` | `6` | `-` | packet.go |
-| `0x014D` | C->S | referenced | `0x014d` | `2` | `clif_parse_GuildCheckMaster` | packet.go |
+| `0x014D` | C->S | implemented | `0x014d` | `2` | `clif_parse_GuildCheckMaster` | guild_packets.go |
+| `0x014E` | S->C | implemented | `HEADER_ZC_ACK_GUILD_MENUINTERFACE` | `6` | `-` | guild_packets.go, packet.go |
 | `0x014F` | C->S | referenced | `0x014f` | `6` | `clif_parse_GuildRequestInfo` | guild_packets.go, packet.go |
 | `0x0150` | S->C | referenced | `0x0150` | `110` | `-` | guild_packets.go, packet.go |
 | `0x0151` | C->S | referenced | `0x0151` | `6` | `clif_parse_GuildRequestEmblem` | guild_packets.go, packet.go |
@@ -287,10 +288,13 @@ email check.
 | `0x0155` | C->S | referenced | `HEADER_CZ_REQ_CHANGE_MEMBERPOS` | `-1` | `clif_parse_GuildChangeMemberPosition` | guild_packets.go, packet.go |
 | `0x0157` | S->C | referenced | `0x0157` | `6` | `-` | packet.go |
 | `0x0158` | S->C | referenced | `0x0158` | `-1` | `-` | guild_packets.go, packet.go |
-| `0x0159` | C->S | referenced | `HEADER_CZ_REQ_LEAVE_GUILD` | `sizeof( PACKET_CZ_REQ_LEAVE_GUILD )` | `clif_parse_GuildLeave` | packet.go |
-| `0x015B` | C->S | referenced | `HEADER_CZ_REQ_BAN_GUILD` | `sizeof( PACKET_CZ_REQ_BAN_GUILD )` | `clif_parse_GuildExpulsion` | packet.go |
-| `0x015D` | C->S | referenced | `HEADER_CZ_REQ_DISORGANIZE_GUILD` | `sizeof( PACKET_CZ_REQ_DISORGANIZE_GUILD )` | `clif_parse_GuildBreak` | packet.go |
-| `0x015F` | S->C | untracked | `0x015f` | `42` | `-` | - |
+| `0x0159` | C->S | implemented | `HEADER_CZ_REQ_LEAVE_GUILD` | `sizeof( PACKET_CZ_REQ_LEAVE_GUILD )` | `clif_parse_GuildLeave` | guild_packets.go |
+| `0x015A` | S->C | implemented | `HEADER_ZC_ACK_LEAVE_GUILD` | `66` | `-` | guild_packets.go |
+| `0x015B` | C->S | implemented | `HEADER_CZ_REQ_BAN_GUILD` | `sizeof( PACKET_CZ_REQ_BAN_GUILD )` | `clif_parse_GuildExpulsion` | guild_packets.go |
+| `0x015C` | S->C | implemented | `HEADER_ZC_ACK_BAN_GUILD` | `90` | `-` | guild_packets.go |
+| `0x015D` | C->S | implemented | `HEADER_CZ_REQ_DISORGANIZE_GUILD` | `sizeof( PACKET_CZ_REQ_DISORGANIZE_GUILD )` | `clif_parse_GuildBreak` | guild_packets.go, console.go |
+| `0x015E` | S->C | implemented | `HEADER_ZC_ACK_DISORGANIZE_GUILD_RESULT` | `6` | `-` | guild_packets.go |
+| `0x015F` | S->C | referenced | `0x015f` | `42` | `-` | packet.go |
 | `0x0161` | C->S | implemented | `0x0161` | `-1` | `clif_parse_GuildChangePositionInfo` | guild_packets.go |
 | `0x0164` | S->C | untracked | `0x0164` | `-1` | `-` | - |
 | `0x0165` | C->S | referenced | `0x0165` | `30` | `clif_parse_CreateGuild` | guild_packets.go |
@@ -312,6 +316,7 @@ email check.
 | `0x017B` | S->C | referenced | `0x017b` | `-1` | `-` | packet.go |
 | `0x017C` | C->S | referenced | `HEADER_CZ_REQ_ITEMCOMPOSITION` | `sizeof( PACKET_CZ_REQ_ITEMCOMPOSITION )` | `clif_parse_InsertCard` | item_packets.go |
 | `0x017E` | C->S | referenced | `0x017e` | `-1` | `clif_parse_GuildMessage` | guild_packets.go |
+| `0x017F` | S->C | implemented | `HEADER_ZC_GUILD_CHAT` | `-1` | `-` | guild_packets.go, packet.go |
 | `0x0180` | C->S | missing | `0x0180` | `6` | `clif_parse_GuildOpposition` | - |
 | `0x0182` | S->C | untracked | `0x0182` | `106` | `-` | - |
 | `0x0183` | C->S | missing | `0x0183` | `10` | `clif_parse_GuildDelAlliance` | - |
@@ -370,7 +375,8 @@ email check.
 | `0x01CA` | S->C | referenced | `0x01ca` | `3` | `-` | packet.go |
 | `0x01CB` | S->C | untracked | `0x01cb` | `9` | `-` | - |
 | `0x01CC` | S->C | untracked | `0x01cc` | `9` | `-` | - |
-| `0x01CE` | C->S | missing | `HEADER_CZ_SELECTAUTOSPELL` | `sizeof( PACKET_CZ_SELECTAUTOSPELL )` | `clif_parse_AutoSpell` | - |
+| `0x01CD` | S->C | implemented | `0x01cd` | `30` | `-` | skill_packets.go, packet.go |
+| `0x01CE` | C->S | implemented | `HEADER_CZ_SELECTAUTOSPELL` | `sizeof( PACKET_CZ_SELECTAUTOSPELL )` | `clif_parse_AutoSpell` | skill_packets.go |
 | `0x01CF` | S->C | referenced | `0x01cf` | `28` | `-` | packet.go |
 | `0x01D0` | S->C | referenced | `0x01d0` | `8` | `-` | packet.go |
 | `0x01D5` | C->S | implemented | `HEADER_CZ_INPUT_EDITDLGSTR` | `-1` | `clif_parse_NpcStringInput` | npc_packets.go |
@@ -478,7 +484,7 @@ email check.
 | `0x0251` | C->S | missing | `HEADER_CZ_AUCTION_ITEM_SEARCH` | `sizeof( PACKET_CZ_AUCTION_ITEM_SEARCH )` | `clif_parse_Auction_search` | - |
 | `0x0252` | S->C | untracked | `0x0252` | `-1` | `-` | - |
 | `0x0253` | S->C | implemented | `0x0253` | `3` | `-` | taekwon_packets.go, packet.go |
-| `0x0254` | C->S | missing | `0x0254` | `3` | `clif_parse_FeelSaveOk` | - |
+| `0x0254` | C->S | implemented | `0x0254` | `3` | `clif_parse_FeelSaveOk` | taekwon_packets.go |
 | `0x0255` | S->C | untracked | `0x0255` | `5` | `-` | - |
 | `0x0256` | S->C | untracked | `0x0256` | `5` | `-` | - |
 | `0x0257` | S->C | untracked | `0x0257` | `8` | `-` | - |

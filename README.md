@@ -144,6 +144,7 @@ Currently implemented (not a claim of complete reference-client parity):
  * Battle and Gameplay
    * Enemies
    * Classic PvP map targeting and rank counter
+   * [War of Emperium (2008 FE/SE client behavior)](docs/woe-20080910.md)
    * Path finding
    * Continuous held-click walking
    * Drops
@@ -196,6 +197,7 @@ Currently implemented (not a claim of complete reference-client parity):
    * Guilds
      * Creation and invitations
      * Member and position management
+     * Leaving, member expulsion, and guild disbanding
      * Guild skills
      * Notices and expulsion history
      * Emblem selection
@@ -234,7 +236,7 @@ Currently implemented (not a claim of complete reference-client parity):
    * Button bar
    * Multi-row shortcuts bar with classic key bindings
    * Console
-   * Minimap with player and NPC markers
+   * Minimap with player, NPC, party, and guild markers
    * Items with vertical category tabs
    * Equipment
    * Option

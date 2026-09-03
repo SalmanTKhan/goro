@@ -34,12 +34,26 @@ const (
 )
 
 func (p MapProperty) PlayerCombatEnabled() bool {
+	return p.IsPvP() || p.IsGvG()
+}
+
+func (p MapProperty) IsPvP() bool {
 	switch p {
 	case MapPropertyFreePvPZone, MapPropertyEventPvPZone, MapPropertyPvPServerZone:
 		return true
 	default:
 		return false
 	}
+}
+
+// IsGvG reports the legacy 2008 WoE map property. PvP and GvG deliberately
+// remain separate because only PvP maps have the client-side ranking display.
+func (p MapProperty) IsGvG() bool {
+	return p == MapPropertyAgitZone
+}
+
+func (p MapProperty) IsSiege() bool {
+	return p.IsGvG()
 }
 
 func (p MapProperty) PvPRankingEnabled() bool {
@@ -62,6 +76,7 @@ type FloorItem struct {
 type Actor struct {
 	ID               uint32
 	Name             string
+	PartyName        string
 	GuildID          uint32
 	EmblemVersion    uint32
 	GuildName        string
@@ -168,6 +183,9 @@ func (w *World) UpsertActor(actor Actor) {
 	if existing, ok := w.Actors[actor.ID]; ok {
 		if actor.Name == "" {
 			actor.Name = existing.Name
+		}
+		if actor.PartyName == "" {
+			actor.PartyName = existing.PartyName
 		}
 		if actor.GuildID == 0 {
 			actor.GuildID = existing.GuildID

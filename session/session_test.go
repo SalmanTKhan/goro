@@ -22,7 +22,8 @@ func TestSelectCharacterClearsCharacterScopedState(t *testing.T) {
 	s.SnapTargets = true
 	s.SnapItems = true
 	s.Whisper = WhisperSettings{OpenFriends: true, Configured: true}
-	s.CharServers = []CharServer{{Name: "local"}}
+	s.CharServers = []CharServer{{Name: "local"}, {Name: "internet"}}
+	s.CharServerIndex = 1
 	s.Characters = []Character{{ID: 150000, Name: "Old"}, {ID: 150001, Name: "New"}}
 
 	s.AttackRange = 14
@@ -72,7 +73,7 @@ func TestSelectCharacterClearsCharacterScopedState(t *testing.T) {
 	if !s.NoShift || !s.NoCtrl || !s.LessEffects || !s.HomunculusCustomAI || !s.HomunculusAggressive || !s.MercenaryCustomAI || !s.MercenaryAggressive || !s.SnapTargets || !s.SnapItems || !s.Whisper.Configured {
 		t.Fatalf("client settings were not preserved: %+v", s)
 	}
-	if len(s.CharServers) != 1 || len(s.Characters) != 2 {
+	if len(s.CharServers) != 2 || s.CharServerIndex != 1 || len(s.Characters) != 2 {
 		t.Fatalf("character-select state was not preserved: servers=%+v characters=%+v", s.CharServers, s.Characters)
 	}
 	if s.CharID != 150001 || s.Selected.ID != 150001 || s.Selected.Name != "New" {

@@ -408,6 +408,51 @@ func TestLoginModeSendsCharServerPingAfterInterval(t *testing.T) {
 	}
 }
 
+func TestLoginModeKeepsLoginServerAliveDuringServiceSelection(t *testing.T) {
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		conn, _ := listener.Accept()
+		accepted <- conn
+	}()
+	netClient := network.NewClient(20080910, false)
+	defer netClient.Close()
+	address := listener.Addr().(*net.TCPAddr)
+	if err := netClient.Connect(context.Background(), address.IP.String(), address.Port); err != nil {
+		t.Fatal(err)
+	}
+	serverConn := <-accepted
+	if serverConn == nil {
+		t.Fatal("server did not accept test client")
+	}
+	defer serverConn.Close()
+	mode := NewLoginMode()
+	mode.username = "Kivutar"
+	mode.accountStep = loginAccountCharacterService
+	now := time.Unix(100, 0)
+	mode.enableLoginServerPing(now.Add(-loginServerPingInterval))
+
+	mode.maybeSendLoginServerPing(client.Context{Network: netClient}, now)
+
+	if err := serverConn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	packet := make([]byte, 26)
+	if _, err := io.ReadFull(serverConn, packet); err != nil {
+		t.Fatal(err)
+	}
+	if binary.LittleEndian.Uint16(packet[:2]) != network.PacketCAConnectInfoChanged {
+		t.Fatalf("login keepalive opcode = 0x%04X", binary.LittleEndian.Uint16(packet[:2]))
+	}
+	if got := strings.TrimRight(string(packet[2:]), "\x00"); got != "Kivutar" {
+		t.Fatalf("login keepalive username = %q", got)
+	}
+}
+
 func TestCharacterCreateDefaultStatsAreServerValid(t *testing.T) {
 	state := defaultCharCreateState(3)
 	if state.slot != 3 {
@@ -546,6 +591,34 @@ func TestLoginEscapeOpensQuitConfirmation(t *testing.T) {
 	}
 	if !mode.quitConfirm.IsOpen() {
 		t.Fatal("quit confirmation did not open")
+	}
+}
+
+func TestCredentialsEscapeReturnsToXMLConnectionSelector(t *testing.T) {
+	mode := NewLoginMode()
+	mode.accountStep = loginAccountCredentials
+	inputState := input.NewState()
+	ctx := client.Context{
+		Input: inputState,
+		Resources: loginTestResources(
+			res.Connection{Display: "Local"},
+			res.Connection{Display: "Internet"},
+		),
+		UIManager: &loginTestUIManager{},
+		ScreenW:   800,
+		ScreenH:   600,
+	}
+	mode.updateLoginWindow(ctx)
+	inputState.SetKey(input.KeyEscape, true)
+
+	if !mode.updatePhaseEscape(ctx, time.Unix(20, 0)) {
+		t.Fatal("escape was not consumed by credentials")
+	}
+	if mode.quitConfirm.IsOpen() {
+		t.Fatal("credentials escape opened quit confirmation instead of the server selector")
+	}
+	if mode.accountStep != loginAccountConnection || mode.serviceWindow == nil || mode.loginWindow != nil {
+		t.Fatal("credentials escape did not restore the XML connection selector")
 	}
 }
 
@@ -713,6 +786,354 @@ func TestLoginWindowUpdatesWithoutDiscoveredServers(t *testing.T) {
 	if mode.loginWindow == nil {
 		t.Fatal("login window was not updated without discovered servers")
 	}
+	if mode.status != "no login servers discovered" {
+		t.Fatalf("login status = %q, want no discovered servers", mode.status)
+	}
+}
+
+func TestMultipleLoginConnectionsShowServerWindowBeforeLogin(t *testing.T) {
+	mode := NewLoginMode()
+	ctx := client.Context{
+		Resources: loginTestResources(
+			res.Connection{Display: "Local", Address: "127.0.0.1", Port: 6900},
+			res.Connection{Display: "Internet", Address: "example.test", Port: 6900},
+		),
+		UIManager: &loginTestUIManager{},
+		ScreenW:   1280,
+		ScreenH:   720,
+	}
+
+	mode.updateAccountWindow(ctx)
+
+	if mode.serviceWindow == nil || mode.loginWindow != nil {
+		t.Fatal("multiple XML connections did not open the server selector first")
+	}
+	if mode.accountStep != loginAccountConnection {
+		t.Fatalf("account step = %d, want connection selection", mode.accountStep)
+	}
+}
+
+func TestSingleLoginConnectionOpensCredentialsDirectly(t *testing.T) {
+	mode := NewLoginMode()
+	ctx := client.Context{
+		Resources: loginTestResources(
+			res.Connection{Display: "Local", Address: "127.0.0.1", Port: 6900},
+		),
+		UIManager: &loginTestUIManager{},
+		ScreenW:   1280,
+		ScreenH:   720,
+	}
+
+	mode.updateAccountWindow(ctx)
+
+	if mode.loginWindow == nil || mode.serviceWindow != nil {
+		t.Fatal("single XML connection did not skip directly to credentials")
+	}
+}
+
+func TestSelectingLoginConnectionOpensCredentialsForThatServer(t *testing.T) {
+	mode := NewLoginMode()
+	ctx := client.Context{
+		Resources: loginTestResources(
+			res.Connection{Display: "Local", Address: "127.0.0.1", Port: 6900},
+			res.Connection{Display: "Internet", Address: "example.test", Port: 6900},
+		),
+		UIManager: &loginTestUIManager{},
+		ScreenW:   1280,
+		ScreenH:   720,
+	}
+	mode.updateAccountWindow(ctx)
+
+	mode.selectLoginServer(ctx, 1)
+
+	if mode.selectedLoginServer != 1 {
+		t.Fatalf("selected login server = %d, want 1", mode.selectedLoginServer)
+	}
+	if mode.accountStep != loginAccountCredentials || mode.loginWindow == nil || mode.serviceWindow != nil {
+		t.Fatal("server selection did not transition to credentials")
+	}
+	connection, ok := mode.selectedLoginConnection(ctx)
+	if !ok || connection.Address != "example.test" {
+		t.Fatalf("selected connection = %+v, %t", connection, ok)
+	}
+}
+
+func TestLoginUsesSelectedConnectionLangType(t *testing.T) {
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	address := listener.Addr().(*net.TCPAddr)
+	netClient := network.NewClient(20080910, false)
+	defer netClient.Close()
+	mode := NewLoginMode()
+	mode.username = "Kivutar"
+	mode.password = "secret"
+	ctx := client.Context{
+		Network: netClient,
+		Session: &session.Session{},
+	}
+
+	mode.connectAndMaybeLogin(ctx, res.Connection{
+		Address:  address.IP.String(),
+		Port:     address.Port,
+		Version:  23,
+		LangType: 1,
+	}, false)
+
+	if tcpListener, ok := listener.(*net.TCPListener); ok {
+		if err := tcpListener.SetDeadline(time.Now().Add(time.Second)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	serverConn, err := listener.Accept()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer serverConn.Close()
+	if err := serverConn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	packet := make([]byte, 55)
+	if _, err := io.ReadFull(serverConn, packet); err != nil {
+		t.Fatal(err)
+	}
+	if packet[54] != 1 {
+		t.Fatalf("CA_LOGIN client type = %d, want 1", packet[54])
+	}
+}
+
+func TestLoginIgnoresRepeatedSubmissionWhilePending(t *testing.T) {
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	address := listener.Addr().(*net.TCPAddr)
+	netClient := network.NewClient(20080910, false)
+	defer netClient.Close()
+	mode := NewLoginMode()
+	mode.username = "Kivutar"
+	mode.password = "wrong"
+	ctx := client.Context{
+		Network: netClient,
+		Session: &session.Session{},
+	}
+	connection := res.Connection{
+		Address: address.IP.String(),
+		Port:    address.Port,
+	}
+
+	mode.connectAndMaybeLogin(ctx, connection, false)
+	mode.connectAndMaybeLogin(ctx, connection, false)
+
+	tcpListener := listener.(*net.TCPListener)
+	if err := tcpListener.SetDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	serverConn, err := listener.Accept()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer serverConn.Close()
+	if err := serverConn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.ReadFull(serverConn, make([]byte, 55)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := tcpListener.SetDeadline(time.Now().Add(100 * time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	secondConn, err := listener.Accept()
+	if err == nil {
+		secondConn.Close()
+		t.Fatal("repeated login submission opened a second connection")
+	}
+	if netErr, ok := err.(net.Error); !ok || !netErr.Timeout() {
+		t.Fatalf("second accept error = %v, want timeout", err)
+	}
+	if !mode.loginPending {
+		t.Fatal("login attempt is not marked pending")
+	}
+}
+
+func TestLoginClientTypeRejectsValuesOutsidePacketRange(t *testing.T) {
+	for _, langType := range []int{-1, 256} {
+		if got := loginClientType(langType); got != 0 {
+			t.Fatalf("loginClientType(%d) = %d, want 0", langType, got)
+		}
+	}
+	if got := loginClientType(240); got != 240 {
+		t.Fatalf("loginClientType(240) = %d, want 240", got)
+	}
+}
+
+func TestAutologinSkipsXMLConnectionSelector(t *testing.T) {
+	mode := NewLoginMode()
+	ctx := client.Context{
+		Config: config.Config{Login: config.LoginConfig{AutoLogin: true}},
+		Resources: loginTestResources(
+			res.Connection{Display: "Local"},
+			res.Connection{Display: "Internet"},
+		),
+		UIManager: &loginTestUIManager{},
+		ScreenW:   1280,
+		ScreenH:   720,
+	}
+
+	mode.updateAccountWindow(ctx)
+
+	if mode.loginWindow == nil || mode.serviceWindow != nil {
+		t.Fatal("autologin did not bypass the XML connection selector")
+	}
+}
+
+func TestAccountAcceptShowsCharacterServiceWithPlayerCount(t *testing.T) {
+	manager := &loginTestUIManager{}
+	mode := NewLoginMode()
+	ctx := client.Context{
+		Resources: &res.Manager{},
+		Session:   &session.Session{},
+		UIManager: manager,
+		ScreenW:   1280,
+		ScreenH:   720,
+	}
+
+	mode.applyAccountAcceptLogin(ctx, network.AccountAcceptLogin{
+		AccountID: 2000000,
+		AuthCode:  123,
+		Sex:       1,
+		CharServer: []network.CharServer{
+			{Name: "Chaos", Address: "127.0.0.1", Port: 6121, UserCount: 42},
+		},
+	})
+
+	if mode.accountStep != loginAccountCharacterService {
+		t.Fatalf("account step = %d, want character service", mode.accountStep)
+	}
+	if mode.serviceWindow == nil || mode.loginWindow != nil {
+		t.Fatal("account acceptance did not replace credentials with the character-service list")
+	}
+	if len(ctx.Session.CharServers) != 1 || ctx.Session.CharServers[0].UserCount != 42 {
+		t.Fatalf("character servers = %+v", ctx.Session.CharServers)
+	}
+	if len(manager.overlays) != 1 {
+		t.Fatalf("login overlays = %d, want character-service window only", len(manager.overlays))
+	}
+}
+
+func TestCharacterServiceNameMatchesClassicServerList(t *testing.T) {
+	tests := []struct {
+		name   string
+		server session.CharServer
+		want   string
+	}{
+		{name: "players", server: session.CharServer{Name: "Chaos", UserCount: 42}, want: "Chaos (42)"},
+		{name: "maintenance", server: session.CharServer{Name: "Chaos", UserCount: 42, State: 1}, want: "Chaos (On maintenance)"},
+		{name: "new", server: session.CharServer{Name: "Chaos", UserCount: 42, Property: 1}, want: "New Chaos (42)"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := characterServiceName(nil, test.server); got != test.want {
+				t.Fatalf("character service label = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestCharacterServiceCancelReturnsToCredentials(t *testing.T) {
+	mode := NewLoginMode()
+	ctx := client.Context{
+		Resources: &res.Manager{},
+		Session: &session.Session{CharServers: []session.CharServer{
+			{Name: "Chaos", UserCount: 42},
+		}},
+		UIManager: &loginTestUIManager{},
+		ScreenW:   1280,
+		ScreenH:   720,
+	}
+	mode.showCharacterServiceSelection(ctx)
+
+	mode.cancelCharacterServiceSelection(ctx)
+
+	if mode.accountStep != loginAccountCredentials {
+		t.Fatalf("account step = %d, want credentials", mode.accountStep)
+	}
+	if mode.serviceWindow != nil || mode.loginWindow == nil {
+		t.Fatal("character-service cancel did not restore credentials")
+	}
+}
+
+func TestCharacterServiceSelectionConnectsChosenServer(t *testing.T) {
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	address := listener.Addr().(*net.TCPAddr)
+	netClient := network.NewClient(20080910, false)
+	defer netClient.Close()
+	mode := NewLoginMode()
+	ctx := client.Context{
+		Network:   netClient,
+		Resources: &res.Manager{},
+		Session: &session.Session{
+			AccountID: 0x11223344,
+			AuthCode:  0x55667788,
+			UserLevel: 3,
+			Sex:       1,
+			CharServers: []session.CharServer{
+				{Name: "Wrong", Address: "127.0.0.1", Port: 1},
+				{Name: "Chaos", Address: address.IP.String(), Port: uint16(address.Port)},
+			},
+		},
+		UIManager: &loginTestUIManager{},
+		ScreenW:   1280,
+		ScreenH:   720,
+	}
+	mode.updateLoginWindow(ctx)
+
+	mode.selectCharacterService(ctx, 1, false)
+
+	if mode.accountStep != loginAccountCharacterConnecting {
+		t.Fatalf("account step = %d, want character connection", mode.accountStep)
+	}
+	if ctx.Session.CharServerIndex != 1 {
+		t.Fatalf("selected character server = %d, want 1", ctx.Session.CharServerIndex)
+	}
+	if mode.loginWindow != nil || mode.serviceWindow != nil {
+		t.Fatal("account windows remained visible while connecting to the character server")
+	}
+	if tcpListener, ok := listener.(*net.TCPListener); ok {
+		if err := tcpListener.SetDeadline(time.Now().Add(time.Second)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	serverConn, err := listener.Accept()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer serverConn.Close()
+	if err := serverConn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	packet := make([]byte, 17)
+	if _, err := io.ReadFull(serverConn, packet); err != nil {
+		t.Fatal(err)
+	}
+	if binary.LittleEndian.Uint16(packet[:2]) != network.PacketCAEnter {
+		t.Fatalf("char-server packet opcode = 0x%04X", binary.LittleEndian.Uint16(packet[:2]))
+	}
+	if binary.LittleEndian.Uint32(packet[2:6]) != ctx.Session.AccountID {
+		t.Fatalf("char-server packet account = 0x%08X", binary.LittleEndian.Uint32(packet[2:6]))
+	}
+}
+
+func loginTestResources(connections ...res.Connection) *res.Manager {
+	return &res.Manager{ClientInfo: res.ClientInfo{Connections: connections}}
 }
 
 type fakeCursorUIApp struct {
@@ -768,7 +1189,7 @@ func TestLoginWindowPublishesOnlyWhenWidgetChanges(t *testing.T) {
 
 	mode.updateLoginWindow(ctx)
 	mode.updateLoginWindow(ctx)
-	mode.updateFormInput(ctx)
+	mode.updateAccountInput(ctx)
 
 	if manager.adds != 1 {
 		t.Fatalf("login window AddOverlay calls = %d, want 1", manager.adds)

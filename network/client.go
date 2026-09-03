@@ -144,6 +144,10 @@ func (c *Client) SendCharServerEnter(accountID, authCode, userLevel uint32, sex 
 	return c.Send(packet)
 }
 
+func (c *Client) SendLoginServerKeepalive(username string) error {
+	return c.Send(BuildLoginServerKeepalivePacket(username))
+}
+
 func (c *Client) SendSelectCharacter(slot uint8) error {
 	return c.Send(BuildSelectCharacterPacket(slot))
 }
@@ -417,6 +421,17 @@ func (c *Client) SendRememberWarpPoint() error {
 		glog.Debugf("sent CZ_REMEMBER_WARPPOINT opcode=0x%04X client_date=%d", ID(packet), c.clientDate)
 	} else {
 		glog.Warnf("send CZ_REMEMBER_WARPPOINT failed opcode=0x%04X len=%d client_date=%d: %v", ID(packet), len(packet), c.clientDate, err)
+	}
+	return err
+}
+
+func (c *Client) SendSelectAutoSpell(skillID uint16) error {
+	packet := BuildSelectAutoSpellPacket(skillID)
+	err := c.Send(packet)
+	if err == nil {
+		glog.Debugf("sent CZ_SELECTAUTOSPELL opcode=0x%04X skill=%d client_date=%d", ID(packet), skillID, c.clientDate)
+	} else {
+		glog.Warnf("send CZ_SELECTAUTOSPELL failed opcode=0x%04X len=%d skill=%d client_date=%d: %v", ID(packet), len(packet), skillID, c.clientDate, err)
 	}
 	return err
 }

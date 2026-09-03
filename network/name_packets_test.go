@@ -39,7 +39,7 @@ func TestParseActorNameAllAck(t *testing.T) {
 	if !ok {
 		t.Fatal("packet was not parsed")
 	}
-	if ack.ID != 0x55667788 || ack.Name != "Alice" || ack.PartyName != "Party" || ack.GuildName != "Guild" || ack.Title != "Title" {
+	if ack.ID != 0x55667788 || ack.Name != "Alice" || ack.PartyName != "Party" || ack.GuildName != "Guild" || ack.Title != "Title" || !ack.HasGuildName {
 		t.Fatalf("ack = %+v", ack)
 	}
 }

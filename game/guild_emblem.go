@@ -5,9 +5,12 @@ import (
 	"compress/zlib"
 	"fmt"
 	"image"
+	"image/draw"
 	"io"
+	"time"
 
 	"github.com/kivutar/goro/client"
+	"github.com/kivutar/goro/db"
 	"github.com/kivutar/goro/glog"
 	"github.com/kivutar/goro/network"
 	"github.com/kivutar/goro/render"
@@ -19,7 +22,13 @@ type guildEmblem struct {
 	version          uint32
 	requestedVersion uint32
 	image            *render.Image
+	flagImage        *render.Image
 }
+
+const (
+	siegeGuildEmblemSize       = 24
+	guildFlagEmblemCanvasScale = 2
+)
 
 func (m *WorldMode) requestActorGuildEmblem(ctx client.Context, guildID, version uint32) {
 	m.requestGuildEmblem(ctx, guildID, version, false)
@@ -48,7 +57,7 @@ func (m *WorldMode) requestGuildEmblem(ctx client.Context, guildID, version uint
 }
 
 func (m *WorldMode) applyGuildEmblemImage(ctx client.Context, packet network.GuildEmblemImage) {
-	image, err := decodeGuildEmblemImage(packet.Data)
+	decodedImage, err := decodeGuildEmblemImage(packet.Data)
 	if err != nil {
 		glog.Warnf("decode guild emblem failed guild=%d version=%d: %v", packet.GuildID, packet.EmblemVersion, err)
 		return
@@ -59,10 +68,67 @@ func (m *WorldMode) applyGuildEmblemImage(ctx client.Context, packet network.Gui
 	m.guildEmblems[packet.GuildID] = guildEmblem{
 		version:          packet.EmblemVersion,
 		requestedVersion: packet.EmblemVersion,
-		image:            render.NewImageFromImage(image),
+		image:            render.NewImageFromImage(decodedImage),
+		flagImage:        buildGuildFlagEmblemTexture(decodedImage),
 	}
 	m.ui.guildWindow.Refresh(ctx)
-	glog.Debugf("guild emblem loaded guild=%d version=%d size=%dx%d", packet.GuildID, packet.EmblemVersion, image.Bounds().Dx(), image.Bounds().Dy())
+	glog.Debugf("guild emblem loaded guild=%d version=%d size=%dx%d", packet.GuildID, packet.EmblemVersion, decodedImage.Bounds().Dx(), decodedImage.Bounds().Dy())
+}
+
+func buildGuildFlagEmblemTexture(source image.Image) *render.Image {
+	if source == nil {
+		return nil
+	}
+	bounds := source.Bounds()
+	width, height := bounds.Dx(), bounds.Dy()
+	if width <= 0 || height <= 0 {
+		return nil
+	}
+	canvas := image.NewNRGBA(image.Rect(0, 0, width*guildFlagEmblemCanvasScale, height*guildFlagEmblemCanvasScale))
+	offset := image.Pt((canvas.Bounds().Dx()-width)/2, (canvas.Bounds().Dy()-height)/2)
+	draw.Draw(canvas, image.Rectangle{Min: offset, Max: offset.Add(bounds.Size())}, source, bounds.Min, draw.Src)
+	bleedGuildFlagTransparentEdges(canvas)
+	return render.NewImageFromStraightAlpha(canvas)
+}
+
+func bleedGuildFlagTransparentEdges(img *image.NRGBA) {
+	if img == nil {
+		return
+	}
+	source := append([]byte(nil), img.Pix...)
+	for y := img.Bounds().Min.Y; y < img.Bounds().Max.Y; y++ {
+		for x := img.Bounds().Min.X; x < img.Bounds().Max.X; x++ {
+			offset := img.PixOffset(x, y)
+			if source[offset+3] != 0 {
+				continue
+			}
+			var red, green, blue, count int
+			for dy := -1; dy <= 1; dy++ {
+				for dx := -1; dx <= 1; dx++ {
+					if dx == 0 && dy == 0 {
+						continue
+					}
+					nx, ny := x+dx, y+dy
+					if !image.Pt(nx, ny).In(img.Bounds()) {
+						continue
+					}
+					neighbor := img.PixOffset(nx, ny)
+					if source[neighbor+3] == 0 {
+						continue
+					}
+					red += int(source[neighbor])
+					green += int(source[neighbor+1])
+					blue += int(source[neighbor+2])
+					count++
+				}
+			}
+			if count > 0 {
+				img.Pix[offset] = byte(red / count)
+				img.Pix[offset+1] = byte(green / count)
+				img.Pix[offset+2] = byte(blue / count)
+			}
+		}
+	}
 }
 
 func decodeGuildEmblemImage(data []byte) (image.Image, error) {
@@ -110,6 +176,9 @@ func (m *WorldMode) actorGuildEmblem(ctx client.Context, actor worldstate.Actor,
 	if isPlayer && ctx.Session != nil {
 		if guildID == 0 {
 			guildID = ctx.Session.GuildID
+			if guildID == 0 {
+				guildID = ctx.Session.Guild.ID
+			}
 		}
 		if version == 0 {
 			version = ctx.Session.EmblemVersion
@@ -128,4 +197,71 @@ func (m *WorldMode) actorGuildEmblem(ctx client.Context, actor worldstate.Actor,
 		return nil
 	}
 	return emblem.image
+}
+
+func (m *WorldMode) drawSiegeGuildEmblems(screen *render.Frame, ctx client.Context, projection sceneProjection, now time.Time, entries []sceneActorDrawEntry) {
+	if screen == nil || ctx.World == nil || !ctx.World.MapProperty.IsSiege() {
+		return
+	}
+	for _, entry := range entries {
+		if !siegeActorShowsGuildEmblem(entry) {
+			continue
+		}
+		emblem := m.actorGuildEmblem(ctx, entry.actor, entry.isPlayer)
+		if emblem == nil {
+			continue
+		}
+		bounds := emblem.Bounds()
+		if bounds.Dx() <= 0 || bounds.Dy() <= 0 {
+			continue
+		}
+		centerX, topY := m.siegeGuildEmblemAnchor(ctx, projection, now, entry)
+		x, y := siegeGuildEmblemPosition(centerX, topY, siegeGuildEmblemSize)
+		x, y = render.SnapScreenPoint(screen, x, y)
+		var opts render.DrawImageOptions
+		opts.Filter = render.FilterLinear
+		opts.GeoM.Scale(float64(siegeGuildEmblemSize)/float64(bounds.Dx()), float64(siegeGuildEmblemSize)/float64(bounds.Dy()))
+		opts.GeoM.Translate(x, y)
+		screen.DrawImage(emblem, &opts)
+	}
+}
+
+func siegeActorShowsGuildEmblem(entry sceneActorDrawEntry) bool {
+	const hiddenEffectMask = db.EffectStateHide | db.EffectStateCloak | db.EffectStateInvisible | db.EffectStateChasewalk
+	return !entry.hidden && entry.actor.EffectState&hiddenEffectMask == 0 && entry.actor.GuildID != 0 && entry.actor.EmblemVersion != 0
+}
+
+func (m *WorldMode) siegeGuildEmblemAnchor(ctx client.Context, projection sceneProjection, now time.Time, entry sceneActorDrawEntry) (float64, float64) {
+	centerX := entry.screenX
+	topY := actorSpriteTopY(entry.screenY, entry.scale)
+	if entry.isPlayer || !m.nonPCActorHasGR2Model(ctx, entry.actor) {
+		return centerX, topY
+	}
+
+	view := m.nonPCGR2ModelView(ctx, entry.actor)
+	if view == nil || view.geometry == nil {
+		return centerX, topY
+	}
+	scale := gr2ModelWorldScale * m.actorBodySizeMultiplier(entry.actor.ID, now)
+	top := modelPoint3{
+		x: float64(view.geometry.Center[0]),
+		y: float64(view.geometry.Center[1]),
+		z: float64(view.geometry.Center[2] + view.geometry.Size[2]/2),
+	}
+	matrix := gr2ActorModelMatrix(entry.worldX, entry.worldY, entry.worldZ, entry.actor.Dir, scale)
+	worldTop := mat4TransformPoint(matrix, top)
+	projected := projection.Project(worldTop.x, worldTop.z, worldTop.y)
+	if !isFinite(float64(projected.x)) || !isFinite(float64(projected.y)) {
+		return centerX, topY
+	}
+	return float64(projected.x), float64(projected.y)
+}
+
+func siegeGuildEmblemPosition(centerX, topY float64, size int) (float64, float64) {
+	if size <= 0 {
+		size = siegeGuildEmblemSize
+	}
+	x := centerX - float64(size)/2
+	y := topY - float64(size) - 4
+	return x, y
 }

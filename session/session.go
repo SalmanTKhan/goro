@@ -28,6 +28,7 @@ type Session struct {
 	SnapItems            bool
 	AttackRange          int
 	CharServers          []CharServer
+	CharServerIndex      int
 	Characters           []Character
 	Selected             Character
 	Zone                 ZoneServer
@@ -226,6 +227,7 @@ type Guild struct {
 	ID               uint32
 	IsMaster         bool
 	Right            uint32
+	MenuAccess       uint32
 	Level            uint32
 	UserNum          uint32
 	MaxUserNum       uint32
@@ -247,6 +249,18 @@ type Guild struct {
 	ExpelHistory     []GuildExpelHistory
 	NoticeSubject    string
 	Notice           string
+	Relations        []GuildRelation
+}
+
+const (
+	GuildRelationAlliance   uint32 = 0
+	GuildRelationOpposition uint32 = 1
+)
+
+type GuildRelation struct {
+	Relation uint32
+	GuildID  uint32
+	Name     string
 }
 
 type GuildMember struct {
@@ -262,6 +276,10 @@ type GuildMember struct {
 	PositionID   uint32
 	Memo         string
 	CharName     string
+}
+
+func (m GuildMember) Online() bool {
+	return m.CurrentState != 0
 }
 
 type GuildPosition struct {

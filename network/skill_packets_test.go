@@ -2,6 +2,7 @@ package network
 
 import (
 	"encoding/binary"
+	"slices"
 	"strings"
 	"testing"
 
@@ -82,6 +83,57 @@ func TestParseAutoRunSkill(t *testing.T) {
 	}
 	if auto.Skill.ID != 26 || auto.Skill.Type != 1 || auto.Skill.Level != 1 || auto.Skill.SPCost != 10 || auto.Skill.Range != 9 || auto.Skill.Name != "Teleportation" {
 		t.Fatalf("auto-run skill = %+v", auto.Skill)
+	}
+}
+
+func TestParseAutoSpellList(t *testing.T) {
+	data := make([]byte, 30)
+	binary.LittleEndian.PutUint16(data[0:2], PacketZCAutoSpellList)
+	for i, skillID := range []uint32{11, 0, 14, 19, 0, 20, 0} {
+		binary.LittleEndian.PutUint32(data[2+i*4:6+i*4], skillID)
+	}
+
+	list, ok, err := ParseAutoSpellList(Packet{ID: PacketZCAutoSpellList, Data: data})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("auto spell list not parsed")
+	}
+	want := []uint16{11, 14, 19, 20}
+	if !slices.Equal(list.SkillIDs, want) {
+		t.Fatalf("auto spell skills = %v, want %v", list.SkillIDs, want)
+	}
+}
+
+func TestParseAutoSpellListRejectsMalformedPacket(t *testing.T) {
+	if _, ok, err := ParseAutoSpellList(Packet{ID: PacketZCAutoSpellList, Data: make([]byte, 29)}); !ok || err == nil {
+		t.Fatalf("short auto spell list ok=%t err=%v", ok, err)
+	}
+
+	data := make([]byte, 30)
+	binary.LittleEndian.PutUint16(data[0:2], PacketZCAutoSpellList)
+	binary.LittleEndian.PutUint32(data[2:6], 0xFFFFFFFF)
+	if _, ok, err := ParseAutoSpellList(Packet{ID: PacketZCAutoSpellList, Data: data}); !ok || err == nil {
+		t.Fatalf("invalid auto spell skill ok=%t err=%v", ok, err)
+	}
+}
+
+func TestBuildSelectAutoSpellPacket(t *testing.T) {
+	packet := BuildSelectAutoSpellPacket(19)
+	if len(packet) != 6 {
+		t.Fatalf("packet len = %d", len(packet))
+	}
+	if got := binary.LittleEndian.Uint16(packet[0:2]); got != PacketCZSelectAutoSpell {
+		t.Fatalf("opcode = 0x%04X", got)
+	}
+	if got := binary.LittleEndian.Uint32(packet[2:6]); got != 19 {
+		t.Fatalf("skill id = %d", got)
+	}
+
+	cancel := BuildSelectAutoSpellPacket(0)
+	if got := binary.LittleEndian.Uint32(cancel[2:6]); got != 0 {
+		t.Fatalf("cancel skill id = %d", got)
 	}
 }
 
