@@ -3,7 +3,9 @@ module github.com/kivutar/goro/android-host
 go 1.26.4
 
 require (
+	github.com/gogpu/gpucontext v0.28.0
 	github.com/gogpu/gputypes v0.5.2
+	github.com/gogpu/ui v0.1.36
 	github.com/gogpu/wgpu v0.31.6
 	github.com/kivutar/goro v0.0.0
 )
@@ -17,6 +19,7 @@ require (
 	github.com/charmbracelet/x/cellbuf v0.0.13-0.20250311204145-2c3ea96c31dd // indirect
 	github.com/charmbracelet/x/term v0.2.1 // indirect
 	github.com/coregx/signals v0.1.0 // indirect
+	github.com/deepteams/webp v1.2.7 // indirect
 	github.com/ebitengine/oto/v3 v3.5.0-alpha.8 // indirect
 	github.com/ebitengine/purego v0.10.1 // indirect
 	github.com/go-fonts/dejavu v0.3.4 // indirect
@@ -31,9 +34,7 @@ require (
 	github.com/godexture/sdk v0.0.0 // indirect
 	github.com/gogpu/gg v0.48.16 // indirect
 	github.com/gogpu/gogpu v0.44.6 // indirect
-	github.com/gogpu/gpucontext v0.28.0 // indirect
 	github.com/gogpu/naga v0.18.0 // indirect
-	github.com/gogpu/ui v0.1.36 // indirect
 	github.com/jfreymuth/pulse v0.1.1 // indirect
 	github.com/klauspost/compress v1.19.2 // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect

@@ -12,8 +12,19 @@ The UI is built on `gogpu/ui` widgets. `render` exposes the widget app through
 `ui.NewManager()` keeps an ordered overlay stack.
 
 - `AddOverlay(widget)` / `RemoveOverlay(widget)` / `Clear()`
-- `PointerBlocked(x, y)` — whether a UI element covers a screen point, so world
-  clicks are not stolen. `game` checks this before world picking.
+- `PointerOverUI(x, y)` — the single predicate for "this screen point belongs to
+  the UI, not the world", so world clicks are not stolen. It combines
+  `PointerBlocked` (a UI element covers the point) with `TextInputActive`. Both
+  the real mouse path and the controller's virtual pointer resolve through it,
+  via `client.UIPointer`, so they cannot drift apart. `game` checks it before
+  world picking.
+- `SetPointerTransform(fn)` — installs the physical-to-logical pointer
+  conversion. Callers pass physical window coordinates while widget bounds are
+  logical, and the two diverge whenever the UI scale is not 1; the renderer
+  hands the manager the same transform it applies to real pointer events.
+- `SetTextInputPredicate(fn)` / `SetControllerRebindPredicate(fn)` — injected
+  sources of world state that lives outside the widget tree (the chat console,
+  an open rebinding capture), keeping `ui` free of a dependency on `game`.
 - `raiseOverlay` implements focus-to-front on press, which is what gives the
   classic overlapping-window behavior with stable dragging.
 - `overlayRoot` is the synthetic root widget: it lays out, draws, and dispatches

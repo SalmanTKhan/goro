@@ -4,12 +4,39 @@ import (
 	"math"
 	"testing"
 
+	"github.com/gogpu/ui/core/button"
 	"github.com/gogpu/ui/geometry"
 	"github.com/gogpu/ui/primitives"
 	"github.com/gogpu/ui/widget"
 	"github.com/kivutar/goro/session"
 	"github.com/kivutar/goro/ui/rotheme"
 )
+
+func TestCharacterSelectInitialControllerFocusUsesSelectedSlot(t *testing.T) {
+	window := &CharacterSelectWindow{opts: CharacterSelectWindowOptions{
+		SelectedSlot: 1,
+		MaxSlots:     3,
+	}}
+	for slot := 0; slot < 3; slot++ {
+		var focused int
+		var findFocused func(widget.Widget)
+		findFocused = func(current widget.Widget) {
+			if candidate, ok := current.(*button.Widget); ok && candidate.IsFocused() {
+				focused++
+			}
+			for _, child := range current.Children() {
+				findFocused(child)
+			}
+		}
+		findFocused(window.slotWidget(slot))
+		if slot == window.opts.SelectedSlot && focused != 1 {
+			t.Fatalf("selected slot %d focused buttons = %d, want 1", slot, focused)
+		}
+		if slot != window.opts.SelectedSlot && focused != 0 {
+			t.Fatalf("unselected slot %d unexpectedly has controller focus", slot)
+		}
+	}
+}
 
 func TestCharacterSelectPage(t *testing.T) {
 	if got := CharacterSelectPage(5); got != 1 {

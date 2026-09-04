@@ -39,6 +39,17 @@ type Context struct {
 	UIManager                UIManager
 	MobileSettingsHost       MobileSettingsHost
 	UISettingsHost           UISettingsHost
+	ControllerSettingsHost   ControllerSettingsHost
+}
+
+// ControllerSettings resolves the live controller policy, preferring the
+// runtime host so a settings change applies without a restart and falling back
+// to the loaded configuration for headless and test contexts.
+func (c Context) ControllerSettings() input.ControllerSettings {
+	if c.ControllerSettingsHost != nil {
+		return c.ControllerSettingsHost.ControllerSettings().Normalized()
+	}
+	return c.Config.Controller.Normalized()
 }
 
 type PackState string
@@ -80,10 +91,25 @@ type UIApp interface {
 	HoveredWidget() widget.Widget
 }
 
+// UIController is an optional capability implemented by desktop render
+// bridges. Keeping it separate preserves the lightweight UIApp contract used
+// by headless and Android callers.
+type UIController interface {
+	SetControllerMode(bool)
+	HandleControllerAction(input.UIAction) bool
+}
+
 type UIManager interface {
 	AddOverlay(widget.Widget)
 	RemoveOverlay(widget.Widget)
 	Clear()
+}
+
+// UIPointer is the optional capability that answers whether a screen point
+// belongs to the UI rather than the world. Both the real mouse path and the
+// controller's virtual pointer resolve through it, so they always agree.
+type UIPointer interface {
+	PointerOverUI(x, y int) bool
 }
 
 // UIViewportManager is the optional responsive extension implemented by UI
@@ -101,6 +127,13 @@ type MobileSettingsHost interface {
 type UISettingsHost interface {
 	UISettings() input.UISettings
 	ApplyUISettings(input.UISettings) bool
+}
+
+// ControllerSettingsHost lets the settings UI read and apply controller
+// settings at runtime, mirroring UISettingsHost.
+type ControllerSettingsHost interface {
+	ControllerSettings() input.ControllerSettings
+	ApplyControllerSettings(input.ControllerSettings) bool
 }
 
 type RuntimeSettings interface {

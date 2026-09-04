@@ -127,6 +127,9 @@ func (b *ShortcutBar) Publish(ctx Context, actions GameActions, assets AssetProv
 		b.rootW = w
 		b.rootH = h
 		b.root = positionedWidget(b.content, x, y, w, h)
+		if overlay, ok := b.root.(*positionedOverlay); ok {
+			overlay.controllerPassthrough = true
+		}
 		if b.published && old != nil {
 			ctx.UIManager.RemoveOverlay(old)
 			ctx.UIManager.AddOverlay(b.root)
@@ -282,34 +285,43 @@ func (b *ShortcutBar) ClearDepletedItem(ctx Context, index, itemID uint16) bool 
 }
 
 func (b *ShortcutBar) activate(ctx Context, actions GameActions, slot int) {
+	_ = b.ActivateSlot(ctx, actions, slot)
+}
+
+// ActivateSlot exposes the same semantic shortcut path used by physical
+// shortcut keys to controller/gameplay command consumers. It deliberately
+// keeps the slot contents private to the UI component.
+func (b *ShortcutBar) ActivateSlot(ctx Context, actions GameActions, slot int) bool {
 	if slot < 0 || slot >= len(b.slots) {
-		return
+		return false
 	}
 	entry := b.slots[slot]
 	switch entry.kind {
 	case shortcutItem:
 		item, ok := inventoryItemForShortcut(ctx.Session, entry.itemIndex, entry.itemID)
 		if !ok {
-			return
+			return false
 		}
 		if err := UseInventoryItem(ctx, item); err != nil {
-			return
+			return false
 		}
 		glog.Debugf("shortcut item use slot=%d index=%d item=%d", slot+1, item.Index, item.ItemID)
 	case shortcutSkill:
 		skill, ok := skillForShortcut(ctx.Session, entry)
 		if !ok {
-			return
+			return false
 		}
 		if actions == nil {
-			return
+			return false
 		}
 		if err := actions.UseShortcutSkill(ctx, skill); err != nil {
-			return
+			return false
 		}
 	default:
+		return false
 	}
 	b.redraw()
+	return true
 }
 
 func (b *ShortcutBar) slotAt(ctx Context, mx, my int) (int, bool) {
@@ -434,6 +446,10 @@ func (w *shortcutSlotButton) Layout(ctx widget.Context, constraints geometry.Con
 	return size
 }
 
+func (w *shortcutSlotButton) IsFocusable() bool {
+	return w != nil && w.bar != nil && w.IsVisible() && w.IsEnabled() && w.slot >= 0 && w.slot < len(w.bar.slots) && w.bar.slots[w.slot].kind != shortcutEmpty
+}
+
 func (w *shortcutSlotButton) Draw(ctx widget.Context, canvas widget.Canvas) {
 	if !w.IsVisible() || w.bar == nil {
 		return
@@ -445,6 +461,9 @@ func (w *shortcutSlotButton) Draw(ctx widget.Context, canvas widget.Canvas) {
 	}
 	canvas.DrawRect(bounds, fill)
 	canvas.StrokeRect(bounds, rotheme.Default.Colors.ButtonBorder, 1)
+	if w.IsFocused() {
+		canvas.StrokeRect(bounds.Inset(geometry.UniformInsets(-2)), rotheme.Default.Colors.InputFocus, 2)
+	}
 	w.drawContent(canvas, bounds)
 }
 
@@ -495,8 +514,17 @@ func (w *shortcutSlotButton) drawContent(canvas widget.Canvas, bounds geometry.R
 }
 
 func (w *shortcutSlotButton) Event(ctx widget.Context, e event.Event) bool {
+	if w.bar == nil {
+		return false
+	}
+	if key, ok := e.(*event.KeyEvent); ok {
+		if w.IsFocused() && w.IsFocusable() && key.KeyType != event.KeyRelease && (key.Key == event.KeyEnter || key.Key == event.KeySpace) {
+			return w.bar.ActivateSlot(w.bar.ctx, w.bar.actions, w.slot)
+		}
+		return false
+	}
 	mouse, ok := e.(*event.MouseEvent)
-	if !ok || w.bar == nil {
+	if !ok {
 		return false
 	}
 	switch mouse.MouseType {

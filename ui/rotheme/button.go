@@ -75,7 +75,8 @@ func buttonWithPaddingFn(label string, disabled func() bool, paddingY float32, o
 
 type mouseOnlyButtonWidget struct {
 	widget.WidgetBase
-	button *button.Widget
+	button         *button.Widget
+	controllerMode bool
 }
 
 func newMouseOnlyButton(btn *button.Widget) *mouseOnlyButtonWidget {
@@ -84,6 +85,17 @@ func newMouseOnlyButton(btn *button.Widget) *mouseOnlyButtonWidget {
 	w.SetEnabled(true)
 	btn.SetParent(w)
 	return w
+}
+
+// SetControllerMode enables keyboard-style activation for the themed button
+// while a gamepad owns the input source. Mouse-only behavior remains the
+// default for the existing desktop pointer path.
+func (w *mouseOnlyButtonWidget) SetControllerMode(enabled bool) {
+	if w == nil {
+		return
+	}
+	w.controllerMode = enabled
+	w.SetNeedsRedraw(true)
 }
 
 func (w *mouseOnlyButtonWidget) Layout(ctx widget.Context, constraints geometry.Constraints) geometry.Size {
@@ -96,11 +108,11 @@ func (w *mouseOnlyButtonWidget) Draw(ctx widget.Context, canvas widget.Canvas) {
 }
 
 func (w *mouseOnlyButtonWidget) Event(ctx widget.Context, e event.Event) bool {
-	if _, ok := e.(*event.KeyEvent); ok {
+	if _, ok := e.(*event.KeyEvent); ok && !w.controllerMode {
 		return false
 	}
 	consumed := w.button.Event(ctx, e)
-	if mouse, ok := e.(*event.MouseEvent); ok && mouse.Button == event.ButtonLeft {
+	if mouse, ok := e.(*event.MouseEvent); ok && mouse.Button == event.ButtonLeft && !w.controllerMode {
 		ctx.ReleaseFocus(w.button)
 	}
 	return consumed
@@ -154,6 +166,12 @@ func (ButtonPainter) PaintButton(canvas widget.Canvas, state button.PaintState) 
 		text = Default.Colors.MutedText
 	}
 	DrawText(canvas, state.Text, state.Bounds, Default.Typography.TextSize, text, false, widget.TextAlignCenter)
+	if state.Focused && !state.Disabled {
+		// The controller UI has no mouse hover to identify the active control.
+		// Keep the focus ring outside the button bounds so it remains visible in
+		// dense keyboard rows and matches the other themed focusable controls.
+		canvas.StrokeRoundRect(state.Bounds.Expand(2), Default.Colors.InputFocus, radius+2, 2)
+	}
 }
 
 func buttonGradientLight(dark widget.Color) widget.Color {

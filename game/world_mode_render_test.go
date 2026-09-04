@@ -276,6 +276,37 @@ func TestFollowCameraProjectionIncludesRuntimeYawOffset(t *testing.T) {
 	}
 }
 
+func TestFollowCameraResetRestoresDefaultOrientation(t *testing.T) {
+	camera := followCamera{
+		yawOffset:  90,
+		pitch:      defaultCameraMaxPitch,
+		zoom:       155,
+		zoomTarget: 155,
+	}
+
+	camera.ResetToDefaultOrientation()
+
+	if camera.yawOffset != 0 || camera.pitch != 0 {
+		t.Fatalf("camera orientation = yaw %.1f pitch %.1f, want defaults", camera.yawOffset, camera.pitch)
+	}
+	if camera.zoomTarget != sceneCameraZoom() {
+		t.Fatalf("camera zoom target = %.1f, want %.1f", camera.zoomTarget, sceneCameraZoom())
+	}
+}
+
+func TestCameraDoubleClickUsesTimeAndPositionWindow(t *testing.T) {
+	start := time.Unix(100, 0)
+	if !isCameraDoubleClick(start, start.Add(499*time.Millisecond), 100, 200, 104, 196) {
+		t.Fatal("click inside the double-click window was rejected")
+	}
+	if isCameraDoubleClick(start, start.Add(501*time.Millisecond), 100, 200, 100, 200) {
+		t.Fatal("click after the double-click interval was accepted")
+	}
+	if isCameraDoubleClick(start, start.Add(100*time.Millisecond), 100, 200, 105, 200) {
+		t.Fatal("click outside the double-click rectangle was accepted")
+	}
+}
+
 func TestIndoorCameraYawIsLockedWithoutLosingOutdoorRotation(t *testing.T) {
 	root := t.TempDir()
 	dataDir := filepath.Join(root, "data")

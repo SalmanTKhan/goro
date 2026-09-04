@@ -6,9 +6,11 @@ import (
 	uiapp "github.com/gogpu/ui/app"
 	"github.com/gogpu/ui/event"
 	"github.com/gogpu/ui/geometry"
+	"github.com/gogpu/ui/primitives"
 	"github.com/gogpu/ui/uitest"
 	"github.com/gogpu/ui/widget"
 	"github.com/kivutar/goro/client"
+	"github.com/kivutar/goro/ui/rotheme"
 )
 
 type countingOverlay struct {
@@ -194,4 +196,110 @@ type clippedOverlayCanvas struct {
 
 func (c *clippedOverlayCanvas) ClipBounds() geometry.Rect {
 	return c.clip
+}
+
+func TestManagerPointerBlockedAppliesPointerTransform(t *testing.T) {
+	app := uiapp.New()
+	manager := NewManager()
+	manager.SetUIApp(basicMenuTestApp{app: app})
+	manager.AddOverlay(positionedWidget(newInertOverlay(), 100, 120, 80, 40))
+	app.Frame()
+	app.Window().DrawTo(&uitest.MockCanvas{})
+
+	// Mirrors render's scaledUIEventSource.point for a 800x600 surface at 1.20
+	// scale: the UI is scaled about the window center, so physical coordinates
+	// must be converted before they are compared with logical widget bounds.
+	const scale = 1.20
+	const width, height = 800.0, 600.0
+	manager.SetPointerTransform(func(x, y int) (int, int) {
+		lx := (float64(x) - (width*(1-scale))/2) / scale
+		ly := (float64(y) - (height*(1-scale))/2) / scale
+		return int(lx + 0.5), int(ly + 0.5)
+	})
+
+	// The logical point 120,130 now lives at a different physical coordinate.
+	physicalX := int(120*scale + (width*(1-scale))/2)
+	physicalY := int(130*scale + (height*(1-scale))/2)
+	if !manager.PointerBlocked(physicalX, physicalY) {
+		t.Fatalf("scaled pointer at %d,%d was not blocked", physicalX, physicalY)
+	}
+	// Without the transform this same physical point would have missed the
+	// overlay, which is the bug the transform exists to fix.
+	manager.SetPointerTransform(nil)
+	if manager.PointerBlocked(physicalX, physicalY) {
+		t.Fatal("untransformed scaled pointer unexpectedly hit the overlay")
+	}
+}
+
+func TestManagerControllerUIActiveFindsCharacterStyleFocusableOverlay(t *testing.T) {
+	app := uiapp.New(uiapp.WithRenderMode(uiapp.RenderModeFrameworkManaged))
+	manager := NewManager()
+	manager.SetUIApp(basicMenuTestApp{app: app})
+	manager.AddOverlay(positionedWidget(
+		primitives.Box(rotheme.Button("OK", nil)).Width(100).Height(40),
+		100, 100, 100, 40,
+	))
+	app.Frame()
+
+	if !manager.ControllerUIActive() {
+		t.Fatal("focusable overlay was not reported as controller-active")
+	}
+}
+
+func TestManagerControllerUIActiveIgnoresPassiveHUDOverlay(t *testing.T) {
+	app := uiapp.New(uiapp.WithRenderMode(uiapp.RenderModeFrameworkManaged))
+	manager := NewManager()
+	manager.SetUIApp(basicMenuTestApp{app: app})
+	overlay := positionedWidget(
+		primitives.Box(rotheme.Button("Rows", nil)).Width(100).Height(40),
+		100, 100, 100, 40,
+	).(*positionedOverlay)
+	overlay.controllerPassthrough = true
+	manager.AddOverlay(overlay)
+	app.Frame()
+
+	if manager.ControllerUIActive() {
+		t.Fatal("passive HUD overlay incorrectly activated controller focus navigation")
+	}
+}
+
+func TestManagerControllerUIActiveFindsOverlayBelowPassiveHUD(t *testing.T) {
+	app := uiapp.New(uiapp.WithRenderMode(uiapp.RenderModeFrameworkManaged))
+	manager := NewManager()
+	manager.SetUIApp(basicMenuTestApp{app: app})
+	modal := positionedWidget(
+		primitives.Box(rotheme.Button("Next", nil)).Width(100).Height(40),
+		100, 100, 100, 40,
+	)
+	passiveHUD := positionedWidget(
+		primitives.Box(rotheme.Button("Rows", nil)).Width(100).Height(40),
+		100, 100, 100, 40,
+	).(*positionedOverlay)
+	passiveHUD.controllerPassthrough = true
+	manager.AddOverlay(modal)
+	manager.AddOverlay(passiveHUD)
+	app.Frame()
+
+	if !manager.ControllerUIActive() {
+		t.Fatal("interactive overlay below passive HUD was not reported as controller-active")
+	}
+}
+
+func TestManagerTextInputActiveUsesPredicate(t *testing.T) {
+	manager := NewManager()
+	if manager.TextInputActive() {
+		t.Fatal("fresh manager reported text input active")
+	}
+	active := false
+	manager.SetTextInputPredicate(func() bool { return active })
+	if manager.TextInputActive() {
+		t.Fatal("inactive predicate reported text input active")
+	}
+	active = true
+	if !manager.TextInputActive() {
+		t.Fatal("active predicate not honored")
+	}
+	if !manager.PointerOverUI(0, 0) {
+		t.Fatal("text input must claim the pointer for the UI")
+	}
 }

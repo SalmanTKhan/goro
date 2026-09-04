@@ -60,6 +60,9 @@ func (p IconButtonPainter) PaintButton(canvas widget.Canvas, state button.PaintS
 	if isDirectionalIconButton(p.Kind) {
 		fill, border := directionalIconButtonColors(state.Hovered, state.Pressed, state.Disabled, state.Background)
 		drawDirectionalIconButton(canvas, state.Bounds, p.Kind, fill, border)
+		if state.Focused && !state.Disabled {
+			canvas.StrokeRoundRect(state.Bounds.Expand(2), Default.Colors.InputFocus, ButtonRadius+2, 2)
+		}
 		return
 	}
 	ButtonPainter{}.PaintButton(canvas, state)

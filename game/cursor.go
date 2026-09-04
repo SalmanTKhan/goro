@@ -395,6 +395,12 @@ func uiPointerBlocked(ctx client.Context) bool {
 	if ctx.Input == nil || ctx.UIManager == nil {
 		return false
 	}
+	// PointerOverUI is the shared predicate; it also reports UI ownership while
+	// text entry is active. Fall back to the narrower bounds test for the
+	// lightweight UI managers used by tests and headless hosts.
+	if pointer, ok := ctx.UIManager.(client.UIPointer); ok {
+		return pointer.PointerOverUI(ctx.Input.MouseX, ctx.Input.MouseY)
+	}
 	blocker, ok := ctx.UIManager.(interface {
 		PointerBlocked(x, y int) bool
 	})

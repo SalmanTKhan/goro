@@ -17,46 +17,89 @@ jobs:
           - goos: windows
             goarch: amd64
             name: goro-windows-x86_64.exe
+            archive: goro-windows-x86_64.zip
+            sdl3: x64
           - goos: windows
             goarch: arm64
             name: goro-windows-arm64.exe
+            archive: goro-windows-arm64.zip
+            sdl3: arm64
           - goos: darwin
             goarch: amd64
             name: goro-osx-x86_64
+            archive: goro-osx-x86_64.zip
           - goos: darwin
             goarch: arm64
             name: goro-osx-arm64
+            archive: goro-osx-arm64.zip
           - goos: linux
             goarch: amd64
             name: goro-linux-x86_64
+            archive: goro-linux-x86_64.tar.gz
           - goos: linux
             goarch: arm64
             name: goro-linux-arm64
+            archive: goro-linux-arm64.tar.gz
     env:
       CGO_ENABLED: "0"
       GOFLAGS: "-tags=nofakecgo"
       GOOS: ${{ matrix.goos }}
       GOARCH: ${{ matrix.goarch }}
+      # Pinned alongside packaging/sdl3/checksums.txt; bump both together.
+      SDL3_VERSION: "3.4.16"
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # tags + history for `git describe` in the resource generator
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
+      - name: Stamp build version
+        # Writes internal/buildinfo/version_gen.go from the exact tag so the
+        # window title shows the release version. GOOS/GOARCH cleared so the
+        # generator runs natively.
+        run: GOOS=linux GOARCH=amd64 go generate ./internal/buildinfo
       - name: Generate Windows resources
         if: matrix.goos == 'windows'
-        run: >-
-          GOOS=linux GOARCH=amd64
-          go run github.com/akavel/rsrc@936343600d578fb5da472acf6987ed76935a389b
-          -arch ${{ matrix.goarch }}
-          -ico packaging/windows/goro.ico
-          -o rsrc_windows_${{ matrix.goarch }}.syso
+        # Restamps goro_windows_{amd64,arm64}.syso (icon + VERSIONINFO) from the
+        # exact release tag. GOOS/GOARCH are cleared so the generator and
+        # goversioninfo run natively on the runner.
+        run: GOOS=linux GOARCH=amd64 go generate .
       - run: |
           ldflags="-s -w"
           if [ "$GOOS" = "windows" ]; then
             ldflags="$ldflags -H=windowsgui"
           fi
-          go build -trimpath -ldflags="$ldflags" -o dist/${{ matrix.name }} .
+          mkdir -p stage
+          go build -trimpath -ldflags="$ldflags" -o stage/${{ matrix.name }} .
+      - name: Bundle SDL3 runtime
+        if: matrix.sdl3 != ''
+        # Controller support loads SDL3 at runtime. Windows has no system SDL3,
+        # so the DLL ships beside the binary; gamepad.loadSDL3 looks there first.
+        # Linux and macOS resolve the library through the platform loader
+        # instead -- see packaging/sdl3/checksums.txt.
+        run: |
+          set -euo pipefail
+          asset="SDL3-${SDL3_VERSION}-win32-${{ matrix.sdl3 }}.zip"
+          curl -fsSL -o "$asset" \
+            "https://github.com/libsdl-org/SDL/releases/download/release-${SDL3_VERSION}/${asset}"
+          grep " ${asset}\$" packaging/sdl3/checksums.txt | sha256sum -c -
+          unzip -j -o "$asset" SDL3.dll -d stage
+          test -f stage/SDL3.dll
+      - name: Create archive
+        run: |
+          set -euo pipefail
+          cd stage
+          if [ "${{ matrix.goos }}" = "linux" ]; then
+            tar -czf "../${{ matrix.archive }}" .
+          else
+            zip -r "../${{ matrix.archive }}" .
+          fi
       - uses: softprops/action-gh-release@v3
         with:
-          files: dist/${{ matrix.name }}
+          # The bare binary is still published so existing links keep working;
+          # the archive is what carries the SDL3 runtime.
+          files: |
+            stage/${{ matrix.name }}
+            ${{ matrix.archive }}

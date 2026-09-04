@@ -1,0 +1,13 @@
+# Pinned SDL3 runtime artifacts from https://github.com/libsdl-org/SDL/releases
+#
+# Only Windows is bundled: SDL publishes ready-to-ship runtime DLLs for it, and
+# Windows has no system SDL3 for the loader to fall back on. Linux and macOS
+# resolve libSDL3.so.0 / libSDL3.dylib through the platform loader instead --
+# see docs/controller.md for the packages to install.
+#
+# Update procedure: bump SDL3_VERSION in .github/workflows/release.yml, then
+#   gh api repos/libsdl-org/SDL/releases/tags/release-<version> \
+#     --jq '.assets[] | select(.name|test("win32-(x64|arm64)")) | "\(.digest)  \(.name)"'
+# and paste the results below.
+4217944b4e51457af4a59c82d883f8443b3e65964b2acd8943484c492756c4b6  SDL3-3.4.16-win32-x64.zip
+dbd381378164447ce7985e40876e619eda0ec8c14b7694080029ee79aa2a494d  SDL3-3.4.16-win32-arm64.zip

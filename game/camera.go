@@ -20,6 +20,8 @@ const (
 	defaultCameraMinPitch          = 205.0
 	defaultCameraMaxPitch          = 245.0
 	defaultCameraPitchDragPerPixel = 0.3
+	cameraDoubleClickInterval      = 500 * time.Millisecond
+	cameraDoubleClickMaxDistance   = 4
 )
 
 type followCamera struct {
@@ -132,6 +134,53 @@ func cameraZoomLerp(followLerp float64) float64 {
 
 func (c *followCamera) ResetRotation() {
 	c.yawOffset = 0
+}
+
+// ResetToDefaultOrientation mirrors the classic client's camera reset: restore
+// the default yaw and pitch immediately, while allowing zoom to ease back to
+// the default distance through the normal camera update path.
+func (c *followCamera) ResetToDefaultOrientation() {
+	c.yawOffset = 0
+	c.pitch = 0
+	c.zoomTarget = sceneCameraZoom()
+}
+
+func isCameraDoubleClick(lastAt, now time.Time, lastX, lastY, x, y int) bool {
+	if lastAt.IsZero() || now.Before(lastAt) || now.Sub(lastAt) > cameraDoubleClickInterval {
+		return false
+	}
+	return absInt(x-lastX) <= cameraDoubleClickMaxDistance && absInt(y-lastY) <= cameraDoubleClickMaxDistance
+}
+
+// handleMouseCameraReset recognizes the same right-button double-click gesture
+// used by the classic desktop client. It runs before world/UI click dispatch so
+// the second click cannot also rotate the camera or open a context action.
+func (m *WorldMode) handleMouseCameraReset(ctx client.Context, blocked bool) bool {
+	if m == nil || ctx.Input == nil || !ctx.Input.MouseJustPressed(input.MouseButtonRight) {
+		return false
+	}
+	if blocked || ctx.World == nil || m.mapPointerBlocked(ctx) {
+		m.lastCameraResetClickAt = time.Time{}
+		return false
+	}
+	now := time.Now()
+	doubleClick := isCameraDoubleClick(
+		m.lastCameraResetClickAt,
+		now,
+		m.lastCameraResetClickX,
+		m.lastCameraResetClickY,
+		ctx.Input.MouseX,
+		ctx.Input.MouseY,
+	)
+	if doubleClick {
+		m.lastCameraResetClickAt = time.Time{}
+		m.ApplyPlayerCommand(ctx, input.PlayerCommand{Kind: input.CommandResetCamera})
+		return true
+	}
+	m.lastCameraResetClickAt = now
+	m.lastCameraResetClickX = ctx.Input.MouseX
+	m.lastCameraResetClickY = ctx.Input.MouseY
+	return false
 }
 
 func (c *followCamera) Projection(ctx client.Context, width, height int, now time.Time) sceneProjection {

@@ -42,6 +42,20 @@ positions are ZQSD on an AZERTY keyboard.
 The keyboard API only reports input. Movement, combat, prompts, and other
 behavior remain Lua policy built from the generic functions below.
 
+### `goro.actions()` and `goro.controller()`
+
+`goro.actions()` exposes the same normalized action snapshot used by the
+production desktop resolver. It includes `source`, `move`/`move_x`/`move_y`,
+`camera_x`/`camera_y`, and `held`, `pressed`, and `released` tables for
+`confirm`, `cancel`, `attack`, `loot`, target actions, menu/map, and
+`shortcut_1` through `shortcut_8`.
+
+`goro.controller()` exposes the current standardized desktop gamepad snapshot:
+`connected`, `id`, `name`, `type`, radial-deadzone-normalized `left_x` /
+`left_y` and `right_x` / `right_y`, plus trigger values. It is empty when no
+controller is available. This is an observation API; a Lua input profile still
+owns its own policy and suppresses production movement while active.
+
 ### `goro.player()`
 
 Returns the local player state.

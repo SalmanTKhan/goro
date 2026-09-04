@@ -19,6 +19,10 @@ const (
 
 type SettingsWindow struct {
 	Window
+	// OnControllerSetup opens the controller diagnostics and rebinding page.
+	// It is injected because that window is owned by the world UI, not by the
+	// settings window.
+	OnControllerSetup func()
 }
 
 func (w *SettingsWindow) OpenWindow(ctx client.Context) {
@@ -223,9 +227,138 @@ func (w *SettingsWindow) contentTree(ctx client.Context) widget.Widget {
 				w.refresh(ctx)
 			}),
 		),
+
+		rotheme.SectionLabel("Controller"),
+
+		rotheme.Checkbox(
+			checkbox.Checked(settingsController(ctx).Enabled),
+			checkbox.LabelOpt("Enable controller"),
+			checkbox.OnToggle(func(enabled bool) {
+				controller := settingsController(ctx)
+				controller.Enabled = enabled
+				w.applyController(ctx, controller)
+			}),
+		),
+
+		rotheme.Button(controllerMoveModeLabel(ctx), func() {
+			controller := settingsController(ctx)
+			if controller.MoveMode == input.ControllerMoveCharacter {
+				controller.MoveMode = input.ControllerMoveCursor
+			} else {
+				controller.MoveMode = input.ControllerMoveCharacter
+			}
+			w.applyController(ctx, controller)
+		}),
+
+		rotheme.Button(controllerUINavModeLabel(ctx), func() {
+			controller := settingsController(ctx)
+			if controller.UINavMode == input.ControllerUINavCursor {
+				controller.UINavMode = input.ControllerUINavFocus
+			} else {
+				controller.UINavMode = input.ControllerUINavCursor
+			}
+			w.applyController(ctx, controller)
+		}),
+
+		primitives.HBox(
+			rotheme.Text("Deadzone"),
+			primitives.Expanded(
+				rotheme.Slider(
+					slider.Min(0.05),
+					slider.Max(0.5),
+					slider.Value(settingsController(ctx).Deadzone),
+					slider.OnChange(func(v float32) {
+						controller := settingsController(ctx)
+						controller.Deadzone = v
+						w.applyController(ctx, controller)
+					}),
+				),
+			),
+		).Gap(8),
+
+		primitives.HBox(
+			rotheme.Text("Cursor speed"),
+			primitives.Expanded(
+				rotheme.Slider(
+					slider.Min(400),
+					slider.Max(3000),
+					slider.Value(settingsController(ctx).CursorSpeed),
+					slider.OnChange(func(v float32) {
+						controller := settingsController(ctx)
+						controller.CursorSpeed = v
+						w.applyController(ctx, controller)
+					}),
+				),
+			),
+		).Gap(8),
+
+		primitives.HBox(
+			rotheme.Text("Camera sens"),
+			primitives.Expanded(
+				rotheme.Slider(
+					slider.Min(0.25),
+					slider.Max(3),
+					slider.Value(settingsController(ctx).CameraSensitivity),
+					slider.OnChange(func(v float32) {
+						controller := settingsController(ctx)
+						controller.CameraSensitivity = v
+						w.applyController(ctx, controller)
+					}),
+				),
+			),
+		).Gap(8),
+
+		rotheme.Checkbox(
+			checkbox.Checked(settingsController(ctx).InvertCameraY),
+			checkbox.LabelOpt("Invert camera Y"),
+			checkbox.OnToggle(func(enabled bool) {
+				controller := settingsController(ctx)
+				controller.InvertCameraY = enabled
+				w.applyController(ctx, controller)
+			}),
+		),
+
+		rotheme.Checkbox(
+			checkbox.Checked(settingsController(ctx).Rumble),
+			checkbox.LabelOpt("Rumble"),
+			checkbox.OnToggle(func(enabled bool) {
+				controller := settingsController(ctx)
+				controller.Rumble = enabled
+				w.applyController(ctx, controller)
+			}),
+		),
+
+		rotheme.ButtonDisabled("Controller setup...", w.OnControllerSetup == nil, func() {
+			if w.OnControllerSetup != nil {
+				w.OnControllerSetup()
+			}
+		}),
 	).
 		Padding(14).
 		Gap(8)
+}
+
+// applyController pushes a controller change to the live host so it takes
+// effect within a frame, then persists it through the shared settings writer.
+func (w *SettingsWindow) applyController(ctx client.Context, controller input.ControllerSettings) {
+	controller = controller.Normalized()
+	if ctx.ControllerSettingsHost != nil {
+		ctx.ControllerSettingsHost.ApplyControllerSettings(controller)
+	}
+	w.saveSettings(ctx)
+	w.refresh(ctx)
+}
+
+func settingsController(ctx client.Context) input.ControllerSettings {
+	return ctx.ControllerSettings()
+}
+
+func controllerMoveModeLabel(ctx client.Context) string {
+	return "Movement: " + settingsController(ctx).MoveMode.String()
+}
+
+func controllerUINavModeLabel(ctx client.Context) string {
+	return "Menus: " + settingsController(ctx).UINavMode.String()
 }
 
 func (w *SettingsWindow) refresh(ctx client.Context) {
@@ -249,6 +382,8 @@ func (w *SettingsWindow) saveSettings(ctx client.Context) {
 		SnapTargets: settingsSnapTargets(ctx),
 		SnapItems:   settingsSnapItems(ctx),
 	}
+	controller := settingsController(ctx)
+	settings.Controller = &controller
 	path, err := config.SaveUserSettings(settings)
 	if err != nil {
 		glog.Warnf("settings save failed: %v", err)

@@ -54,8 +54,9 @@ dependencies that need cgo.
 ## Release (`.github/workflows/release.yml`)
 
 Triggered on GitHub release creation. Cross-compiles Windows/macOS/Linux for
-amd64 and arm64 with `-ldflags "-s -w"`. Windows binaries get an icon compiled
-in via `rsrc` from `packaging/windows/goro.ico`.
+amd64 and arm64 with `-ldflags "-s -w"` (`-H=windowsgui` added for Windows). The
+Windows job runs `go generate .` first to restamp the resource objects from the
+exact tag (needs `fetch-depth: 0` for `git describe`).
 
 ## Icon and packaging
 
@@ -64,8 +65,24 @@ the binary and handed to GoGPU. Regenerate platform assets with
 `go generate ./internal/appicon`, which writes `packaging/windows/goro.ico`,
 `packaging/linux/goro.png`, and the Android launcher icons under
 `android/host/app/src/main/res/mipmap-*/ic_launcher.png`.
-`packaging/linux/goro.desktop` is a distribution template. macOS releases are bare binaries with no app bundle. Details:
-`docs/application-icon.md`.
+`packaging/linux/goro.desktop` is a distribution template. macOS releases are bare binaries with no app bundle.
+
+Windows resources are separate. `go generate .` runs `packaging/windows/generate.go`,
+which reads `packaging/windows/goro.ico` plus `git describe` and writes
+`goro_windows_amd64.syso` / `goro_windows_arm64.syso` at the repo root (icon +
+`VERSIONINFO`, via a pinned `goversioninfo`). Go links each `.syso` into the
+matching `GOOS`/`GOARCH` build by filename, so plain `go build .` gets the icon
+and the version fields. These `.syso` files are committed; regenerate and commit
+them when tagging a release. Details: `docs/application-icon.md`.
+
+## Build version
+
+`internal/buildinfo.Version()` returns a build identifier (`git describe` form,
+e.g. `v0.9.0-5-gdb40e9f`, or `devel`). `go generate ./internal/buildinfo` writes
+the committed `internal/buildinfo/version_gen.go`; if that is stale the function
+falls back to the Go toolchain's VCS stamp. `render.Run` appends it to the
+default window title. Regenerate and commit `version_gen.go` when tagging;
+the release workflow restamps it (needs `fetch-depth: 0`).
 
 ## Website
 

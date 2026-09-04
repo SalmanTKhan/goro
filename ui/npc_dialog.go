@@ -73,6 +73,10 @@ type NPCDialog struct {
 	inputWindow  Window
 	dirty        bool
 	onClose      func()
+	// confirmArmed guards against a dialog opened by a confirm press advancing
+	// on that same press. The dialog arms only once confirm has been observed
+	// released, so opening and advancing always take two distinct presses.
+	confirmArmed bool
 }
 
 type npcDialogTextRun struct {
@@ -98,6 +102,7 @@ func (d *NPCDialog) Apply(packet network.NPCDialog) {
 			d.clearOnText = false
 		}
 		d.open = true
+		d.confirmArmed = false
 		d.npcID = packet.NPCID
 		d.action = npcDialogActionNone
 		d.options = nil
@@ -114,6 +119,7 @@ func (d *NPCDialog) Apply(packet network.NPCDialog) {
 			return
 		}
 		d.open = true
+		d.confirmArmed = false
 		d.npcID = packet.NPCID
 		d.action = npcDialogActionNext
 		d.options = nil
@@ -124,6 +130,7 @@ func (d *NPCDialog) Apply(packet network.NPCDialog) {
 			return
 		}
 		d.open = true
+		d.confirmArmed = false
 		d.npcID = packet.NPCID
 		d.action = npcDialogActionClose
 		d.options = nil
@@ -131,6 +138,7 @@ func (d *NPCDialog) Apply(packet network.NPCDialog) {
 		d.dirty = true
 	case network.NPCDialogMenu:
 		d.open = true
+		d.confirmArmed = false
 		d.npcID = packet.NPCID
 		d.action = npcDialogActionMenu
 		d.options = append([]string(nil), packet.Options...)
@@ -290,7 +298,13 @@ func (d *NPCDialog) Update(ctx Context) bool {
 		d.publish(ctx)
 		return true
 	}
-	if ctx.Input.JustPressed(input.KeyEnter) {
+	// Arm confirm only once it has been observed released. The press that opened
+	// this dialog must not also act on it, so opening and advancing always take
+	// two distinct presses. Escape and menu navigation are unaffected.
+	if !d.confirmArmed && !ctx.Input.Pressed(input.KeyEnter) {
+		d.confirmArmed = true
+	}
+	if d.confirmArmed && ctx.Input.JustPressed(input.KeyEnter) {
 		switch d.action {
 		case npcDialogActionNext:
 			d.next(ctx)
@@ -344,6 +358,7 @@ func (d *NPCDialog) next(ctx Context) {
 
 func (d *NPCDialog) openInput(npcID uint32, action npcDialogAction) {
 	d.open = true
+	d.confirmArmed = false
 	d.npcID = npcID
 	d.action = action
 	d.options = nil
@@ -453,6 +468,7 @@ func (d *NPCDialog) ensureWindows(ctx Context) {
 	x, y, w, h := npcDialogBounds(width, height)
 	if d.dialogWindow.width == 0 {
 		d.dialogWindow = NewWindow(w, h)
+		d.dialogWindow.SetControllerActionHandler(d.handleControllerAction)
 		d.dialogWindow.OpenAt(x, y, d.dialogTree(ctx, w, h))
 	} else {
 		if d.dialogWindow.width != w || d.dialogWindow.height != h {
@@ -466,6 +482,7 @@ func (d *NPCDialog) ensureWindows(ctx Context) {
 	menuX, menuY, menuW, menuH := d.menuBounds(width, height, d.dialogWindow.x, d.dialogWindow.y, w, h)
 	if d.menuWindow.width == 0 {
 		d.menuWindow = NewWindow(menuW, menuH)
+		d.menuWindow.SetControllerActionHandler(d.handleControllerAction)
 		d.menuWindow.SetAutoPosition(menuX, menuY)
 	} else {
 		if d.menuWindow.width != menuW || d.menuWindow.height != menuH {
@@ -479,6 +496,7 @@ func (d *NPCDialog) ensureWindows(ctx Context) {
 	inputX, inputY, inputW, inputH := d.inputBounds(width, height, d.dialogWindow.x, d.dialogWindow.y, w, h)
 	if d.inputWindow.width == 0 {
 		d.inputWindow = NewWindow(inputW, inputH)
+		d.inputWindow.SetControllerActionHandler(d.handleControllerAction)
 		d.inputWindow.titleHeight = 0
 		d.inputWindow.SetAutoPosition(inputX, inputY)
 	} else {
@@ -490,6 +508,53 @@ func (d *NPCDialog) ensureWindows(ctx Context) {
 		if d.inputWindow.SetAutoPosition(inputX, inputY) {
 			d.dirty = true
 		}
+	}
+}
+
+// handleControllerAction is the modal NPC-dialog bridge. The topmost dialog
+// window owns controller Confirm/Cancel while it is open; directional events
+// are left to the list/focus machinery so menu selection and focus traversal
+// retain their normal behavior.
+func (d *NPCDialog) handleControllerAction(action input.UIAction) bool {
+	if d == nil || !d.open {
+		return false
+	}
+	ctx := d.dialogWindow.ctx
+	switch action {
+	case input.UIActionConfirm:
+		switch d.action {
+		case npcDialogActionNext:
+			d.next(ctx)
+		case npcDialogActionClose:
+			d.close(ctx)
+		case npcDialogActionMenu:
+			d.chooseSelected(ctx)
+		default:
+			// Text input is handled by the generic bridge, which opens the
+			// reusable controller keyboard for the focused text field.
+			return false
+		}
+		return true
+	case input.UIActionCancel:
+		switch d.action {
+		case npcDialogActionMenu:
+			d.choose(ctx, 255)
+		case npcDialogActionClose:
+			d.close(ctx)
+		case npcDialogActionNext, npcDialogActionNone, npcDialogActionNumberInput, npcDialogActionStringInput:
+			// Match the existing keyboard behavior: Next/Waiting and text
+			// input remain open; the active controller keyboard handles its
+			// own Cancel before this window is reached.
+		}
+		return true
+	case input.UIActionUp, input.UIActionDown, input.UIActionPageUp, input.UIActionPageDown:
+		// Menus/lists consume these through their normal widget key path.
+		return false
+	case input.UIActionNextFocus, input.UIActionPreviousFocus:
+		return false
+	default:
+		// Keep all other controller actions modal while the dialog is open.
+		return true
 	}
 }
 
@@ -561,14 +626,14 @@ func (d *NPCDialog) publish(ctx Context) {
 		d.inputWindow.Unpublish(ctx)
 		return
 	}
-	d.dialogWindow.Publish(ctx)
+	d.dialogWindow.PublishForeground(ctx)
 	if d.action == npcDialogActionMenu && d.menuWindow.IsOpen() {
-		d.menuWindow.Publish(ctx)
+		d.menuWindow.PublishForeground(ctx)
 	} else {
 		d.menuWindow.Unpublish(ctx)
 	}
 	if d.isInputAction() && d.inputWindow.IsOpen() {
-		d.inputWindow.Publish(ctx)
+		d.inputWindow.PublishForeground(ctx)
 	} else {
 		d.inputWindow.Unpublish(ctx)
 	}
@@ -621,7 +686,18 @@ func (d *NPCDialog) dialogTree(ctx Context, width, height int) widget.Widget {
 			Footer(footer...),
 		)
 	}
-	return Win(options...)
+	tree := Win(options...)
+	if d.action == npcDialogActionNext || d.action == npcDialogActionClose {
+		// A fresh server action replaces the old widget tree. Seed the new
+		// footer button's focused flag so the first Cross press activates it
+		// instead of merely selecting it.
+		if focus := firstControllerFocusable(tree); focus != nil {
+			if controllerFocus, ok := focus.(widget.Focusable); ok {
+				controllerFocus.SetFocused(true)
+			}
+		}
+	}
+	return tree
 }
 
 func (d *NPCDialog) isInputAction() bool {

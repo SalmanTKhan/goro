@@ -103,7 +103,7 @@ if (normalizedPlatform.includes("win")) {
   platform = "windows";
   primaryDownload = {
     label: "Download for Windows",
-    url: "https://github.com/kivutar/goro/releases/latest/download/goro-windows-x86_64.exe",
+    url: "https://github.com/kivutar/goro/releases/latest/download/goro-windows-x86_64.zip",
   };
 } else if (normalizedPlatform.includes("mac")) {
   platform = "macos";

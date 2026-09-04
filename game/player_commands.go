@@ -15,6 +15,20 @@ import (
 // combat, and skill rules.
 func (m *WorldMode) ApplyPlayerCommand(ctx client.Context, command input.PlayerCommand) bool {
 	switch command.Kind {
+	case input.CommandMoveDirection:
+		return m.moveController(ctx, command.Direction)
+	case input.CommandTargetPrevious:
+		return m.cycleControllerTarget(ctx, true)
+	case input.CommandTargetNext:
+		return m.cycleControllerTarget(ctx, false)
+	case input.CommandAttackFocused:
+		return m.controllerAttackFocused(ctx)
+	case input.CommandInteractFocused:
+		return m.controllerInteractFocused(ctx)
+	case input.CommandLootFocused:
+		return m.controllerLootFocused(ctx)
+	case input.CommandUseShortcut:
+		return m.ui.shortcutBar.ActivateSlot(ctx, m, int(command.Slot))
 	case input.CommandMoveTo:
 		return m.requestWalk(ctx, int(math.Round(command.Position.X)), int(math.Round(command.Position.Y)), "player command")
 	case input.CommandAttackActor:
@@ -90,12 +104,15 @@ func (m *WorldMode) ApplyPlayerCommand(ctx client.Context, command input.PlayerC
 		}
 		m.camera.ZoomByDelta(command.DeltaY)
 		return true
+	case input.CommandResetCamera:
+		m.camera.ResetToDefaultOrientation()
+		return true
 	case input.CommandCancelAction:
+		m.cancelControllerAction(ctx)
 		if ctx.Offline != nil {
 			return ctx.Offline.HandleCommand(command)
 		}
 		m.skills().Cancel("player command")
-		m.cancelAttackIntent()
 		return true
 	case input.CommandInspectActor:
 		// Inspection is presentation state, but validating the actor here keeps

@@ -66,6 +66,19 @@ func (a basicMenuTestApp) HoveredWidget() widget.Widget {
 	return a.app.Window().HoveredWidget()
 }
 
+func (a basicMenuTestApp) WidgetContext() widget.Context {
+	return a.app.Window().Context()
+}
+
+func (a basicMenuTestApp) FocusControllerWidget(target widget.Widget) bool {
+	focus, ok := target.(widget.Focusable)
+	if !ok || !focus.IsFocusable() {
+		return false
+	}
+	a.app.Window().FocusManager().Focus(focus)
+	return true
+}
+
 func TestBasicMenuRowsUsePointerCursor(t *testing.T) {
 	app := uiapp.New()
 	manager := NewManager()

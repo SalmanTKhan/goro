@@ -219,6 +219,42 @@ func TestLoadConfigRejectsInvalidCharacterSlot(t *testing.T) {
 	}
 }
 
+func TestLoadConfigReadsControllerSettings(t *testing.T) {
+	isolateUserConfig(t)
+	path := filepath.Join(t.TempDir(), "controller.ini")
+	if err := os.WriteFile(path, []byte(`[controller]
+enabled = false
+deadzone = 0.20
+outer_deadzone = 0.90
+camera_sensitivity = 1.75
+invert_camera_y = true
+confirm_button = circle
+cancel_button = cross
+attack_button = square
+loot_button = triangle
+target_previous = l1
+target_next = r1
+reset_camera = r3
+menu_button = options
+map_button = touchpad
+left_modifier = l2
+right_modifier = r2
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig([]string{"--config", path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Controller.Enabled || cfg.Controller.Deadzone != 0.2 || cfg.Controller.OuterDeadzone != 0.9 || cfg.Controller.CameraSensitivity != 1.75 || !cfg.Controller.InvertCameraY {
+		t.Fatalf("unexpected controller settings: %#v", cfg.Controller)
+	}
+	bindings := cfg.Controller.Bindings
+	if bindings.Confirm != input.ControllerButtonEast || bindings.Cancel != input.ControllerButtonSouth || bindings.Attack != input.ControllerButtonWest || bindings.Loot != input.ControllerButtonNorth || bindings.ResetCamera != input.ControllerButtonRightStick || bindings.LeftModifier != input.ControllerButtonLeftTrigger || bindings.RightModifier != input.ControllerButtonRightTrigger {
+		t.Fatalf("unexpected controller bindings: %#v", bindings)
+	}
+}
+
 func TestLoadConfigRejectsInvalidLogLevel(t *testing.T) {
 	isolateUserConfig(t)
 	if _, err := LoadConfig([]string{"--log-level", "verbose"}); err == nil {
@@ -419,5 +455,86 @@ func TestMobileSettingsRoundTripPreservesAllSupportedValues(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("saved config missing %q:\n%s", want, text)
 		}
+	}
+}
+
+func TestLoadConfigReadsControllerModeSettings(t *testing.T) {
+	isolateUserConfig(t)
+	path := filepath.Join(t.TempDir(), "controller-modes.ini")
+	if err := os.WriteFile(path, []byte(`[controller]
+move_mode = cursor
+ui_nav_mode = focus
+cursor_speed = 2200
+trigger_deadzone = 0.25
+nav_repeat_delay_ms = 400
+nav_repeat_ms = 90
+rumble = false
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig([]string{"--config", path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	controller := cfg.Controller
+	if controller.MoveMode != input.ControllerMoveCursor || controller.UINavMode != input.ControllerUINavFocus {
+		t.Fatalf("modes = %v,%v", controller.MoveMode, controller.UINavMode)
+	}
+	if controller.CursorSpeed != 2200 || controller.TriggerDeadzone != 0.25 {
+		t.Fatalf("cursor tuning = %v,%v", controller.CursorSpeed, controller.TriggerDeadzone)
+	}
+	if controller.NavRepeatDelayMS != 400 || controller.NavRepeatMS != 90 {
+		t.Fatalf("nav repeat = %v,%v", controller.NavRepeatDelayMS, controller.NavRepeatMS)
+	}
+	if controller.Rumble {
+		t.Fatal("rumble should be disabled")
+	}
+}
+
+func TestSaveControllerSettingsRoundTripPreservesUnrelatedINI(t *testing.T) {
+	isolateUserConfig(t)
+	path, err := UserConfigPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("[login]\nusername = hero\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	settings := input.DefaultControllerSettings()
+	settings.MoveMode = input.ControllerMoveCursor
+	settings.UINavMode = input.ControllerUINavFocus
+	settings.CursorSpeed = 1800
+	settings.NavRepeatMS = 90
+	settings.Rumble = false
+	settings.Bindings.Set(input.ActionConfirm, input.ControllerButtonNorth)
+	if _, err := SaveControllerSettings(settings); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "username = hero") {
+		t.Fatalf("unrelated INI lost:\n%s", data)
+	}
+
+	cfg, err := LoadConfig([]string{"--config", path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := cfg.Controller
+	if got.MoveMode != settings.MoveMode || got.UINavMode != settings.UINavMode {
+		t.Fatalf("modes = %v,%v", got.MoveMode, got.UINavMode)
+	}
+	if got.CursorSpeed != settings.CursorSpeed || got.NavRepeatMS != settings.NavRepeatMS || got.Rumble {
+		t.Fatalf("tuning not round-tripped: %#v", got)
+	}
+	if got.Bindings.Get(input.ActionConfirm) != input.ControllerButtonNorth {
+		t.Fatalf("binding not round-tripped: %#v", got.Bindings)
 	}
 }

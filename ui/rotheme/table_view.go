@@ -230,9 +230,65 @@ func (w *TableViewWidget) Event(ctx widget.Context, e event.Event) bool {
 	if !w.IsVisible() || !w.IsEnabled() {
 		return false
 	}
+	if key, ok := e.(*event.KeyEvent); ok && key.KeyType != event.KeyRelease && w.IsFocused() {
+		if w.handleControllerKey(ctx, key.Key) {
+			return true
+		}
+	}
 	w.updateScrollBounds()
 	w.updateHoverFromEvent(ctx, e)
 	return w.scroll.Event(ctx, e)
+}
+
+func (w *TableViewWidget) handleControllerKey(ctx widget.Context, key event.Key) bool {
+	if w.cfg.selectedRow == nil || w.cfg.rowCount <= 0 {
+		return false
+	}
+	row := w.cfg.selectedRow.Get()
+	if row < 0 || row >= w.cfg.rowCount {
+		row = 0
+	}
+	next := row
+	switch key {
+	case event.KeyUp, event.KeyLeft:
+		next--
+	case event.KeyDown, event.KeyRight:
+		next++
+	case event.KeyPageUp:
+		next -= maxTableRows(w)
+	case event.KeyPageDown:
+		next += maxTableRows(w)
+	case event.KeyEnter, event.KeyNumpadEnter, event.KeySpace:
+		if w.cfg.onRowClick != nil {
+			w.cfg.onRowClick(row)
+			return true
+		}
+		return false
+	default:
+		return false
+	}
+	if next < 0 {
+		next = 0
+	}
+	if next >= w.cfg.rowCount {
+		next = w.cfg.rowCount - 1
+	}
+	if next != row {
+		w.setSelectedRow(ctx, next)
+		w.scroll.Event(ctx, event.NewKeyEvent(event.KeyPress, key, 0, event.ModNone))
+	}
+	return true
+}
+
+func maxTableRows(w *TableViewWidget) int {
+	if w == nil || w.cfg.rowHeight <= 0 || w.bodyHeight <= 0 {
+		return 1
+	}
+	rows := int(w.bodyHeight / w.cfg.rowHeight)
+	if rows < 1 {
+		return 1
+	}
+	return rows
 }
 
 func (w *TableViewWidget) IsFocusable() bool {

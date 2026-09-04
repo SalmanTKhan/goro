@@ -102,6 +102,20 @@ type WorldMode struct {
 	lockedAttackID             uint32
 	attackFocusID              uint32
 	attackFocusStart           time.Time
+	controllerMoveDir          input.Direction8
+	controllerMoveTargetX      int
+	controllerMoveTargetY      int
+	controllerMoveTargetKnown  bool
+	controllerStopPending      bool
+	controllerStopWaitForAck   bool
+	controllerZoomAt           time.Time
+	controllerMenuHeldAt       time.Time
+	controllerMenuSuppressed   bool
+	controllerFocusItemID      uint32
+	controllerFocusItemStart   time.Time
+	lastCameraResetClickAt     time.Time
+	lastCameraResetClickX      int
+	lastCameraResetClickY      int
 	scriptHighlight            actorHighlight
 	lastAttackAt               time.Time
 	lastChaseAt                time.Time
@@ -242,6 +256,7 @@ type worldUI struct {
 	playerContext        gameui.PlayerContextMenu
 	tradeWindow          gameui.TradeWindow
 	settingsWindow       gameui.SettingsWindow
+	controllerWindow     gameui.ControllerWindow
 	shortcutBar          gameui.ShortcutBar
 }
 
@@ -270,6 +285,7 @@ func (u *worldUI) nonConsoleKeyboardInputBlocked(ctx client.Context) bool {
 		u.mercenaryConfirm.IsOpen() ||
 		u.starPlaceConfirm.IsOpen() ||
 		u.settingsWindow.IsOpen() ||
+		u.controllerWindow.IsOpen() ||
 		u.autoSpellWindow.IsOpen() ||
 		u.identifyWindow.IsOpen() ||
 		u.cardWindow.IsOpen() ||
@@ -407,8 +423,25 @@ func (m *WorldMode) Name() string {
 	return "world"
 }
 
+// registerUIPredicates tells the UI manager about the two pieces of world state
+// the controller routing needs but that live outside the widget tree: whether
+// the chat console owns text entry, and whether a rebinding capture is open.
+func (m *WorldMode) registerUIPredicates(ctx client.Context) {
+	registrar, ok := ctx.UIManager.(interface {
+		SetTextInputPredicate(func() bool)
+		SetControllerRebindPredicate(func() bool)
+	})
+	if !ok {
+		return
+	}
+	registrar.SetTextInputPredicate(func() bool { return m.ui.console.Active() })
+	registrar.SetControllerRebindPredicate(func() bool { return m.ui.controllerWindow.RebindActive() })
+	m.ui.settingsWindow.OnControllerSetup = func() { m.ui.controllerWindow.Toggle(ctx) }
+}
+
 func (m *WorldMode) Enter(ctx client.Context) {
 	now := time.Now()
+	m.registerUIPredicates(ctx)
 	m.bindNPCDialogLifecycle()
 	m.startMapPrewarm()
 	m.camera.ResetTracking()
@@ -686,6 +719,7 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 		return nil, nil
 	}
 
+	m.preemptControllerCombat(ctx)
 	m.updatePendingAttack(ctx, "update", false)
 	m.processPendingAttack(ctx)
 	m.updatePendingPickup(ctx, "update", false)
@@ -720,6 +754,10 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 	m.ui.console.UpdatePresentation(ctx)
 	dead := playerIsDead(ctx)
 	keyboardBlocked := m.ui.keyboardInputBlocked(ctx)
+	if m.handleMouseCameraReset(ctx, dead || keyboardBlocked) {
+		return nil, nil
+	}
+	m.updateControllerInput(ctx, dead, keyboardBlocked)
 	m.updateBotInput(ctx, !dead && !keyboardBlocked)
 	if m.updatePetSlotMachine(ctx) {
 		return nil, nil
@@ -931,6 +969,9 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 		return nil, nil
 	}
 	if m.ui.settingsWindow.Update(ctx) {
+		return nil, nil
+	}
+	if m.ui.controllerWindow.Update(ctx) {
 		return nil, nil
 	}
 	if !dead && m.ui.escapeMenu.Update(ctx) {
@@ -1472,6 +1513,7 @@ func (m *WorldMode) nextWorldMode() *WorldMode {
 	next.pendingChatRoom = m.pendingChatRoom
 	next.ui.partySettings = m.ui.partySettings
 	next.ui.settingsWindow = m.ui.settingsWindow
+	next.ui.controllerWindow = m.ui.controllerWindow
 	next.ui.partyCreate = m.ui.partyCreate
 	next.ui.partyInvite = m.ui.partyInvite
 	next.ui.skillTextPrompt = m.ui.skillTextPrompt
@@ -1517,6 +1559,10 @@ func (m *WorldMode) requestNPCTalk(ctx client.Context, actor worldstate.Actor, s
 	if playerIsDead(ctx) {
 		return
 	}
+	// Talking is an explicit non-combat action. Clear both queued chase and
+	// lock-on state before contacting the NPC so an earlier monster target
+	// cannot resume while the server is opening the conversation.
+	m.clearControllerCombatIntent()
 	if ctx.Network == nil {
 		if ctx.Offline != nil {
 			m.clearLockedAttack()
@@ -1593,6 +1639,7 @@ func (m *WorldMode) Draw(ctx client.Context, screen *render.Frame) {
 		m.ui.homunculusSkill.Draw(screen, ctx, m)
 		m.ui.mercenarySkill.Draw(screen, ctx, m)
 		m.drawHoveredGroundItemLabel(screen, ctx, projection, now)
+		m.drawControllerFocusedTargetNameLabel(screen, ctx, projection, now)
 	}
 }
 

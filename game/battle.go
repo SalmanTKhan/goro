@@ -316,6 +316,7 @@ func (m *WorldMode) focusAttackTarget(targetID uint32, now time.Time) {
 		m.clearAttackFocus()
 		return
 	}
+	m.clearControllerItemFocus()
 	if m.attackFocusID == targetID {
 		return
 	}
@@ -326,6 +327,7 @@ func (m *WorldMode) focusAttackTarget(targetID uint32, now time.Time) {
 func (m *WorldMode) clearAttackFocus() {
 	m.attackFocusID = 0
 	m.attackFocusStart = time.Time{}
+	m.clearControllerItemFocus()
 }
 
 func (m *WorldMode) continuePendingAttack(ctx client.Context, source string) {

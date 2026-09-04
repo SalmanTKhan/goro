@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	uiapp "github.com/gogpu/ui/app"
 	"github.com/kivutar/goro/input"
 	"github.com/kivutar/goro/mobileui"
 	"github.com/kivutar/goro/network"
@@ -273,4 +274,105 @@ func npcDialogPlainText(runs []npcDialogTextRun) string {
 		text += run.text
 	}
 	return text
+}
+
+func TestNPCDialogConfirmRequiresReleaseBeforeAdvancing(t *testing.T) {
+	// Regression: pressing confirm to talk to an NPC opened the dialog and then
+	// advanced past its first page on that same held press.
+	var dialog NPCDialog
+	dialog.open = true
+	dialog.action = npcDialogActionNext
+	dialog.confirmArmed = false
+
+	state := input.NewState()
+	state.SetKey(input.KeyEnter, true)
+	ctx := Context{Input: state}
+
+	dialog.Update(ctx)
+	if dialog.confirmArmed {
+		t.Fatal("confirm armed while still held")
+	}
+
+	// Releasing arms it, but the release itself must not advance.
+	state.EndFrame()
+	state.SetKey(input.KeyEnter, false)
+	dialog.Update(ctx)
+	if !dialog.confirmArmed {
+		t.Fatal("confirm not armed after release")
+	}
+
+	// The next genuine press is the one that advances.
+	state.EndFrame()
+	state.SetKey(input.KeyEnter, true)
+	if !state.JustPressed(input.KeyEnter) {
+		t.Fatal("test setup: expected a press edge")
+	}
+}
+
+func TestNPCDialogControllerConfirmOwnsNextAction(t *testing.T) {
+	app := uiapp.New(uiapp.WithRenderMode(uiapp.RenderModeFrameworkManaged))
+	manager := NewManager()
+	manager.SetUIApp(basicMenuTestApp{app: app})
+	ctx := Context{
+		Input:     input.NewState(),
+		UIManager: manager,
+		ScreenW:   800,
+		ScreenH:   600,
+	}
+	dialog := NPCDialog{}
+	dialog.Apply(network.NPCDialog{Kind: network.NPCDialogSay, NPCID: 100, Message: "Hello"})
+	dialog.Apply(network.NPCDialog{Kind: network.NPCDialogNext, NPCID: 100})
+	if !dialog.Update(ctx) {
+		t.Fatal("NPC dialog did not publish")
+	}
+	app.Frame()
+
+	if !manager.ControllerUIActive() {
+		t.Fatal("NPC Next action did not activate controller UI")
+	}
+	focus := firstControllerFocusable(dialog.dialogWindow.published)
+	if focus == nil {
+		t.Fatal("NPC Next dialog has no controller-focusable action")
+	}
+	if controllerFocus, ok := focus.(interface{ IsFocused() bool }); !ok || !controllerFocus.IsFocused() {
+		t.Fatalf("NPC Next action focus = %T, want initially focused", focus)
+	}
+	handler, ok := manager.overlays[len(manager.overlays)-1].(interface {
+		HandleControllerAction(input.UIAction) bool
+	})
+	if !ok {
+		t.Fatalf("top NPC overlay %T has no semantic controller handler", manager.overlays[len(manager.overlays)-1])
+	}
+	if !handler.HandleControllerAction(input.UIActionConfirm) {
+		t.Fatal("NPC dialog did not consume controller Confirm")
+	}
+	if dialog.status != "not connected" {
+		t.Fatalf("controller Next status = %q, want the local no-network result", dialog.status)
+	}
+}
+
+func TestNPCDialogStaysAboveLaterHUDOverlays(t *testing.T) {
+	app := uiapp.New(uiapp.WithRenderMode(uiapp.RenderModeFrameworkManaged))
+	manager := NewManager()
+	manager.SetUIApp(basicMenuTestApp{app: app})
+	ctx := Context{
+		Input:     input.NewState(),
+		UIManager: manager,
+		ScreenW:   800,
+		ScreenH:   600,
+	}
+	dialog := NPCDialog{}
+	dialog.Apply(network.NPCDialog{Kind: network.NPCDialogSay, NPCID: 100, Message: "Hello"})
+	dialog.Apply(network.NPCDialog{Kind: network.NPCDialogNext, NPCID: 100})
+	if !dialog.Update(ctx) {
+		t.Fatal("NPC dialog did not publish")
+	}
+
+	// The world redraws HUD overlays after NPCDialog.Update. They must not
+	// displace the modal dialog from the foreground controller scope.
+	hud := positionedWidget(newInertOverlay(), 10, 10, 80, 40)
+	manager.AddOverlay(hud)
+	if len(manager.overlays) == 0 || manager.overlays[len(manager.overlays)-1] != dialog.dialogWindow.published {
+		t.Fatal("later HUD overlay displaced NPC dialog from foreground")
+	}
 }

@@ -467,6 +467,10 @@ func (w *equipmentSlotWidget) Layout(ctx widget.Context, constraints geometry.Co
 	return size
 }
 
+func (w *equipmentSlotWidget) IsFocusable() bool {
+	return w != nil && w.IsVisible() && w.IsEnabled() && w.cfg.hasItem
+}
+
 func (w *equipmentSlotWidget) Draw(ctx widget.Context, canvas widget.Canvas) {
 	if !w.IsVisible() {
 		return
@@ -522,10 +526,22 @@ func (w *equipmentSlotWidget) Draw(ctx widget.Context, canvas widget.Canvas) {
 		false,
 		align,
 	)
+	if w.IsFocused() {
+		canvas.StrokeRect(bounds.Inset(geometry.UniformInsets(-2)), rotheme.Default.Colors.InputFocus, 2)
+	}
 }
 
 func (w *equipmentSlotWidget) Event(ctx widget.Context, e event.Event) bool {
 	if !w.IsVisible() || !w.IsEnabled() {
+		return false
+	}
+	if key, ok := e.(*event.KeyEvent); ok {
+		if key.KeyType != event.KeyRelease && w.IsFocused() && w.IsFocusable() && (key.Key == event.KeyEnter || key.Key == event.KeySpace) {
+			if w.cfg.onClick != nil {
+				w.cfg.onClick(w.cfg.item)
+			}
+			return true
+		}
 		return false
 	}
 	mouse, ok := e.(*event.MouseEvent)

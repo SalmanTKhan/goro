@@ -271,6 +271,27 @@ func (g *Game) InputState() *input.State {
 	return g.input
 }
 
+// ControllerSettings exposes the desktop controller policy to the renderer
+// without making the render package depend on the application configuration
+// graph.
+func (g *Game) ControllerSettings() input.ControllerSettings {
+	if g == nil {
+		return input.DefaultControllerSettings()
+	}
+	return g.cfg.Controller.Normalized()
+}
+
+// ApplyControllerSettings updates the controller policy at runtime. The
+// renderer re-reads ControllerSettings every poll, so a change here takes
+// effect within a frame.
+func (g *Game) ApplyControllerSettings(settings input.ControllerSettings) bool {
+	if g == nil {
+		return false
+	}
+	g.cfg.Controller = settings.Normalized()
+	return true
+}
+
 // MountAssetOverlay activates a verified mobile delivery layer at the next
 // render-thread command boundary. Callers never modify the embedded base.
 func (g *Game) MountAssetOverlay(overlay res.AssetOverlay) error {
@@ -942,5 +963,6 @@ func (g *Game) modeContext() client.Context {
 		UIManager:                g.ui,
 		MobileSettingsHost:       g,
 		UISettingsHost:           g,
+		ControllerSettingsHost:   g,
 	}
 }

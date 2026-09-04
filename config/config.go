@@ -26,6 +26,7 @@ type Config struct {
 	MobileSession MobileSessionConfig
 	Fog           FogConfig
 	Gameplay      GameplayConfig
+	Controller    input.ControllerSettings
 	UI            input.UISettings
 	Mobile        input.MobileControls
 	MobileDisplay input.MobileDisplaySettings
@@ -143,6 +144,7 @@ type UserSettings struct {
 	SnapItems     bool
 	Mobile        *input.MobileControls
 	MobileDisplay *input.MobileDisplaySettings
+	Controller    *input.ControllerSettings
 }
 
 func UserConfigPath() (string, error) {
@@ -276,6 +278,9 @@ func SaveUserSettings(settings UserSettings) (string, error) {
 			"itemsnap":     formatINIValueBool(settings.SnapItems),
 		},
 	}
+	if settings.Controller != nil {
+		values["controller"] = controllerINIValues(*settings.Controller)
+	}
 	if settings.Mobile != nil {
 		mobile := settings.Mobile.Normalized()
 		values["mobile"] = map[string]string{
@@ -297,6 +302,61 @@ func SaveUserSettings(settings UserSettings) (string, error) {
 		return "", err
 	}
 	data := upsertINIValues(string(existing), values)
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// controllerINIValues renders a controller settings block. It is shared by the
+// full user-settings writer and SaveControllerSettings so the two can never
+// disagree about key names or formatting.
+func controllerINIValues(settings input.ControllerSettings) map[string]string {
+	controller := settings.Normalized()
+	return map[string]string{
+		"enabled":             formatINIValueBool(controller.Enabled),
+		"deadzone":            formatINIValueFloat(float64(controller.Deadzone)),
+		"outer_deadzone":      formatINIValueFloat(float64(controller.OuterDeadzone)),
+		"camera_sensitivity":  formatINIValueFloat(float64(controller.CameraSensitivity)),
+		"invert_camera_y":     formatINIValueBool(controller.InvertCameraY),
+		"move_mode":           formatINIControllerMoveMode(controller.MoveMode),
+		"ui_nav_mode":         formatINIControllerUINavMode(controller.UINavMode),
+		"cursor_speed":        formatINIValueFloat(float64(controller.CursorSpeed)),
+		"trigger_deadzone":    formatINIValueFloat(float64(controller.TriggerDeadzone)),
+		"nav_repeat_delay_ms": strconv.Itoa(controller.NavRepeatDelayMS),
+		"nav_repeat_ms":       strconv.Itoa(controller.NavRepeatMS),
+		"rumble":              formatINIValueBool(controller.Rumble),
+		"confirm_button":      formatINIControllerButton(controller.Bindings.Confirm),
+		"cancel_button":       formatINIControllerButton(controller.Bindings.Cancel),
+		"attack_button":       formatINIControllerButton(controller.Bindings.Attack),
+		"loot_button":         formatINIControllerButton(controller.Bindings.Loot),
+		"target_previous":     formatINIControllerButton(controller.Bindings.TargetPrevious),
+		"target_next":         formatINIControllerButton(controller.Bindings.TargetNext),
+		"reset_camera":        formatINIControllerButton(controller.Bindings.ResetCamera),
+		"menu_button":         formatINIControllerButton(controller.Bindings.Menu),
+		"map_button":          formatINIControllerButton(controller.Bindings.Map),
+		"left_modifier":       formatINIControllerButton(controller.Bindings.LeftModifier),
+		"right_modifier":      formatINIControllerButton(controller.Bindings.RightModifier),
+	}
+}
+
+// SaveControllerSettings updates only the controller section of the user INI,
+// so a rebinding cannot disturb unrelated settings.
+func SaveControllerSettings(settings input.ControllerSettings) (string, error) {
+	path, err := UserConfigPath()
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", err
+	}
+	existing, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+	data := upsertINIValues(string(existing), map[string]map[string]string{
+		"controller": controllerINIValues(settings),
+	})
 	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
 		return "", err
 	}
@@ -423,6 +483,7 @@ func defaultConfig() Config {
 		Gameplay: GameplayConfig{
 			NoCtrl: true,
 		},
+		Controller:    input.DefaultControllerSettings(),
 		UI:            input.DefaultUISettings(),
 		Mobile:        input.DefaultMobileControls(),
 		MobileDisplay: input.MobileDisplaySettings{ShowMinimap: true, Presentation: input.MobilePresentationMobileUI},
@@ -649,6 +710,52 @@ func applyConfigValue(cfg *Config, section, key, value string) error {
 		return setBool(value, &cfg.Gameplay.SnapItems)
 	case "gameplay.forceuserai":
 		return setBool(value, &cfg.Gameplay.ForceUserAI)
+	case "controller.enabled":
+		return setBool(value, &cfg.Controller.Enabled)
+	case "controller.deadzone":
+		return setFloat32(value, &cfg.Controller.Deadzone)
+	case "controller.outerdeadzone", "controller.outer_deadzone":
+		return setFloat32(value, &cfg.Controller.OuterDeadzone)
+	case "controller.camerasensitivity", "controller.camera_sensitivity":
+		return setFloat32(value, &cfg.Controller.CameraSensitivity)
+	case "controller.invertcameray", "controller.invert_camera_y":
+		return setBool(value, &cfg.Controller.InvertCameraY)
+	case "controller.movemode", "controller.move_mode":
+		return setControllerMoveMode(value, &cfg.Controller.MoveMode)
+	case "controller.uinavmode", "controller.ui_nav_mode":
+		return setControllerUINavMode(value, &cfg.Controller.UINavMode)
+	case "controller.cursorspeed", "controller.cursor_speed":
+		return setFloat32(value, &cfg.Controller.CursorSpeed)
+	case "controller.triggerdeadzone", "controller.trigger_deadzone":
+		return setFloat32(value, &cfg.Controller.TriggerDeadzone)
+	case "controller.navrepeatdelayms", "controller.nav_repeat_delay_ms":
+		return setInt(value, &cfg.Controller.NavRepeatDelayMS)
+	case "controller.navrepeatms", "controller.nav_repeat_ms":
+		return setInt(value, &cfg.Controller.NavRepeatMS)
+	case "controller.rumble":
+		return setBool(value, &cfg.Controller.Rumble)
+	case "controller.confirmbutton", "controller.confirm_button":
+		return setControllerButton(value, &cfg.Controller.Bindings.Confirm)
+	case "controller.cancelbutton", "controller.cancel_button":
+		return setControllerButton(value, &cfg.Controller.Bindings.Cancel)
+	case "controller.attackbutton", "controller.attack_button":
+		return setControllerButton(value, &cfg.Controller.Bindings.Attack)
+	case "controller.lootbutton", "controller.loot_button":
+		return setControllerButton(value, &cfg.Controller.Bindings.Loot)
+	case "controller.targetprevious", "controller.target_previous":
+		return setControllerButton(value, &cfg.Controller.Bindings.TargetPrevious)
+	case "controller.targetnext", "controller.target_next":
+		return setControllerButton(value, &cfg.Controller.Bindings.TargetNext)
+	case "controller.resetcamera", "controller.reset_camera":
+		return setControllerButton(value, &cfg.Controller.Bindings.ResetCamera)
+	case "controller.menubutton", "controller.menu_button":
+		return setControllerButton(value, &cfg.Controller.Bindings.Menu)
+	case "controller.mapbutton", "controller.map_button":
+		return setControllerButton(value, &cfg.Controller.Bindings.Map)
+	case "controller.leftmodifier", "controller.left_modifier":
+		return setControllerButton(value, &cfg.Controller.Bindings.LeftModifier)
+	case "controller.rightmodifier", "controller.right_modifier":
+		return setControllerButton(value, &cfg.Controller.Bindings.RightModifier)
 	case "mobile.movement":
 		return setMobileMovement(value, &cfg.Mobile.MovementMode)
 	case "mobile.camerasensitivity":
@@ -706,6 +813,7 @@ func validateConfig(cfg *Config) error {
 		return fmt.Errorf("sfx volume must be between 0 and 1")
 	}
 	cfg.UI = cfg.UI.Normalized()
+	cfg.Controller = cfg.Controller.Normalized()
 	if cfg.Render.BenchSeconds < 0 || cfg.Render.BenchWarmupSeconds < 0 {
 		return fmt.Errorf("benchmark durations must be non-negative")
 	}
@@ -721,7 +829,7 @@ func validateConfig(cfg *Config) error {
 }
 
 func upsertINIValues(src string, values map[string]map[string]string) string {
-	sectionOrder := []string{"window", "render", "capture", "ui", "audio", "gameplay", "mobile"}
+	sectionOrder := []string{"window", "render", "capture", "ui", "audio", "gameplay", "mobile", "controller"}
 	seenSections := make(map[string]bool)
 	written := make(map[string]map[string]bool)
 	for section := range values {
@@ -792,7 +900,7 @@ func upsertINIValues(src string, values map[string]map[string]string) string {
 }
 
 func sortedINIKeys(values map[string]string) []string {
-	preferred := []string{"fullscreen", "vsync", "fps", "ffmpeg_path", "scale", "bgm", "bgm_volume", "sfx_volume", "no_shift", "no_ctrl", "less_effects", "snap", "itemsnap", "movement", "camera_sensitivity", "zoom_sensitivity", "invert_camera_y", "long_press_ms", "show_target_names", "show_minimap", "presentation"}
+	preferred := []string{"fullscreen", "vsync", "fps", "ffmpeg_path", "scale", "bgm", "bgm_volume", "sfx_volume", "no_shift", "no_ctrl", "less_effects", "snap", "itemsnap", "movement", "camera_sensitivity", "zoom_sensitivity", "invert_camera_y", "long_press_ms", "show_target_names", "show_minimap", "presentation", "enabled", "deadzone", "outer_deadzone", "trigger_deadzone", "move_mode", "ui_nav_mode", "cursor_speed", "nav_repeat_delay_ms", "nav_repeat_ms", "rumble", "confirm_button", "cancel_button", "attack_button", "loot_button", "target_previous", "target_next", "reset_camera", "menu_button", "map_button", "left_modifier", "right_modifier"}
 	keys := make([]string, 0, len(values))
 	seen := make(map[string]bool, len(values))
 	for _, key := range preferred {
@@ -874,6 +982,140 @@ func setFloat(raw string, dst *float64) error {
 		return fmt.Errorf("invalid float %q", raw)
 	}
 	*dst = value
+	return nil
+}
+
+func setFloat32(raw string, dst *float32) error {
+	var value float64
+	if err := setFloat(raw, &value); err != nil {
+		return err
+	}
+	*dst = float32(value)
+	return nil
+}
+
+func setControllerButton(raw string, dst *input.ControllerButton) error {
+	button, ok := parseControllerButton(raw)
+	if !ok {
+		return fmt.Errorf("unknown controller button %q", raw)
+	}
+	*dst = button
+	return nil
+}
+
+func parseControllerButton(raw string) (input.ControllerButton, bool) {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	value = strings.NewReplacer("-", "_", " ", "_").Replace(value)
+	switch value {
+	case "south", "cross", "a":
+		return input.ControllerButtonSouth, true
+	case "east", "circle", "b":
+		return input.ControllerButtonEast, true
+	case "west", "square", "x":
+		return input.ControllerButtonWest, true
+	case "north", "triangle", "y":
+		return input.ControllerButtonNorth, true
+	case "back", "share":
+		return input.ControllerButtonBack, true
+	case "start", "options":
+		return input.ControllerButtonStart, true
+	case "left_stick", "l3":
+		return input.ControllerButtonLeftStick, true
+	case "right_stick", "r3":
+		return input.ControllerButtonRightStick, true
+	case "left_shoulder", "l1":
+		return input.ControllerButtonLeftShoulder, true
+	case "right_shoulder", "r1":
+		return input.ControllerButtonRightShoulder, true
+	case "dpad_up":
+		return input.ControllerButtonDPadUp, true
+	case "dpad_down":
+		return input.ControllerButtonDPadDown, true
+	case "dpad_left":
+		return input.ControllerButtonDPadLeft, true
+	case "dpad_right":
+		return input.ControllerButtonDPadRight, true
+	case "touchpad":
+		return input.ControllerButtonTouchpad, true
+	case "left_trigger", "l2":
+		return input.ControllerButtonLeftTrigger, true
+	case "right_trigger", "r2":
+		return input.ControllerButtonRightTrigger, true
+	default:
+		return 0, false
+	}
+}
+
+func formatINIControllerButton(button input.ControllerButton) string {
+	switch button {
+	case input.ControllerButtonSouth:
+		return "south"
+	case input.ControllerButtonEast:
+		return "east"
+	case input.ControllerButtonWest:
+		return "west"
+	case input.ControllerButtonNorth:
+		return "north"
+	case input.ControllerButtonBack:
+		return "back"
+	case input.ControllerButtonStart:
+		return "start"
+	case input.ControllerButtonLeftStick:
+		return "left_stick"
+	case input.ControllerButtonRightStick:
+		return "right_stick"
+	case input.ControllerButtonLeftShoulder:
+		return "left_shoulder"
+	case input.ControllerButtonRightShoulder:
+		return "right_shoulder"
+	case input.ControllerButtonDPadUp:
+		return "dpad_up"
+	case input.ControllerButtonDPadDown:
+		return "dpad_down"
+	case input.ControllerButtonDPadLeft:
+		return "dpad_left"
+	case input.ControllerButtonDPadRight:
+		return "dpad_right"
+	case input.ControllerButtonTouchpad:
+		return "touchpad"
+	case input.ControllerButtonLeftTrigger:
+		return "left_trigger"
+	case input.ControllerButtonRightTrigger:
+		return "right_trigger"
+	default:
+		return "south"
+	}
+}
+
+func formatINIControllerMoveMode(value input.ControllerMoveMode) string {
+	if value == input.ControllerMoveCursor {
+		return "cursor"
+	}
+	return "character"
+}
+
+func formatINIControllerUINavMode(value input.ControllerUINavMode) string {
+	if value == input.ControllerUINavFocus {
+		return "focus"
+	}
+	return "cursor"
+}
+
+func setControllerMoveMode(raw string, dst *input.ControllerMoveMode) error {
+	mode, ok := input.ParseControllerMoveMode(raw)
+	if !ok {
+		return fmt.Errorf("invalid controller move mode %q", raw)
+	}
+	*dst = mode
+	return nil
+}
+
+func setControllerUINavMode(raw string, dst *input.ControllerUINavMode) error {
+	mode, ok := input.ParseControllerUINavMode(raw)
+	if !ok {
+		return fmt.Errorf("invalid controller ui nav mode %q", raw)
+	}
+	*dst = mode
 	return nil
 }
 

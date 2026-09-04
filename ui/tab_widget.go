@@ -51,6 +51,10 @@ func (w *tabWidget) Layout(ctx widget.Context, constraints geometry.Constraints)
 	return size
 }
 
+func (w *tabWidget) IsFocusable() bool {
+	return w != nil && w.IsVisible() && w.IsEnabled() && !w.cfg.disabled
+}
+
 func (w *tabWidget) Draw(ctx widget.Context, canvas widget.Canvas) {
 	bounds := w.Bounds()
 	fill := rotheme.Default.Colors.Button
@@ -68,6 +72,15 @@ func (w *tabWidget) Draw(ctx widget.Context, canvas widget.Canvas) {
 }
 
 func (w *tabWidget) Event(ctx widget.Context, e event.Event) bool {
+	if key, ok := e.(*event.KeyEvent); ok {
+		if key.KeyType != event.KeyRelease && w.IsFocused() && w.IsFocusable() && (key.Key == event.KeyEnter || key.Key == event.KeySpace) {
+			if w.cfg.onClick != nil {
+				w.cfg.onClick()
+			}
+			return true
+		}
+		return false
+	}
 	mouse, ok := e.(*event.MouseEvent)
 	if !ok {
 		return false

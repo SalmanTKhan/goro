@@ -7,16 +7,44 @@ import (
 	"time"
 
 	uiapp "github.com/gogpu/ui/app"
+	"github.com/gogpu/ui/core/button"
+	"github.com/gogpu/ui/core/checkbox"
+	"github.com/gogpu/ui/event"
 	"github.com/gogpu/ui/geometry"
 	"github.com/gogpu/ui/primitives"
 	"github.com/gogpu/ui/uitest"
 	"github.com/gogpu/ui/widget"
 	"github.com/kivutar/goro/config"
+	"github.com/kivutar/goro/input"
 )
 
 type emptyUITestRoot struct {
 	*primitives.BoxWidget
 }
+
+type controllerEventRecorder struct {
+	*widget.WidgetBase
+	events int
+}
+
+func newControllerEventRecorder() *controllerEventRecorder {
+	return &controllerEventRecorder{WidgetBase: widget.NewWidgetBase()}
+}
+
+func (r *controllerEventRecorder) Layout(_ widget.Context, constraints geometry.Constraints) geometry.Size {
+	size := constraints.BiggestFinite(1, 1)
+	r.SetBounds(geometry.FromPointSize(r.Position(), size))
+	return size
+}
+
+func (r *controllerEventRecorder) Draw(widget.Context, widget.Canvas) {}
+
+func (r *controllerEventRecorder) Event(widget.Context, event.Event) bool {
+	r.events++
+	return true
+}
+
+func (r *controllerEventRecorder) Children() []widget.Widget { return nil }
 
 func TestRecordingFrameScheduleUsesFixedFPS(t *testing.T) {
 	runtime := &captureRuntime{recordFPS: 30}
@@ -156,6 +184,117 @@ func TestSetUIImageKeepsCurrentGPUTextureWhenImageUnchanged(t *testing.T) {
 
 	if _, ok := gpu.textures[image]; !ok {
 		t.Fatal("current UI image texture was released even though the image did not change")
+	}
+}
+
+func TestControllerKeyboardSpatialFocusUsesNestedCoordinates(t *testing.T) {
+	app := uiapp.New(uiapp.WithRenderMode(uiapp.RenderModeFrameworkManaged))
+	bridge := &uiAppBridge{App: app}
+	first := button.New(button.TextOpt("one"))
+	second := button.New(button.TextOpt("two"))
+	root := primitives.Box(
+		primitives.VBox(
+			primitives.HBox(first, second).Gap(8),
+		),
+	)
+	app.SetRoot(root)
+	app.Frame()
+
+	app.Window().FocusManager().Focus(first)
+	bridge.SetControllerMode(true)
+	if !bridge.HandleControllerAction(input.UIActionRight) {
+		t.Fatal("right controller action was not consumed")
+	}
+	if next := app.Window().FocusManager().Focused(); next == nil || next == first {
+		t.Fatalf("right controller action focused %T, want the next key after %T", next, first)
+	}
+}
+
+func TestControllerSpatialFocusStaysOnCurrentRow(t *testing.T) {
+	app := uiapp.New(uiapp.WithRenderMode(uiapp.RenderModeFrameworkManaged))
+	bridge := &uiAppBridge{App: app}
+	topLeft := button.New(button.TextOpt("top-left"))
+	topRight := button.New(button.TextOpt("top-right"))
+	bottomLeft := button.New(button.TextOpt("bottom-left"))
+	bottomRight := button.New(button.TextOpt("bottom-right"))
+	root := primitives.Box(
+		primitives.VBox(
+			primitives.HBox(topLeft, topRight).Gap(12),
+			primitives.HBox(bottomLeft, bottomRight).Gap(12),
+		).Gap(12),
+	)
+	app.SetRoot(root)
+	app.Frame()
+
+	app.Window().FocusManager().Focus(topLeft)
+	bridge.SetControllerMode(true)
+	if !bridge.HandleControllerAction(input.UIActionRight) {
+		t.Fatal("right controller action was not consumed")
+	}
+	if focused := app.Window().FocusManager().Focused(); focused != topRight {
+		t.Fatalf("right controller action focused %T, want top-right button", focused)
+	}
+}
+
+func TestControllerFocusChangeMarksBothControlsForRedraw(t *testing.T) {
+	app := uiapp.New(uiapp.WithRenderMode(uiapp.RenderModeFrameworkManaged))
+	bridge := &uiAppBridge{App: app}
+	first := button.New(button.TextOpt("one"))
+	second := button.New(button.TextOpt("two"))
+	root := primitives.HBox(first, second).Gap(8)
+	app.SetRoot(root)
+	app.Frame()
+	bridge.SetControllerMode(true)
+	first.ClearRedraw()
+	second.ClearRedraw()
+	root.ClearRedraw()
+	app.Window().FocusManager().Focus(first)
+	if !bridge.HandleControllerAction(input.UIActionRight) {
+		t.Fatal("right controller action was not consumed")
+	}
+	if !first.NeedsRedraw() || !second.NeedsRedraw() {
+		t.Fatalf("focus transition redraw flags = first:%t second:%t, want both true", first.NeedsRedraw(), second.NeedsRedraw())
+	}
+}
+
+func TestControllerActionDoesNotPropagateBelowTopOverlay(t *testing.T) {
+	app := uiapp.New(uiapp.WithRenderMode(uiapp.RenderModeFrameworkManaged))
+	bridge := &uiAppBridge{App: app}
+	underlying := newControllerEventRecorder()
+	topButton := button.New(button.TextOpt("top"))
+	root := primitives.VBox(
+		underlying,
+		primitives.Box(topButton).Width(120).Height(40),
+	)
+	app.SetRoot(root)
+	app.Frame()
+
+	if !bridge.HandleControllerAction(input.UIActionConfirm) {
+		t.Fatal("confirm action was not consumed by the visible overlay scope")
+	}
+	if underlying.events != 0 {
+		t.Fatalf("confirm propagated to underlying widget %d time(s)", underlying.events)
+	}
+	if focused := app.Window().FocusManager().Focused(); focused != topButton {
+		t.Fatalf("confirm focused %T, want top button", focused)
+	}
+}
+
+func TestControllerConfirmActivatesCheckboxWithSpaceFallback(t *testing.T) {
+	toggled := false
+	app := uiapp.New(uiapp.WithRenderMode(uiapp.RenderModeFrameworkManaged))
+	bridge := &uiAppBridge{App: app}
+	check := checkbox.New(checkbox.OnToggle(func(enabled bool) { toggled = enabled }))
+	root := primitives.Box(check).Width(180).Height(40)
+	app.SetRoot(root)
+	app.Frame()
+	app.Window().FocusManager().Focus(check)
+
+	if !bridge.HandleControllerAction(input.UIActionConfirm) {
+		t.Fatal("confirm action was not consumed by checkbox")
+	}
+	if !toggled {
+		t.Fatal("controller Confirm did not toggle checkbox")
 	}
 }
 

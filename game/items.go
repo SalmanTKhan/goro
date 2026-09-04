@@ -87,6 +87,9 @@ func (m *WorldMode) applyFloorItemDisappear(ctx client.Context, disappear networ
 	if m.pendingPickup.itemID == disappear.ID {
 		m.pendingPickup = pickupIntent{}
 	}
+	if m.controllerFocusItemID == disappear.ID {
+		m.clearControllerItemFocus()
+	}
 	glog.Debugf("floor item disappear id=%d", disappear.ID)
 }
 
@@ -398,6 +401,34 @@ func (m *WorldMode) drawHoveredGroundItemLabel(screen *render.Frame, ctx client.
 	point := projection.Project(cellCenter(x), cellCenter(y), z)
 	scale := actorBillboardScreenScale(projection, cellCenter(x), cellCenter(y), z) * groundItemScreenScale
 	drawGroundItemNameLabel(screen, label, float64(point.x), float64(point.y), scale)
+}
+
+func (m *WorldMode) drawControllerItemFocusMarker(screen *render.Frame, ctx client.Context, projection sceneProjection, now time.Time) {
+	if m == nil || screen == nil || ctx.World == nil || m.controllerFocusItemID == 0 {
+		return
+	}
+	item, ok := ctx.World.Items[m.controllerFocusItemID]
+	if !ok || item.ID == 0 {
+		m.clearControllerItemFocus()
+		return
+	}
+	if m.controllerFocusItemStart.IsZero() {
+		m.controllerFocusItemStart = now
+	}
+	state := m.loadedCursorState(ctx)
+	frame, ok := state.frameAt(cursorActionLock, cursorInfo(cursorActionLock), m.controllerFocusItemStart, now)
+	if !ok {
+		return
+	}
+	x, y := floorItemWorldPosition(item)
+	z := floorItemRenderHeight(ctx.World, item, now)
+	point := projection.Project(cellCenter(x), cellCenter(y), z)
+	scale := actorBillboardScreenScale(projection, cellCenter(x), cellCenter(y), z) * groundItemScreenScale
+	centerX, centerY := groundItemPickBoundsCenter(float64(point.x), float64(point.y), scale)
+	var opts render.DrawImageOptions
+	opts.GeoM.Translate(math.Round(centerX-frame.anchorX), math.Round(centerY-frame.anchorY))
+	opts.Filter = spriteDrawFilter()
+	screen.DrawImage(frame.image, &opts)
 }
 
 func clickedGroundItem(ctx client.Context, projection sceneProjection, mouseX, mouseY int, now time.Time) (worldstate.FloorItem, bool) {

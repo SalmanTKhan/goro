@@ -3,24 +3,26 @@ module github.com/kivutar/goro
 go 1.26.4
 
 require (
+	github.com/Zyko0/go-sdl3 v0.1.1
 	github.com/charmbracelet/log v1.0.0
 	github.com/deepteams/webp v1.2.7
 	github.com/ebitengine/oto/v3 v3.5.0-alpha.8
 	github.com/go-fonts/dejavu v0.3.4
-	github.com/klauspost/compress v1.19.2
 	github.com/gogpu/gogpu v0.44.6
 	github.com/gogpu/gpucontext v0.21.1
 	github.com/gogpu/gputypes v0.5.1
 	github.com/gogpu/naga v0.17.15
 	github.com/gogpu/ui v0.1.36
 	github.com/gogpu/wgpu v0.30.19
+	github.com/klauspost/compress v1.19.2
 	github.com/yuin/gopher-lua v1.1.2
-	gopkg.in/yaml.v3 v3.0.1
 	golang.org/x/image v0.43.0
 	golang.org/x/text v0.38.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
+	github.com/Zyko0/purego-gen v0.0.0-20250727121216-3bcd331a1e0c // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/charmbracelet/colorprofile v0.2.3-0.20250311203215-f60798e515dc // indirect
 	github.com/charmbracelet/lipgloss v1.1.0 // indirect
@@ -51,7 +53,7 @@ require (
 	github.com/godexture/sdk v0.0.0
 	github.com/gogpu/gg v0.48.16
 	github.com/jfreymuth/pulse v0.1.1 // indirect
-	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/sys v0.47.0
 )
 
 replace github.com/godexture/codec-mp3 => github.com/godexture/godec/plugins/codec-mp3 v0.0.0-20260621142744-bd77e78cfab1

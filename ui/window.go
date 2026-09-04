@@ -194,27 +194,40 @@ func windowCloseButton(enabled bool, onClose func()) widget.Widget {
 }
 
 type Window struct {
-	open        bool
-	x           int
-	y           int
-	width       int
-	height      int
-	titleHeight int
-	positioned  bool
-	userMoved   bool
-	dragging    bool
-	dragLayer   bool
-	dragDX      int
-	dragDY      int
-	dragBottom  int
-	content     widget.Widget
-	placed      widget.Widget
-	published   widget.Widget
-	opacity     float32
-	background  *widget.Color
-	fullRedraw  bool
-	CloseOnEsc  bool
-	ctx         client.Context
+	open                    bool
+	x                       int
+	y                       int
+	width                   int
+	height                  int
+	titleHeight             int
+	positioned              bool
+	userMoved               bool
+	dragging                bool
+	dragLayer               bool
+	dragDX                  int
+	dragDY                  int
+	dragBottom              int
+	content                 widget.Widget
+	placed                  widget.Widget
+	published               widget.Widget
+	opacity                 float32
+	background              *widget.Color
+	fullRedraw              bool
+	CloseOnEsc              bool
+	ctx                     client.Context
+	controllerActionHandler func(input.UIAction) bool
+	foreground              bool
+}
+
+// SetControllerActionHandler lets a semantic overlay consume a controller
+// action before the generic widget-key bridge runs. It is useful for packet
+// driven windows whose state transition is not represented by a normal button
+// click (for example NPC next/menu/cancel actions).
+func (w *Window) SetControllerActionHandler(handler func(input.UIAction) bool) {
+	if w == nil {
+		return
+	}
+	w.controllerActionHandler = handler
 }
 
 func (w *Window) EnsureWindow(width, height int) bool {
@@ -313,6 +326,42 @@ func (w *Window) Publish(ctx client.Context) {
 	ctx.UIManager.AddOverlay(root)
 }
 
+// PublishForeground publishes a modal window above ordinary HUD overlays.
+// Controller focus and semantic actions must follow the same z-order as the
+// visible UI; otherwise a minimap or shortcut bar redrawn later in the frame
+// can hide the dialog from controller dispatch while it remains on screen.
+func (w *Window) PublishForeground(ctx client.Context) {
+	if w == nil || ctx.UIManager == nil {
+		return
+	}
+	w.ctx = ctx
+	if !w.open || w.content == nil {
+		w.Unpublish(ctx)
+		return
+	}
+	root := w.Widget()
+	if root == nil {
+		return
+	}
+	manager, ok := ctx.UIManager.(interface{ AddForegroundOverlay(widget.Widget) })
+	if !ok {
+		w.Publish(ctx)
+		return
+	}
+	if w.published == root && w.foreground {
+		return
+	}
+	if w.published != nil {
+		w.Unpublish(ctx)
+	}
+	if w.fullRedraw {
+		markNeedsRedraw(root)
+	}
+	w.published = root
+	w.foreground = true
+	manager.AddForegroundOverlay(root)
+}
+
 func (w *Window) Raise(ctx client.Context) {
 	if w == nil || w.published == nil || ctx.UIManager == nil {
 		return
@@ -330,6 +379,7 @@ func (w *Window) Unpublish(ctx client.Context) {
 	clearPositionedOverlayDamage(w.published)
 	ctx.UIManager.RemoveOverlay(w.published)
 	w.published = nil
+	w.foreground = false
 }
 
 func (w *Window) SetSize(width, height int) {
@@ -691,14 +741,15 @@ func clearPositionedOverlayDamage(root widget.Widget) {
 
 type positionedOverlay struct {
 	widget.WidgetBase
-	child         widget.Widget
-	x, y          int
-	width, height int
-	damage        geometry.Rect
-	hasDamage     bool
-	hidden        bool
-	raiseOnPress  bool
-	owner         *Window
+	child                 widget.Widget
+	x, y                  int
+	width, height         int
+	damage                geometry.Rect
+	hasDamage             bool
+	hidden                bool
+	raiseOnPress          bool
+	owner                 *Window
+	controllerPassthrough bool
 }
 
 func (w *positionedOverlay) viewportChanged(oldWidth, oldHeight, width, height int) {
@@ -837,11 +888,44 @@ func (w *positionedOverlay) Event(ctx widget.Context, e event.Event) bool {
 	}
 }
 
+// HandleControllerAction is intentionally separate from Event: controller
+// actions are semantic and do not need to be faked as physical key events for
+// packet-driven overlays.
+func (w *positionedOverlay) HandleControllerAction(action input.UIAction) bool {
+	if w == nil || w.owner == nil || w.owner.controllerActionHandler == nil {
+		return false
+	}
+	return w.owner.controllerActionHandler(action)
+}
+
 func (w *positionedOverlay) Children() []widget.Widget {
-	if w.hidden || w.hasDamage || w.child == nil {
+	if w.hidden || w.child == nil {
+		return nil
+	}
+	if w.hasDamage {
 		return nil
 	}
 	return []widget.Widget{w.child}
+}
+
+// ControllerChildren exposes the logical child even while this overlay has a
+// pending paint damage region. Rendering traversal intentionally hides damaged
+// descendants until repaint, but controller focus and modal routing must not
+// lose the active control during that interval.
+func (w *positionedOverlay) ControllerChildren() []widget.Widget {
+	if w.hidden || w.child == nil {
+		return nil
+	}
+	return []widget.Widget{w.child}
+}
+
+// ControllerNavigationPassthrough marks HUD overlays that should not
+// automatically switch the gamepad into focus-navigation mode. They remain
+// available to the controller pointer and to explicit focus navigation when
+// the user is already interacting with UI, but must not steal the left stick
+// from world movement merely because they contain buttons.
+func (w *positionedOverlay) ControllerNavigationPassthrough() bool {
+	return w != nil && w.controllerPassthrough
 }
 
 func centeredWindowRect(ctx client.Context, width, height int) (int, int, int, int) {

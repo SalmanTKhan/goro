@@ -817,6 +817,7 @@ func (m *WorldMode) drawSceneActorOverlays(screen *render.Frame, ctx client.Cont
 		m.drawActorLifeBar(screen, ctx, entry)
 	}
 	m.drawAttackFocusMarker(screen, ctx, now, entries)
+	m.drawControllerItemFocusMarker(screen, ctx, projection, now)
 	m.drawScriptHighlightMarker(screen, ctx, now, entries)
 	m.drawVendingBoardLabels(screen, ctx, entries)
 	m.drawChatRoomBoardLabels(screen, ctx, entries)
@@ -1206,6 +1207,59 @@ func (m *WorldMode) drawHoveredActorNameLabel(screen *render.Frame, ctx client.C
 	if life, ok := m.actorLifeForDisplay(ctx, actor); ok {
 		labelY = actorNameBelowLifeBarY(float64(point.y), scale, life)
 	}
+	drawActorNameLabelsAtY(screen, labels, m.actorGuildEmblem(ctx, actor, isPlayer), float64(point.x), labelY, actorNameLabelColor(actor, isPlayer))
+}
+
+// drawControllerFocusedTargetNameLabel mirrors the ordinary hover-name path
+// for semantic controller targets. A controller target is represented by a
+// lock marker rather than by moving the real mouse position, so the hover
+// renderer cannot discover it on its own. Keep the label anchored to the
+// selected actor/item and suppress a duplicate when the physical cursor is
+// already hovering the same target.
+func (m *WorldMode) drawControllerFocusedTargetNameLabel(screen *render.Frame, ctx client.Context, projection sceneProjection, now time.Time) {
+	if m == nil || screen == nil || ctx.Input == nil || ctx.World == nil {
+		return
+	}
+	if m.controllerFocusItemID != 0 {
+		item, ok := ctx.World.Items[m.controllerFocusItemID]
+		if !ok || item.ID == 0 {
+			m.clearControllerItemFocus()
+			return
+		}
+		if hovered, ok := clickedGroundItem(ctx, projection, ctx.Input.MouseX, ctx.Input.MouseY, now); ok && hovered.ID == item.ID {
+			return
+		}
+		label := m.groundItemLabel(ctx, item)
+		x, y := floorItemWorldPosition(item)
+		z := floorItemRenderHeight(ctx.World, item, now)
+		point := projection.Project(cellCenter(x), cellCenter(y), z)
+		scale := actorBillboardScreenScale(projection, cellCenter(x), cellCenter(y), z) * groundItemScreenScale
+		drawGroundItemNameLabel(screen, label, float64(point.x), float64(point.y), scale)
+		return
+	}
+	if m.attackFocusID == 0 {
+		return
+	}
+	actor, ok := ctx.World.Actors[m.attackFocusID]
+	if !ok || isWarpActor(actor) {
+		return
+	}
+	if hovered, ok := hoveredCursorActor(ctx, projection, ctx.Input.MouseX, ctx.Input.MouseY, now, m.actorDeaths); ok && hovered.ID == actor.ID {
+		return
+	}
+	labels := m.hoveredActorDisplayLabels(ctx, actor, now)
+	if len(labels) == 0 {
+		return
+	}
+	actorX, actorY := actorRenderPosition(actor, now)
+	terrainZ := terrainHeightAt(ctx.World, actorX, actorY)
+	point := projection.Project(cellCenter(actorX), cellCenter(actorY), terrainZ)
+	scale := actorBillboardScreenScale(projection, cellCenter(actorX), cellCenter(actorY), terrainZ)
+	labelY := actorNameLabelY(float64(point.y), scale)
+	if life, ok := m.actorLifeForDisplay(ctx, actor); ok {
+		labelY = actorNameBelowLifeBarY(float64(point.y), scale, life)
+	}
+	isPlayer := isLocalActor(ctx, actor.ID)
 	drawActorNameLabelsAtY(screen, labels, m.actorGuildEmblem(ctx, actor, isPlayer), float64(point.x), labelY, actorNameLabelColor(actor, isPlayer))
 }
 

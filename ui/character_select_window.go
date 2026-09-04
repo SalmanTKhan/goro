@@ -198,28 +198,32 @@ func (w *CharacterSelectWindow) slotWidget(slot int) widget.Widget {
 	if w.opts.PreviewImages != nil {
 		preview = w.opts.PreviewImages[slot]
 	}
+	slotButton := button.New(
+		button.TextOpt(""),
+		button.PainterOpt(characterSelectSlotPainter{
+			selected:     slot == w.opts.SelectedSlot,
+			hasCharacter: hasCharacter,
+			preview:      preview,
+		}),
+		button.OnClick(func() {
+			if slot == w.opts.SelectedSlot {
+				if w.callbacks.OnActivateSlot != nil {
+					w.callbacks.OnActivateSlot(slot)
+				}
+				return
+			}
+			if w.callbacks.OnSelectSlot != nil {
+				w.callbacks.OnSelectSlot(slot)
+			}
+		}),
+	)
+	// The current character/slot is the initial controller target, matching
+	// the desktop selection state instead of starting on the tiny page arrow.
+	if slot == w.opts.SelectedSlot {
+		slotButton.SetFocused(true)
+	}
 	return primitives.Box(
-		primitives.Expanded(
-			button.New(
-				button.TextOpt(""),
-				button.PainterOpt(characterSelectSlotPainter{
-					selected:     slot == w.opts.SelectedSlot,
-					hasCharacter: hasCharacter,
-					preview:      preview,
-				}),
-				button.OnClick(func() {
-					if slot == w.opts.SelectedSlot {
-						if w.callbacks.OnActivateSlot != nil {
-							w.callbacks.OnActivateSlot(slot)
-						}
-						return
-					}
-					if w.callbacks.OnSelectSlot != nil {
-						w.callbacks.OnSelectSlot(slot)
-					}
-				}),
-			),
-		),
+		primitives.Expanded(slotButton),
 	).
 		Width(characterSelectSlotW).
 		Height(characterSelectSlotH).
@@ -246,8 +250,14 @@ func (p characterSelectSlotPainter) PaintButton(canvas widget.Canvas, state butt
 	if state.Hovered || state.Pressed {
 		border = rotheme.Default.Colors.ButtonBorder
 	}
+	if state.Focused && !state.Disabled {
+		border = rotheme.Default.Colors.InputFocus
+	}
 	canvas.DrawRect(bounds, bg)
 	canvas.StrokeRect(bounds, border, 1)
+	if state.Focused && !state.Disabled {
+		canvas.StrokeRect(bounds.Expand(2), border, 2)
+	}
 	if p.preview != nil {
 		imgBounds := p.preview.Bounds()
 		x := bounds.Min.X + (bounds.Width()-float32(imgBounds.Dx()))/2

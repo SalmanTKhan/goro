@@ -17,6 +17,7 @@ import (
 	gogputypes "github.com/gogpu/gogpu/gpu/types"
 	"github.com/gogpu/gpucontext"
 	uiapp "github.com/gogpu/ui/app"
+	"github.com/gogpu/ui/event"
 	"github.com/gogpu/ui/geometry"
 	uirender "github.com/gogpu/ui/render"
 	"github.com/gogpu/ui/widget"
@@ -26,11 +27,19 @@ import (
 	"github.com/kivutar/goro/config"
 	"github.com/kivutar/goro/glog"
 	"github.com/kivutar/goro/input"
+	"github.com/kivutar/goro/input/gamepad"
 	"github.com/kivutar/goro/internal/appicon"
+	"github.com/kivutar/goro/internal/buildinfo"
 	"github.com/kivutar/goro/ui/rotheme"
 )
 
 const BackendName = "gogpu-wgpu"
+
+// A VSync frame normally takes about 16.7ms. Logging every frame above that
+// boundary turns normal scheduling jitter into a synchronous stderr write;
+// when a window is minimized and the swapchain stops pacing, that can become
+// an unbounded log/CPU spiral. Keep diagnostics for actual stalls only.
+const slowFrameDiagnosticThreshold = 100 * time.Millisecond
 
 type Game interface {
 	Update() error
@@ -94,12 +103,19 @@ type uiAppReceiver interface {
 
 type uiAppBridge struct {
 	*uiapp.App
-	runner *runner
+	runner         *runner
+	uiManager      client.UIManager
+	controllerMode bool
 }
 
 func (b uiAppBridge) SetUIRoot(root widget.Widget) {
 	if b.App != nil {
 		b.App.SetRoot(root)
+		if b.controllerMode {
+			// A newly published overlay must inherit the current input mode even
+			// when no new controller event arrives after it is mounted.
+			setControllerMode(root, true)
+		}
 		if empty, ok := root.(interface{ IsUIRootEmpty() bool }); root == nil || ok && empty.IsUIRootEmpty() {
 			b.runner.discardPublishedUI()
 		}
@@ -146,6 +162,17 @@ func (b uiAppBridge) WidgetContext() widget.Context {
 	return b.App.Window().Context()
 }
 
+func (b *uiAppBridge) FocusControllerWidget(target widget.Widget) bool {
+	if b == nil || b.App == nil || b.App.Window() == nil || target == nil {
+		return false
+	}
+	focus, ok := target.(widget.Focusable)
+	if !ok || !focus.IsFocusable() {
+		return false
+	}
+	return b.focusControllerWidget(focus)
+}
+
 func (b uiAppBridge) Cursor() widget.CursorType {
 	if b.App == nil || b.App.Window() == nil || b.App.Window().Context() == nil {
 		return widget.CursorDefault
@@ -158,6 +185,446 @@ func (b uiAppBridge) HoveredWidget() widget.Widget {
 		return nil
 	}
 	return b.App.Window().HoveredWidget()
+}
+
+var _ client.UIController = (*uiAppBridge)(nil)
+
+// SetControllerMode enables controller-aware themed controls and focus
+// affordances. Keyboard and mouse input switch this back off through
+// wireInput's source callback.
+func (b *uiAppBridge) SetControllerMode(enabled bool) {
+	if b == nil || b.App == nil || b.App.Window() == nil {
+		return
+	}
+	changed := b.controllerMode != enabled
+	b.controllerMode = enabled
+	setControllerMode(b.App.Window().Root(), enabled)
+	if changed {
+		b.requestControllerUIRedraw()
+	}
+}
+
+func (b *uiAppBridge) focusControllerWidget(focus widget.Focusable) bool {
+	if b == nil || b.App == nil || b.App.Window() == nil || focus == nil || !focus.IsFocusable() {
+		return false
+	}
+	manager := b.App.Window().FocusManager()
+	previous := manager.Focused()
+	manager.Focus(focus)
+	b.controllerFocusChanged(previous, manager.Focused())
+	return true
+}
+
+func (b *uiAppBridge) controllerFocusChanged(previous, current widget.Focusable) {
+	if previous != nil {
+		if redraw, ok := previous.(interface{ SetNeedsRedraw(bool) }); ok {
+			redraw.SetNeedsRedraw(true)
+		}
+	}
+	if current != nil {
+		if redraw, ok := current.(interface{ SetNeedsRedraw(bool) }); ok {
+			redraw.SetNeedsRedraw(true)
+		}
+	}
+	b.requestControllerUIRedraw()
+}
+
+func (b *uiAppBridge) requestControllerUIRedraw() {
+	if b == nil || b.App == nil || b.App.Window() == nil {
+		return
+	}
+	if root := b.App.Window().Root(); root != nil {
+		if redraw, ok := root.(interface{ SetNeedsRedraw(bool) }); ok {
+			redraw.SetNeedsRedraw(true)
+		}
+	}
+	if ctx := b.App.Window().Context(); ctx != nil {
+		ctx.Invalidate()
+	}
+}
+
+// HandleControllerAction routes a normalized controller UI action through the
+// existing widget tree. Directional events are offered to widgets first so
+// lists and sliders retain their native keyboard behavior; spatial focus is
+// used when the focused widget does not consume the event.
+func (b *uiAppBridge) HandleControllerAction(action input.UIAction) bool {
+	if b == nil || b.App == nil || b.App.Window() == nil || b.App.Window().Root() == nil {
+		return false
+	}
+	b.SetControllerMode(true)
+	window := b.App.Window()
+	root := window.Root()
+	scope := controllerFocusScope(root)
+	focused := window.FocusManager().Focused()
+	if focused == nil || !widgetInTree(scope, focusedWidget(focused)) {
+		// Some windows establish their initial focus by setting the widget's
+		// focused flag while constructing their tree. Reconcile that state with
+		// the focus manager before interpreting a controller action. The same
+		// check also drops a stale focus pointer after a dynamic window rebuild.
+		if candidate := controllerFocusedWidget(scope); candidate != nil {
+			b.focusControllerWidget(candidate)
+			focused = candidate
+		} else {
+			focused = nil
+		}
+	}
+	// Give packet-driven modal windows (NPC dialogs, trade prompts, and other
+	// semantic overlays) first refusal. This keeps their action state local and
+	// avoids pretending that a controller Confirm is a physical Enter that can
+	// be interpreted by an unrelated widget.
+	if handler, ok := scope.(interface{ HandleControllerAction(input.UIAction) bool }); ok && handler.HandleControllerAction(action) {
+		return true
+	}
+	if action == input.UIActionCancel {
+		if active, ok := b.uiManager.(interface{ ControllerKeyboardActive() bool }); ok && active.ControllerKeyboardActive() {
+			if closer, ok := b.uiManager.(interface{ CloseControllerKeyboard() }); ok {
+				closer.CloseControllerKeyboard()
+				return true
+			}
+		}
+	}
+	if action == input.UIActionConfirm {
+		if opener, ok := b.uiManager.(interface{ OpenControllerKeyboard(widget.Widget) bool }); ok {
+			if focused != nil {
+				if target, ok := focused.(widget.Widget); ok && widgetInTree(scope, target) && opener.OpenControllerKeyboard(target) {
+					b.SetControllerMode(true)
+					return true
+				}
+			}
+		}
+	}
+	if action == input.UIActionNextFocus || action == input.UIActionPreviousFocus {
+		focusables := collectFocusable(scope)
+		if len(focusables) == 0 {
+			return false
+		}
+		previous := window.FocusManager().Focused()
+		cycleControllerFocus(window.FocusManager(), focusables, action == input.UIActionNextFocus)
+		b.controllerFocusChanged(previous, window.FocusManager().Focused())
+		return true
+	}
+	key, ok := controllerUIKey(action)
+	if !ok {
+		return false
+	}
+	ctx := window.Context()
+	keyEvent := event.NewKeyEvent(event.KeyPress, key, 0, event.ModNone)
+	// Controller UI events are modal at the overlay level. Sending them to the
+	// whole overlay root lets an unhandled key fall through into every window
+	// underneath the active one (for example, Cross on the keyboard reaching
+	// the login form). Keep the event inside the topmost visible scope.
+	eventRoot := scope
+	if eventRoot == nil {
+		eventRoot = root
+	}
+	if action == input.UIActionConfirm {
+		// Buttons accept Enter and Space, while checkboxes intentionally accept
+		// Space only. Try Enter first for ordinary controls and fall back to a
+		// complete Space press/release pair so controller Confirm also toggles
+		// checkboxes without ever reaching a lower window.
+		if eventRoot.Event(ctx, keyEvent) {
+			// gogpu/ui buttons activate on the release edge. Controller input
+			// is sampled as a press edge, so synthesize the matching release
+			// after the focused widget accepts the press.
+			eventRoot.Event(ctx, event.NewKeyEvent(event.KeyRelease, key, 0, event.ModNone))
+			return true
+		}
+		space := event.NewKeyEvent(event.KeyPress, event.KeySpace, 0, event.ModNone)
+		if eventRoot.Event(ctx, space) {
+			eventRoot.Event(ctx, event.NewKeyEvent(event.KeyRelease, event.KeySpace, 0, event.ModNone))
+			return true
+		}
+	} else if eventRoot.Event(ctx, keyEvent) {
+		return true
+	}
+	if action == input.UIActionConfirm || action == input.UIActionCancel || action == input.UIActionPageUp || action == input.UIActionPageDown {
+		focusables := collectFocusable(scope)
+		if len(focusables) == 0 {
+			return eventRoot != root
+		}
+		if window.FocusManager().Focused() == nil {
+			b.focusControllerWidget(focusables[0])
+		}
+		return true
+	}
+	if b.moveSpatialFocus(action, focusablesForRoot(scope, nil)) {
+		return true
+	}
+	// A visible overlay still owns controller input even when it has no
+	// directionally adjacent focus target. Do not leak the event to gameplay or
+	// a window below it.
+	return eventRoot != root
+}
+
+func controllerFocusScope(root widget.Widget) widget.Widget {
+	if root == nil {
+		return nil
+	}
+	children := root.Children()
+	for i := len(children) - 1; i >= 0; i-- {
+		child := children[i]
+		if child == nil {
+			continue
+		}
+		if visible, ok := child.(interface{ IsVisible() bool }); ok && !visible.IsVisible() {
+			continue
+		}
+		if enabled, ok := child.(interface{ IsEnabled() bool }); ok && !enabled.IsEnabled() {
+			continue
+		}
+		// A passive HUD overlay is visible for context but deliberately does
+		// not own controller focus. Resolve the modal/interactive overlay below
+		// it instead (for example an NPC dialog below the shortcut bar).
+		if passive, ok := child.(interface{ ControllerNavigationPassthrough() bool }); ok && passive.ControllerNavigationPassthrough() {
+			continue
+		}
+		return child
+	}
+	return root
+}
+
+func widgetInTree(root, target widget.Widget) bool {
+	if root == nil || target == nil {
+		return false
+	}
+	if root == target {
+		return true
+	}
+	for _, child := range controllerChildren(root) {
+		if widgetInTree(child, target) {
+			return true
+		}
+	}
+	return false
+}
+
+func controllerUIKey(action input.UIAction) (event.Key, bool) {
+	switch action {
+	case input.UIActionUp:
+		return event.KeyUp, true
+	case input.UIActionDown:
+		return event.KeyDown, true
+	case input.UIActionLeft:
+		return event.KeyLeft, true
+	case input.UIActionRight:
+		return event.KeyRight, true
+	case input.UIActionConfirm:
+		return event.KeyEnter, true
+	case input.UIActionCancel:
+		return event.KeyEscape, true
+	case input.UIActionPageUp:
+		return event.KeyPageUp, true
+	case input.UIActionPageDown:
+		return event.KeyPageDown, true
+	default:
+		return 0, false
+	}
+}
+
+type focusableWidget struct {
+	focus  widget.Focusable
+	widget widget.Widget
+	center geometry.Point
+}
+
+func focusablesForRoot(root widget.Widget, out []focusableWidget) []focusableWidget {
+	if root == nil {
+		return out
+	}
+	if focus, ok := root.(widget.Focusable); ok && focus.IsFocusable() {
+		if child, ok := root.(widget.Widget); ok {
+			bounds, hasBounds := controllerWidgetBounds(child)
+			if hasBounds {
+				out = append(out, focusableWidget{focus: focus, widget: child, center: bounds.Center()})
+			}
+		}
+	}
+	for _, child := range controllerChildren(root) {
+		out = focusablesForRoot(child, out)
+	}
+	return out
+}
+
+// controllerWidgetBounds returns screen-space bounds for focus navigation.
+// ScreenBounds is authoritative after a draw pass. Before the first draw
+// (notably when a controller opens a new overlay), walk the parent chain so
+// nested boxes do not all appear to share the same local origin.
+func controllerWidgetBounds(w widget.Widget) (geometry.Rect, bool) {
+	if w == nil {
+		return geometry.Rect{}, false
+	}
+	if screen, ok := w.(interface {
+		ScreenBounds() geometry.Rect
+		IsScreenOriginValid() bool
+	}); ok && screen.IsScreenOriginValid() {
+		return screen.ScreenBounds(), true
+	}
+
+	var (
+		origin geometry.Point
+		size   geometry.Size
+		cur    = w
+		first  = true
+	)
+	for cur != nil {
+		bounds, ok := cur.(interface{ Bounds() geometry.Rect })
+		if !ok {
+			return geometry.Rect{}, false
+		}
+		local := bounds.Bounds()
+		origin = origin.Add(local.Min)
+		if first {
+			size = local.Size()
+			first = false
+		}
+		parent, ok := cur.(interface{ Parent() widget.Widget })
+		if !ok {
+			break
+		}
+		cur = parent.Parent()
+	}
+	return geometry.FromPointSize(origin, size), true
+}
+
+func collectFocusable(root widget.Widget) []widget.Focusable {
+	items := focusablesForRoot(root, nil)
+	out := make([]widget.Focusable, 0, len(items))
+	for _, item := range items {
+		out = append(out, item.focus)
+	}
+	return out
+}
+
+func controllerFocusedWidget(root widget.Widget) widget.Focusable {
+	if root == nil {
+		return nil
+	}
+	if focus, ok := root.(widget.Focusable); ok && focus.IsFocusable() && focus.IsFocused() {
+		return focus
+	}
+	for _, child := range controllerChildren(root) {
+		if focus := controllerFocusedWidget(child); focus != nil {
+			return focus
+		}
+	}
+	return nil
+}
+
+func cycleControllerFocus(manager interface {
+	Focused() widget.Focusable
+	Focus(widget.Focusable)
+}, focusables []widget.Focusable, forward bool) {
+	if manager == nil || len(focusables) == 0 {
+		return
+	}
+	current := manager.Focused()
+	index := -1
+	for i, focus := range focusables {
+		if focus == current {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		if forward {
+			manager.Focus(focusables[0])
+		} else {
+			manager.Focus(focusables[len(focusables)-1])
+		}
+		return
+	}
+	if forward {
+		index = (index + 1) % len(focusables)
+	} else {
+		index = (index - 1 + len(focusables)) % len(focusables)
+	}
+	manager.Focus(focusables[index])
+}
+
+func (b *uiAppBridge) moveSpatialFocus(action input.UIAction, items []focusableWidget) bool {
+	if b == nil || b.App == nil || b.App.Window() == nil || len(items) == 0 {
+		return false
+	}
+	current := b.App.Window().FocusManager().Focused()
+	if current == nil {
+		return b.focusControllerWidget(items[0].focus)
+	}
+	currentWidget, ok := current.(widget.Widget)
+	if !ok {
+		return false
+	}
+	currentBounds, ok := controllerWidgetBounds(currentWidget)
+	if !ok {
+		return false
+	}
+	origin := currentBounds.Center()
+	dx, dy := float32(0), float32(0)
+	switch action {
+	case input.UIActionUp:
+		dy = -1
+	case input.UIActionDown:
+		dy = 1
+	case input.UIActionLeft:
+		dx = -1
+	case input.UIActionRight:
+		dx = 1
+	default:
+		return false
+	}
+	best := -1
+	bestPrimary := float32(0)
+	bestSecondary := float32(0)
+	for i, item := range items {
+		if item.focus == current {
+			continue
+		}
+		vx, vy := item.center.X-origin.X, item.center.Y-origin.Y
+		primary := vx*dx + vy*dy
+		if primary <= 0 {
+			continue
+		}
+		secondary := float32(math.Abs(float64(vx*dy - vy*dx)))
+		// Alignment with the current row/column is the primary criterion.
+		// Distance along the requested axis is only the tie-breaker; otherwise
+		// a nearby control below a row can win over the next key to the right.
+		if best < 0 || secondary < bestSecondary || secondary == bestSecondary && primary < bestPrimary {
+			best, bestPrimary, bestSecondary = i, primary, secondary
+		}
+	}
+	if best < 0 {
+		return false
+	}
+	return b.focusControllerWidget(items[best].focus)
+}
+
+func focusedWidget(focus widget.Focusable) widget.Widget {
+	if focus == nil {
+		return nil
+	}
+	widget, _ := focus.(widget.Widget)
+	return widget
+}
+
+func setControllerMode(root widget.Widget, enabled bool) {
+	if root == nil {
+		return
+	}
+	if setter, ok := root.(interface{ SetControllerMode(bool) }); ok {
+		setter.SetControllerMode(enabled)
+	}
+	for _, child := range controllerChildren(root) {
+		setControllerMode(child, enabled)
+	}
+}
+
+func controllerChildren(root widget.Widget) []widget.Widget {
+	if root == nil {
+		return nil
+	}
+	if logical, ok := root.(interface{ ControllerChildren() []widget.Widget }); ok {
+		return logical.ControllerChildren()
+	}
+	return root.Children()
 }
 
 func (b uiAppBridge) BeginWindowDragLayer(token any, rect geometry.Rect) bool {
@@ -205,6 +672,10 @@ type runtimeSettingsProvider interface {
 	RuntimeFullscreen() bool
 	RuntimeVSync() bool
 	RuntimeFPS() bool
+}
+
+type controllerSettingsProvider interface {
+	ControllerSettings() input.ControllerSettings
 }
 
 type screenshotRequester interface {
@@ -337,6 +808,27 @@ type runner struct {
 	uiProfile           uiProfileStats
 	captureCfg          config.CaptureConfig
 	capture             *captureRuntime
+	controller          input.ControllerBackend
+	controllerSettings  input.ControllerSettings
+	uiBridge            *uiAppBridge
+	controllerNav       navRepeater
+	controllerRightNav  navRepeater
+	controllerPollError bool
+	events              *fanoutEventSource
+	cursor              input.VirtualCursor
+	controllerLastPoll  time.Time
+	injectingPointer    bool
+	cursorLeftDown      bool
+	controllerConnected bool
+}
+
+// windowTitle appends the build identifier to the default window title so the
+// running version is visible at a glance. An explicit --title is left untouched.
+func windowTitle(base string) string {
+	if base == "" || base == "goro" {
+		return "goro " + buildinfo.Version()
+	}
+	return base
 }
 
 func Run(game Game, cfg config.WindowConfig, renderCfg config.RenderConfig, captureCfg ...config.CaptureConfig) error {
@@ -348,7 +840,7 @@ func Run(game Game, cfg config.WindowConfig, renderCfg config.RenderConfig, capt
 	}
 	appConfig = appConfig.
 		WithGraphicsAPI(api).
-		WithTitle(cfg.Title).
+		WithTitle(windowTitle(cfg.Title)).
 		WithIcon(appicon.Image()).
 		WithSize(cfg.Width, cfg.Height).
 		WithResizable(true).
@@ -387,28 +879,60 @@ func Run(game Game, cfg config.WindowConfig, renderCfg config.RenderConfig, capt
 		captureConfig = captureCfg[0]
 	}
 	r := &runner{
-		app:        gg,
-		ui:         ui,
-		game:       game,
-		width:      cfg.Width,
-		height:     cfg.Height,
-		duration:   time.Duration(renderCfg.BenchSeconds) * time.Second,
-		warmup:     time.Duration(renderCfg.BenchWarmupSeconds) * time.Second,
-		renderCfg:  renderCfg,
-		quit:       gg.Quit,
-		fullscreen: cfg.Fullscreen,
-		vsync:      renderCfg.VSync,
-		fps:        renderCfg.FPS,
-		captureCfg: captureConfig,
+		app:                gg,
+		ui:                 ui,
+		game:               game,
+		width:              cfg.Width,
+		height:             cfg.Height,
+		duration:           time.Duration(renderCfg.BenchSeconds) * time.Second,
+		warmup:             time.Duration(renderCfg.BenchWarmupSeconds) * time.Second,
+		renderCfg:          renderCfg,
+		quit:               gg.Quit,
+		fullscreen:         cfg.Fullscreen,
+		vsync:              renderCfg.VSync,
+		fps:                renderCfg.FPS,
+		captureCfg:         captureConfig,
+		controllerSettings: input.DefaultControllerSettings(),
+	}
+	if provider, ok := game.(controllerSettingsProvider); ok {
+		r.controllerSettings = provider.ControllerSettings().Normalized()
+	}
+	r.events = events
+	r.cursor.Reset(cfg.Width, cfg.Height)
+	r.uiBridge = &uiAppBridge{App: ui, runner: r}
+	if provider, ok := game.(interface{ ContextUIManager() client.UIManager }); ok {
+		r.uiBridge.uiManager = provider.ContextUIManager()
+		// Hand the manager the exact transform applied to real pointer events so
+		// its hit tests agree with the widget tree at any UI scale.
+		if transform, ok := r.uiBridge.uiManager.(interface {
+			SetPointerTransform(func(x, y int) (int, int))
+		}); ok {
+			transform.SetPointerTransform(func(x, y int) (int, int) {
+				lx, ly := uiEvents.point(float64(x), float64(y))
+				return int(lx + 0.5), int(ly + 0.5)
+			})
+		}
+	}
+	if r.controllerSettings.Enabled {
+		controller, controllerErr := gamepad.Open()
+		if controllerErr != nil {
+			glog.Warnf("controller input unavailable: %v", controllerErr)
+		} else {
+			r.controller = controller
+		}
 	}
 	if receiver, ok := game.(quitReceiver); ok {
 		receiver.SetQuitFunc(gg.Quit)
 	}
 	if receiver, ok := game.(uiAppReceiver); ok {
-		receiver.SetUIApp(uiAppBridge{App: ui, runner: r})
+		receiver.SetUIApp(r.uiBridge)
 	}
 	game.Resize(cfg.Width, cfg.Height)
-	wireInput(events, game.InputState())
+	wireInput(events, game.InputState(), func() bool { return r.injectingPointer }, func(source input.InputSource) {
+		if r.uiBridge != nil {
+			r.uiBridge.SetControllerMode(source == input.InputSourceController)
+		}
+	})
 
 	gg.OnResize(func(width, height int) {
 		if width <= 0 || height <= 0 {
@@ -419,10 +943,20 @@ func Run(game Game, cfg config.WindowConfig, renderCfg config.RenderConfig, capt
 		}
 		r.width, r.height = width, height
 		uiWidth, uiHeight = width, height
+		r.cursor.Resize(width, height)
 		r.screen = nil
 		r.game.Resize(width, height)
 	})
+	events.OnFocus(func(focused bool) {
+		if !focused {
+			// Losing focus must not leave a synthetic button held or the
+			// character walking, mirroring the safeguard the real window
+			// already applies to keyboard state.
+			r.releaseControllerPointer()
+		}
+	})
 	gg.OnUpdate(func(float64) {
+		applyWindowIcon()
 		if err := r.update(); err != nil {
 			glog.Errorf("update error: %v", err)
 			gg.Quit()
@@ -453,6 +987,10 @@ func Run(game Game, cfg config.WindowConfig, renderCfg config.RenderConfig, capt
 		if r.uiOverlayCanvas != nil {
 			_ = r.uiOverlayCanvas.Close()
 			r.uiOverlayCanvas = nil
+		}
+		if r.controller != nil {
+			_ = r.controller.Close()
+			r.controller = nil
 		}
 	})
 	return gg.Run()
@@ -614,36 +1152,87 @@ func (f *fanoutEventSource) OnIMECompositionEnd(fn func(string)) {
 	f.imeCompositionEnd = append(f.imeCompositionEnd, fn)
 }
 
-func wireInput(events gpucontext.EventSource, state *input.State) {
+// The Emit* methods inject synthetic pointer events into the same fanout the
+// window delivers real ones to. Both pointer consumers — input.State for world
+// picking and the gogpu widget tree for windows, drag, and scrolling — are
+// downstream of this fork, so one emit reaches everything a real mouse would.
+
+func (f *fanoutEventSource) EmitMouseMove(x, y float64) {
+	for _, fn := range f.mouseMove {
+		fn(x, y)
+	}
+}
+
+func (f *fanoutEventSource) EmitMousePress(button gpucontext.MouseButton, x, y float64) {
+	for _, fn := range f.mousePress {
+		fn(button, x, y)
+	}
+}
+
+func (f *fanoutEventSource) EmitMouseRelease(button gpucontext.MouseButton, x, y float64) {
+	for _, fn := range f.mouseRelease {
+		fn(button, x, y)
+	}
+}
+
+func (f *fanoutEventSource) EmitScroll(x, y float64) {
+	for _, fn := range f.scroll {
+		fn(x, y)
+	}
+}
+
+// wireInput copies window events into the shared input.State. synthetic reports
+// whether the event currently being delivered was injected by the controller's
+// virtual cursor; those must not be attributed to the mouse, or the pad would
+// switch controller mode off in the widget tree on every frame it moves the
+// pointer. A nil predicate means "everything is real".
+func wireInput(events gpucontext.EventSource, state *input.State, synthetic func() bool, sourceChanged ...func(input.InputSource)) {
 	if state == nil {
 		return
 	}
+	notifySource := func(source input.InputSource) {
+		if synthetic != nil && synthetic() {
+			return
+		}
+		for _, callback := range sourceChanged {
+			if callback != nil {
+				callback(source)
+			}
+		}
+	}
 	events.OnKeyPress(func(key gpucontext.Key, _ gpucontext.Modifiers) {
 		state.SetKeyCode(key, true)
+		notifySource(input.InputSourceKeyboard)
 	})
 	events.OnKeyRelease(func(key gpucontext.Key, _ gpucontext.Modifiers) {
 		state.SetKeyCode(key, false)
+		notifySource(input.InputSourceKeyboard)
 	})
 	events.OnMouseMove(func(x, y float64) {
 		state.SetMousePosition(int(x+0.5), int(y+0.5))
+		notifySource(input.InputSourceMouse)
 	})
 	events.OnMousePress(func(button gpucontext.MouseButton, x, y float64) {
 		state.SetMousePosition(int(x+0.5), int(y+0.5))
 		if mapped, ok := mapMouseButton(button); ok {
 			state.SetMouseButton(mapped, true)
 		}
+		notifySource(input.InputSourceMouse)
 	})
 	events.OnMouseRelease(func(button gpucontext.MouseButton, x, y float64) {
 		state.SetMousePosition(int(x+0.5), int(y+0.5))
 		if mapped, ok := mapMouseButton(button); ok {
 			state.SetMouseButton(mapped, false)
 		}
+		notifySource(input.InputSourceMouse)
 	})
 	events.OnScroll(func(x, y float64) {
 		state.AddWheel(x, y)
+		notifySource(input.InputSourceMouse)
 	})
 	events.OnTextInput(func(text string) {
 		state.AddTextInput(text)
+		notifySource(input.InputSourceKeyboard)
 	})
 }
 
@@ -658,9 +1247,339 @@ func mapMouseButton(button gpucontext.MouseButton) (input.MouseButton, bool) {
 	}
 }
 
+func (r *runner) pollController() {
+	if r == nil || r.controller == nil || r.game == nil || r.game.InputState() == nil {
+		return
+	}
+	now := time.Now()
+	dt := input.ClampFrameDelta(now.Sub(r.controllerLastPoll))
+	if r.controllerLastPoll.IsZero() {
+		dt = 0
+	}
+	r.controllerLastPoll = now
+
+	// Settings are re-read every poll rather than captured at startup, so the
+	// settings page applies within a frame without extra plumbing.
+	if provider, ok := r.game.(controllerSettingsProvider); ok {
+		r.controllerSettings = provider.ControllerSettings().Normalized()
+	}
+	settings := r.controllerSettings
+
+	snapshot, err := r.controller.Poll()
+	if err != nil {
+		if !r.controllerPollError {
+			glog.Warnf("controller poll failed: %v", err)
+			r.controllerPollError = true
+		}
+		r.game.InputState().SetController(input.ControllerSnapshot{})
+		r.handleControllerDisconnect()
+		return
+	}
+	r.controllerPollError = false
+	state := r.game.InputState()
+	state.SetController(snapshot)
+	if snapshot.Active() {
+		r.uiBridge.SetControllerMode(true)
+	}
+	if snapshot.Connected != r.controllerConnected {
+		if snapshot.Connected {
+			r.handleControllerConnect(snapshot)
+		} else {
+			r.handleControllerDisconnect()
+		}
+	}
+	if !snapshot.Connected {
+		return
+	}
+
+	actions := input.ResolveActions(state, settings)
+
+	// The on-screen keyboard owns the whole frame while it is open: no pointer
+	// motion, no zoom, and no walking behind it.
+	if r.controllerKeyboardActive() {
+		r.dispatchControllerUI(state, actions, now)
+		state.ConsumeControllerMovement()
+		return
+	}
+	// A rebinding capture likewise consumes everything, so the button being
+	// bound does not also fire the action it is being bound to. The snapshot is
+	// still published above, which keeps the diagnostics animating.
+	if r.controllerRebindActive() {
+		state.ConsumeControllerMovement()
+		for _, action := range input.BindableActions() {
+			state.ConsumeControllerAction(action)
+		}
+		return
+	}
+
+	focusNavigation := false
+	if nav, ok := r.uiBridge.uiManager.(interface{ ControllerFocusNavigationActive() bool }); ok {
+		focusNavigation = nav.ControllerFocusNavigationActive()
+	}
+	controllerUI := false
+	if active, ok := r.uiBridge.uiManager.(interface{ ControllerUIActive() bool }); ok {
+		controllerUI = active.ControllerUIActive()
+	}
+	if controllerUI || focusNavigation || (settings.UINavMode == input.ControllerUINavFocus && r.pointerOverUI()) {
+		r.dispatchControllerUI(state, actions, now)
+		// Focus navigation owns the movement stick/D-pad while it is active;
+		// otherwise the world consumer could interpret the same input as a walk.
+		state.ConsumeControllerMovement()
+		return
+	}
+	r.dispatchControllerPointer(state, snapshot, settings, dt)
+}
+
+// controllerCursorAxes reports the stick vector that should drive the pointer
+// this frame, and whether the left stick is therefore unavailable for walking.
+// In cursor move mode the left stick always aims. In character move mode it
+// aims only while the pointer is over the UI — otherwise it walks and the right
+// stick takes over aiming.
+func controllerCursorAxes(snapshot input.ControllerSnapshot, settings input.ControllerSettings, overUI bool) (x, y float32, blocksMovement bool) {
+	leftX, leftY := input.ApplyRadialDeadzone(snapshot.LeftX, snapshot.LeftY, settings.Deadzone, settings.OuterDeadzone)
+	rightX, rightY := input.ApplyRadialDeadzone(snapshot.RightX, snapshot.RightY, settings.Deadzone, settings.OuterDeadzone)
+	if settings.MoveMode == input.ControllerMoveCursor || overUI {
+		return leftX, leftY, true
+	}
+	return rightX, rightY, false
+}
+
+// controllerPointerClickEnabled keeps the virtual pointer's mouse-click
+// compatibility path scoped to the modes that actually use it. In direct
+// character movement mode, Confirm is a semantic gameplay action (interact,
+// pick up, or talk) and must not also become a world left click/attack.
+func controllerPointerClickEnabled(settings input.ControllerSettings, overUI bool) bool {
+	return settings.MoveMode == input.ControllerMoveCursor || overUI
+}
+
+// controllerWheelScale converts full right-stick deflection into wheel notches
+// per second while scrolling a UI list.
+const controllerWheelScale = 12
+
+func (r *runner) dispatchControllerPointer(state *input.State, snapshot input.ControllerSnapshot, settings input.ControllerSettings, dt time.Duration) {
+	if r == nil || r.events == nil || state == nil {
+		return
+	}
+	overUI := r.pointerOverUI()
+	axisX, axisY, blocksMovement := controllerCursorAxes(snapshot, settings, overUI)
+	if blocksMovement {
+		// The left stick is aiming, so gameplay must not also read it as a walk
+		// request this frame.
+		state.ConsumeControllerMovement()
+	} else {
+		// The right stick is aiming instead. Gameplay must not also rotate the
+		// camera with the same deflection, or the stick would do two jobs at
+		// once.
+		state.ConsumeControllerCamera()
+	}
+	if r.cursor.Move(axisX, axisY, dt, settings.CursorSpeed) {
+		x, y := r.cursor.Position()
+		r.injectPointer(func() { r.events.EmitMouseMove(float64(x), float64(y)) })
+	}
+
+	x, y := r.cursor.Position()
+	confirm := settings.Bindings.Confirm
+	pointerClickEnabled := controllerPointerClickEnabled(settings, overUI)
+	switch {
+	case pointerClickEnabled && snapshot.ButtonDown(confirm) && !r.cursorLeftDown:
+		r.cursorLeftDown = true
+		r.injectPointer(func() {
+			r.events.EmitMousePress(gpucontext.MouseButtonLeft, float64(x), float64(y))
+		})
+		state.ConsumeControllerAction(input.ActionConfirm)
+	case !snapshot.ButtonDown(confirm) && r.cursorLeftDown:
+		r.cursorLeftDown = false
+		r.injectPointer(func() {
+			r.events.EmitMouseRelease(gpucontext.MouseButtonLeft, float64(x), float64(y))
+		})
+		if overUI {
+			// gogpu buttons activate on release, so a synthetic click on a
+			// hovered but unfocused control is ambiguous. Confirm the focused
+			// widget as well.
+			r.uiBridge.HandleControllerAction(input.UIActionConfirm)
+		}
+		state.ConsumeControllerAction(input.ActionConfirm)
+	}
+
+	if overUI {
+		// Over the UI the right stick scrolls. Over the world it stays camera
+		// rotation, which gameplay emits as CommandRotateCamera; synthesizing a
+		// right-button drag here would double-rotate through MouseDX/MouseDY.
+		_, wheelY := input.ApplyRadialDeadzone(snapshot.RightX, snapshot.RightY, settings.Deadzone, settings.OuterDeadzone)
+		if wheelY != 0 {
+			notches := float64(-wheelY) * controllerWheelScale * dt.Seconds()
+			r.injectPointer(func() { r.events.EmitScroll(0, notches) })
+		}
+	}
+}
+
+// injectPointer marks the emission as synthetic so wireInput does not attribute
+// it to the mouse and switch controller mode off.
+func (r *runner) injectPointer(emit func()) {
+	state := r.game.InputState()
+	r.injectingPointer = true
+	if state != nil {
+		state.SetPointerSource(input.InputSourceController)
+	}
+	emit()
+	if state != nil {
+		state.SetPointerSource(input.InputSourceMouse)
+	}
+	r.injectingPointer = false
+}
+
+// releaseControllerPointer drops a held synthetic button and clears navigation
+// repeats. It runs on disconnect and on window focus loss so neither can leave
+// the pointer stuck down.
+func (r *runner) releaseControllerPointer() {
+	if r == nil {
+		return
+	}
+	r.controllerNav.reset()
+	r.controllerRightNav.reset()
+	if r.cursorLeftDown && r.events != nil {
+		x, y := r.cursor.Position()
+		r.cursorLeftDown = false
+		r.injectPointer(func() {
+			r.events.EmitMouseRelease(gpucontext.MouseButtonLeft, float64(x), float64(y))
+		})
+	}
+}
+
+func (r *runner) handleControllerConnect(snapshot input.ControllerSnapshot) {
+	r.controllerConnected = true
+	r.cursor.Reset(r.width, r.height)
+	glog.Infof("controller connected name=%q type=%s", snapshot.Name, snapshot.Kind)
+	if !r.controllerSettings.Rumble {
+		return
+	}
+	if rumbler, ok := r.controller.(input.ControllerRumbler); ok {
+		// A short buzz on connect proves the haptics path end to end.
+		if err := rumbler.Rumble(0.19, 0.4, 200*time.Millisecond); err != nil {
+			glog.Debugf("controller connect rumble failed: %v", err)
+		}
+	}
+}
+
+func (r *runner) handleControllerDisconnect() {
+	if r == nil || !r.controllerConnected {
+		return
+	}
+	r.controllerConnected = false
+	r.releaseControllerPointer()
+	glog.Infof("controller disconnected")
+}
+
+func (r *runner) pointerOverUI() bool {
+	if r == nil || r.uiBridge == nil || r.uiBridge.uiManager == nil {
+		return false
+	}
+	pointer, ok := r.uiBridge.uiManager.(client.UIPointer)
+	if !ok {
+		return false
+	}
+	x, y := r.cursor.Position()
+	return pointer.PointerOverUI(x, y)
+}
+
+func (r *runner) controllerKeyboardActive() bool {
+	if r == nil || r.uiBridge == nil || r.uiBridge.uiManager == nil {
+		return false
+	}
+	active, ok := r.uiBridge.uiManager.(interface{ ControllerKeyboardActive() bool })
+	return ok && active.ControllerKeyboardActive()
+}
+
+func (r *runner) controllerRebindActive() bool {
+	if r == nil || r.uiBridge == nil || r.uiBridge.uiManager == nil {
+		return false
+	}
+	active, ok := r.uiBridge.uiManager.(interface{ ControllerRebindActive() bool })
+	return ok && active.ControllerRebindActive()
+}
+
+func (r *runner) dispatchControllerUI(state *input.State, actions input.ActionState, now time.Time) {
+	if r == nil || state == nil || r.uiBridge == nil || !state.Controller().Connected {
+		return
+	}
+	settings := r.controllerSettings
+	delay, rate := settings.NavRepeatDelay(), settings.NavRepeatRate()
+	move := actions.Move
+	if !controllerMoveActive(state.Controller(), settings) || move == input.DirectionNone {
+		r.controllerNav.reset()
+	} else {
+		action := controllerUIActionForDirection(move)
+		if r.controllerNav.fire(action, now, delay, rate) && r.uiBridge.HandleControllerAction(action) {
+			state.ConsumeControllerMovement()
+		}
+	}
+	r.dispatchControllerAnalogUI(state, actions, now, delay, rate)
+
+	buttonActions := []struct {
+		action input.Action
+		ui     input.UIAction
+	}{
+		{input.ActionConfirm, input.UIActionConfirm},
+		{input.ActionCancel, input.UIActionCancel},
+		{input.ActionTargetPrevious, input.UIActionPreviousFocus},
+		{input.ActionTargetNext, input.UIActionNextFocus},
+		{input.ActionMenu, input.UIActionCancel},
+	}
+	for _, item := range buttonActions {
+		if !actions.Pressed.Has(item.action) {
+			continue
+		}
+		if r.uiBridge.HandleControllerAction(item.ui) {
+			state.ConsumeControllerAction(item.action)
+		}
+	}
+}
+
+func (r *runner) dispatchControllerAnalogUI(state *input.State, actions input.ActionState, now time.Time, delay, rate time.Duration) {
+	if r == nil || state == nil || r.uiBridge == nil || !state.Controller().Connected {
+		return
+	}
+	var action input.UIAction
+	switch {
+	case actions.CameraY < -0.15:
+		action = input.UIActionPageUp
+	case actions.CameraY > 0.15:
+		action = input.UIActionPageDown
+	case actions.CameraX < -0.15:
+		action = input.UIActionLeft
+	case actions.CameraX > 0.15:
+		action = input.UIActionRight
+	default:
+		r.controllerRightNav.reset()
+		return
+	}
+	if r.controllerRightNav.fire(action, now, delay, rate) {
+		r.uiBridge.HandleControllerAction(action)
+	}
+}
+
+func controllerMoveActive(snapshot input.ControllerSnapshot, settings input.ControllerSettings) bool {
+	leftX, leftY := input.ApplyRadialDeadzone(snapshot.LeftX, snapshot.LeftY, settings.Deadzone, settings.OuterDeadzone)
+	return leftX != 0 || leftY != 0 || snapshot.Buttons.Has(input.ControllerButtonDPadUp) || snapshot.Buttons.Has(input.ControllerButtonDPadDown) || snapshot.Buttons.Has(input.ControllerButtonDPadLeft) || snapshot.Buttons.Has(input.ControllerButtonDPadRight)
+}
+
+func controllerUIActionForDirection(direction input.Direction8) input.UIAction {
+	switch direction {
+	case input.DirectionNorth, input.DirectionNorthEast, input.DirectionNorthWest:
+		return input.UIActionUp
+	case input.DirectionSouth, input.DirectionSouthEast, input.DirectionSouthWest:
+		return input.UIActionDown
+	case input.DirectionWest:
+		return input.UIActionLeft
+	default:
+		return input.UIActionRight
+	}
+}
+
 func (r *runner) update() error {
 	updateStart := time.Now()
 	r.applyRuntimeSettings()
+	r.pollController()
 	if r.duration > 0 && r.started.IsZero() {
 		r.started = time.Now()
 		r.lastLog = r.started
@@ -788,6 +1707,14 @@ func (r *runner) draw(ctx *gogpu.Context) error {
 		r.gpu = gpu
 		glog.Infof("render backend=%s surface_format=%s", ctx.Backend(), r.gpu.format)
 	}
+	// A minimized native window can temporarily expose no drawable surface.
+	// Avoid rebuilding the game and UI frame in that state, and yield so the
+	// platform event loop remains responsive until restore supplies a surface.
+	surface := ctx.SurfaceView()
+	if surface == nil {
+		time.Sleep(16 * time.Millisecond)
+		return nil
+	}
 	r.prepareCapture()
 	r.screen.BeginFrame()
 	r.screen.SetScreenScale(scaleX, scaleY)
@@ -813,10 +1740,6 @@ func (r *runner) draw(ctx *gogpu.Context) error {
 	}
 	// Goro redraws the 3D scene every frame; UI canvas damage only scopes UI texture updates.
 	ctx.SetDamageRects(nil)
-	surface := ctx.SurfaceView()
-	if surface == nil {
-		return nil
-	}
 	framebufferW, framebufferH = ctx.FramebufferSize()
 	if framebufferW <= 0 || framebufferH <= 0 {
 		framebufferW, framebufferH = width, height
@@ -850,11 +1773,12 @@ func (r *runner) draw(ctx *gogpu.Context) error {
 	}
 	drawDur := time.Since(drawStart)
 	totalDur := r.lastUpdateDuration + drawDur
-	if totalDur > 16*time.Millisecond {
+	if totalDur > slowFrameDiagnosticThreshold {
 		glog.Errorf(
-			"slow frame frame=%d total_ms=%.2f threshold_ms=16.00 update_ms=%.2f game_update_ms=%.2f ui_frame_ms=%.2f draw_ms=%.2f ui_work=%t ui_redraw=%t ui_draw_ms=%.2f ui_canvas_ms=%.2f ui_flush_ms=%.2f ui_image_ms=%.2f ui_dirty_regions=%d ui_full_repaint=%t ui_union=%.0f,%.0f %.0fx%.0f",
+			"slow frame frame=%d total_ms=%.2f threshold_ms=%.2f update_ms=%.2f game_update_ms=%.2f ui_frame_ms=%.2f draw_ms=%.2f ui_work=%t ui_redraw=%t ui_draw_ms=%.2f ui_canvas_ms=%.2f ui_flush_ms=%.2f ui_image_ms=%.2f ui_dirty_regions=%d ui_full_repaint=%t ui_union=%.0f,%.0f %.0fx%.0f",
 			r.frames,
 			durationMS(totalDur),
+			durationMS(slowFrameDiagnosticThreshold),
 			durationMS(r.lastUpdateDuration),
 			durationMS(r.lastGameUpdateDur),
 			durationMS(r.lastUIFrameDur),
@@ -1121,11 +2045,12 @@ func (r *runner) drawUISync(screen *Frame, width, height int, deviceScale float6
 		r.lastUIFullRepaint = win.WasFullRepaint()
 		r.lastUIDirtyUnion = win.LastDirtyUnion()
 		r.lastUIDrawStats = win.LastDrawStats()
-		if uiDur > 16*time.Millisecond {
+		if uiDur > slowFrameDiagnosticThreshold {
 			union := win.LastDirtyUnion()
 			glog.Errorf(
-				"slow ui redraw ms=%.2f canvas_ms=%.2f flush_ms=%.2f image_ms=%.2f drawn=%t dirty_regions=%d full=%t union=%.0f,%.0f %.0fx%.0f stats=%+v",
+				"slow ui redraw ms=%.2f threshold_ms=%.2f canvas_ms=%.2f flush_ms=%.2f image_ms=%.2f drawn=%t dirty_regions=%d full=%t union=%.0f,%.0f %.0fx%.0f stats=%+v",
 				durationMS(uiDur),
+				durationMS(slowFrameDiagnosticThreshold),
 				durationMS(canvasDur),
 				durationMS(flushDur),
 				durationMS(imageDur),
@@ -1179,11 +2104,12 @@ func (r *runner) drawUIAsync(screen *Frame, width, height int, deviceScale float
 		r.lastUIFullRepaint = win.WasFullRepaint()
 		r.lastUIDirtyUnion = win.LastDirtyUnion()
 		r.lastUIDrawStats = win.LastDrawStats()
-		if uiDur > 16*time.Millisecond {
+		if uiDur > slowFrameDiagnosticThreshold {
 			union := win.LastDirtyUnion()
 			glog.Errorf(
-				"slow ui record ms=%.2f canvas_ms=%.2f drawn=%t dirty_regions=%d full=%t union=%.0f,%.0f %.0fx%.0f stats=%+v",
+				"slow ui record ms=%.2f threshold_ms=%.2f canvas_ms=%.2f drawn=%t dirty_regions=%d full=%t union=%.0f,%.0f %.0fx%.0f stats=%+v",
 				durationMS(uiDur),
+				durationMS(slowFrameDiagnosticThreshold),
 				durationMS(canvasDur),
 				drawn,
 				win.DirtyRegionCount(),

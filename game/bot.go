@@ -9,6 +9,7 @@ import (
 	"github.com/kivutar/goro/client"
 	"github.com/kivutar/goro/db"
 	"github.com/kivutar/goro/glog"
+	"github.com/kivutar/goro/input"
 	"github.com/kivutar/goro/session"
 	gameui "github.com/kivutar/goro/ui"
 	worldstate "github.com/kivutar/goro/world"
@@ -218,6 +219,14 @@ func (b *luaBot) registerAPI(ctx client.Context, mode *WorldMode) {
 		},
 		"player": func(L *lua.LState) int {
 			L.Push(luaPlayerTable(L, ctx))
+			return 1
+		},
+		"actions": func(L *lua.LState) int {
+			L.Push(luaActionTable(L, ctx))
+			return 1
+		},
+		"controller": func(L *lua.LState) int {
+			L.Push(luaControllerTable(L, ctx))
 			return 1
 		},
 	})
@@ -537,6 +546,117 @@ func luaPlayerTable(L *lua.LState, ctx client.Context) *lua.LTable {
 	result.RawSetString("sp", lua.LNumber(sp))
 	result.RawSetString("max_sp", lua.LNumber(maxSP))
 	return result
+}
+
+func luaActionTable(L *lua.LState, ctx client.Context) *lua.LTable {
+	result := L.NewTable()
+	actions := input.ResolveActions(ctx.Input, ctx.ControllerSettings())
+	result.RawSetString("source", lua.LString(luaInputSourceName(actions.Source)))
+	result.RawSetString("move", lua.LString(luaDirectionName(actions.Move)))
+	moveX, moveY := actions.Move.Vector()
+	result.RawSetString("move_x", lua.LNumber(moveX))
+	result.RawSetString("move_y", lua.LNumber(moveY))
+	result.RawSetString("camera_x", lua.LNumber(actions.CameraX))
+	result.RawSetString("camera_y", lua.LNumber(actions.CameraY))
+	held := L.NewTable()
+	pressed := L.NewTable()
+	released := L.NewTable()
+	for action := input.ActionConfirm; action <= input.ActionShortcut8; action++ {
+		name := luaActionName(action)
+		held.RawSetString(name, lua.LBool(actions.Held.Has(action)))
+		pressed.RawSetString(name, lua.LBool(actions.Pressed.Has(action)))
+		released.RawSetString(name, lua.LBool(actions.Released.Has(action)))
+	}
+	result.RawSetString("held", held)
+	result.RawSetString("pressed", pressed)
+	result.RawSetString("released", released)
+	return result
+}
+
+func luaControllerTable(L *lua.LState, ctx client.Context) *lua.LTable {
+	result := L.NewTable()
+	if ctx.Input == nil {
+		return result
+	}
+	snapshot := ctx.Input.Controller()
+	settings := ctx.ControllerSettings()
+	leftX, leftY := input.ApplyRadialDeadzone(snapshot.LeftX, -snapshot.LeftY, settings.Deadzone, settings.OuterDeadzone)
+	rightX, rightY := input.ApplyRadialDeadzone(snapshot.RightX, -snapshot.RightY, settings.Deadzone, settings.OuterDeadzone)
+	result.RawSetString("connected", lua.LBool(snapshot.Connected))
+	result.RawSetString("id", lua.LNumber(snapshot.ID))
+	result.RawSetString("name", lua.LString(snapshot.Name))
+	result.RawSetString("type", lua.LString(snapshot.Kind.String()))
+	result.RawSetString("left_x", lua.LNumber(leftX))
+	result.RawSetString("left_y", lua.LNumber(leftY))
+	result.RawSetString("right_x", lua.LNumber(rightX))
+	result.RawSetString("right_y", lua.LNumber(rightY))
+	result.RawSetString("left_trigger", lua.LNumber(snapshot.LeftTrigger))
+	result.RawSetString("right_trigger", lua.LNumber(snapshot.RightTrigger))
+	return result
+}
+
+func luaActionName(action input.Action) string {
+	if action >= input.ActionShortcut1 && action <= input.ActionShortcut8 {
+		return "shortcut_" + string(rune('1'+int(action-input.ActionShortcut1)))
+	}
+	switch action {
+	case input.ActionConfirm:
+		return "confirm"
+	case input.ActionCancel:
+		return "cancel"
+	case input.ActionAttack:
+		return "attack"
+	case input.ActionLoot:
+		return "loot"
+	case input.ActionTargetPrevious:
+		return "target_previous"
+	case input.ActionTargetNext:
+		return "target_next"
+	case input.ActionMenu:
+		return "menu"
+	case input.ActionMap:
+		return "map"
+	default:
+		return "unknown"
+	}
+}
+
+func luaDirectionName(direction input.Direction8) string {
+	switch direction {
+	case input.DirectionNorth:
+		return "north"
+	case input.DirectionNorthEast:
+		return "northeast"
+	case input.DirectionEast:
+		return "east"
+	case input.DirectionSouthEast:
+		return "southeast"
+	case input.DirectionSouth:
+		return "south"
+	case input.DirectionSouthWest:
+		return "southwest"
+	case input.DirectionWest:
+		return "west"
+	case input.DirectionNorthWest:
+		return "northwest"
+	default:
+		return "none"
+	}
+}
+
+func luaInputSourceName(source input.InputSource) string {
+	switch source {
+	case input.InputSourceKeyboard:
+		return "keyboard"
+	case input.InputSourceMouse:
+		return "mouse"
+	case input.InputSourceController:
+		return "controller"
+	case input.InputSourceTouch:
+		return "touch"
+	default:
+		return "unknown"
+	}
 }
 
 func scriptHP(ctx client.Context) (int, int) {

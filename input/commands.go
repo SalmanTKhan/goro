@@ -73,6 +73,16 @@ const (
 	CommandNPCNext
 	CommandNPCMenuChoice
 	CommandNPCClose
+	// Controller and physical-keyboard intents are appended so existing
+	// command IDs remain stable for callers that persist or inspect them.
+	CommandMoveDirection
+	CommandTargetPrevious
+	CommandTargetNext
+	CommandAttackFocused
+	CommandInteractFocused
+	CommandLootFocused
+	CommandUseShortcut
+	CommandResetCamera
 )
 
 // WorldPosition is a presentation-independent world target. Screen-space
@@ -114,6 +124,7 @@ type PlayerCommand struct {
 	RefuseInvites    bool
 	DeltaX           float64
 	DeltaY           float64
+	Direction        Direction8
 	MobileControls   MobileControls
 	MobileSettings   MobileSettings
 }

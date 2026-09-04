@@ -67,17 +67,24 @@ const (
 type TouchID int64
 
 type State struct {
-	keys              map[Key]bool
-	prev              map[Key]bool
-	justKeys          map[Key]bool
-	keyCodes          map[KeyCode]bool
-	prevKeyCodes      map[KeyCode]bool
-	justKeyCodes      map[KeyCode]bool
-	justKeyCodeUps    map[KeyCode]bool
-	buttons           map[MouseButton]bool
-	prevMouse         map[MouseButton]bool
-	justMouse         map[MouseButton]bool
-	justMouseReleased map[MouseButton]bool
+	keys                     map[Key]bool
+	prev                     map[Key]bool
+	justKeys                 map[Key]bool
+	keyCodes                 map[KeyCode]bool
+	prevKeyCodes             map[KeyCode]bool
+	justKeyCodes             map[KeyCode]bool
+	justKeyCodeUps           map[KeyCode]bool
+	buttons                  map[MouseButton]bool
+	prevMouse                map[MouseButton]bool
+	justMouse                map[MouseButton]bool
+	justMouseReleased        map[MouseButton]bool
+	controller               ControllerSnapshot
+	prevController           ControllerSnapshot
+	consumedActions          ActionSet
+	controllerMoveConsumed   bool
+	controllerCameraConsumed bool
+	pointerSource            InputSource
+	source                   InputSource
 
 	MouseX   int
 	MouseY   int
@@ -116,6 +123,7 @@ func NewState() *State {
 		justMouse:         make(map[MouseButton]bool),
 		justMouseReleased: make(map[MouseButton]bool),
 		touches:           make(map[TouchID]TouchPoint),
+		source:            InputSourceUnknown,
 	}
 }
 
@@ -148,6 +156,10 @@ func (s *State) EndFrame() {
 	for button := range s.justMouseReleased {
 		delete(s.justMouseReleased, button)
 	}
+	s.prevController = s.controller
+	s.consumedActions = 0
+	s.controllerMoveConsumed = false
+	s.controllerCameraConsumed = false
 	s.MouseDX = 0
 	s.MouseDY = 0
 	s.WheelX = 0
@@ -161,6 +173,9 @@ func (s *State) SetKey(key Key, pressed bool) {
 		s.justKeys[key] = true
 	}
 	s.keys[key] = pressed
+	if pressed {
+		s.source = InputSourceKeyboard
+	}
 }
 
 func (s *State) SetKeyCode(code KeyCode, pressed bool) {
@@ -171,9 +186,30 @@ func (s *State) SetKeyCode(code KeyCode, pressed bool) {
 		s.justKeyCodeUps[code] = true
 	}
 	s.keyCodes[code] = pressed
+	if pressed {
+		s.source = InputSourceKeyboard
+	}
 	if key, ok := legacyKeyForCode(code); ok {
 		s.SetKey(key, pressed)
 	}
+}
+
+// SetPointerSource selects which input source pointer events are attributed
+// to. The controller's virtual cursor sets this to InputSourceController while
+// it injects events so the pad is not misread as a mouse. The zero value keeps
+// the historical behavior of attributing pointer events to the mouse.
+func (s *State) SetPointerSource(source InputSource) {
+	if s == nil {
+		return
+	}
+	s.pointerSource = source
+}
+
+func (s *State) pointerInputSource() InputSource {
+	if s.pointerSource == InputSourceUnknown {
+		return InputSourceMouse
+	}
+	return s.pointerSource
 }
 
 func (s *State) SetMouseButton(button MouseButton, pressed bool) {
@@ -184,6 +220,9 @@ func (s *State) SetMouseButton(button MouseButton, pressed bool) {
 		s.justMouseReleased[button] = true
 	}
 	s.buttons[button] = pressed
+	if pressed {
+		s.source = s.pointerInputSource()
+	}
 }
 
 func (s *State) SetMousePosition(x, y int) {
@@ -194,6 +233,84 @@ func (s *State) SetMousePosition(x, y int) {
 		s.hasMouse = true
 	}
 	s.MouseX, s.MouseY = x, y
+	s.source = s.pointerInputSource()
+}
+
+// SetController publishes the current controller snapshot for the next game
+// update. Button edge queries compare this snapshot with the previous frame.
+func (s *State) SetController(snapshot ControllerSnapshot) {
+	if s == nil {
+		return
+	}
+	s.controller = snapshot
+	if snapshot.Active() {
+		s.source = InputSourceController
+	}
+}
+
+func (s *State) Controller() ControllerSnapshot {
+	if s == nil {
+		return ControllerSnapshot{}
+	}
+	return s.controller
+}
+
+func (s *State) InputSource() InputSource {
+	if s == nil {
+		return InputSourceUnknown
+	}
+	return s.source
+}
+
+func (s *State) ControllerButtonDown(button ControllerButton) bool {
+	return s != nil && s.controller.ButtonDown(button)
+}
+
+func (s *State) ControllerButtonJustPressed(button ControllerButton) bool {
+	if s == nil {
+		return false
+	}
+	return s.controller.ButtonDown(button) && !s.prevController.ButtonDown(button)
+}
+
+func (s *State) ControllerButtonJustReleased(button ControllerButton) bool {
+	if s == nil {
+		return false
+	}
+	return !s.controller.ButtonDown(button) && s.prevController.ButtonDown(button)
+}
+
+func (s *State) ConsumeControllerAction(action Action) {
+	if s != nil {
+		s.consumedActions.Set(action, true)
+	}
+}
+
+func (s *State) ControllerActionConsumed(action Action) bool {
+	return s != nil && s.consumedActions.Has(action)
+}
+
+// ConsumeControllerCamera marks the right stick as already spent this frame.
+// The renderer sets it when the right stick is aiming the virtual pointer, so
+// gameplay does not also rotate the camera with the same deflection.
+func (s *State) ConsumeControllerCamera() {
+	if s != nil {
+		s.controllerCameraConsumed = true
+	}
+}
+
+func (s *State) ControllerCameraConsumed() bool {
+	return s != nil && s.controllerCameraConsumed
+}
+
+func (s *State) ConsumeControllerMovement() {
+	if s != nil {
+		s.controllerMoveConsumed = true
+	}
+}
+
+func (s *State) ControllerMovementConsumed() bool {
+	return s != nil && s.controllerMoveConsumed
 }
 
 func (s *State) AddWheel(x, y float64) {
@@ -214,11 +331,16 @@ func (s *State) TextInput() string {
 }
 
 func (s *State) SetTouch(id TouchID, x, y int, pressed bool) {
+	if s == nil {
+		return
+	}
 	if pressed {
 		s.touches[id] = TouchPoint{ID: id, X: x, Y: y}
+		s.source = InputSourceTouch
 		return
 	}
 	delete(s.touches, id)
+	s.source = InputSourceTouch
 }
 
 func (s *State) Pressed(key Key) bool {

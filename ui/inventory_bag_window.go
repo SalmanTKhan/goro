@@ -519,10 +519,11 @@ type inventoryGridWidget struct {
 	widget.WidgetBase
 	cfg     inventoryGridConfig
 	hovered int
+	focused int
 }
 
 func newInventoryGridWidget(cfg inventoryGridConfig) *inventoryGridWidget {
-	w := &inventoryGridWidget{cfg: cfg, hovered: -1}
+	w := &inventoryGridWidget{cfg: cfg, hovered: -1, focused: -1}
 	w.SetVisible(true)
 	w.SetEnabled(true)
 	return w
@@ -568,6 +569,13 @@ func (w *inventoryGridWidget) Draw(ctx widget.Context, canvas widget.Canvas) {
 			rotheme.DrawText(canvas, "E", geometry.NewRect(cell.Min.X+2, cell.Min.Y+2, 12, 12), rotheme.Default.Typography.TextSize, widget.RGBA8(54, 128, 76, 255), false, widget.TextAlignLeft)
 		}
 	}
+	if w.focused >= startIndex && w.focused < endIndex {
+		canvas.StrokeRect(w.cellBounds(w.focused).Inset(geometry.UniformInsets(-2)), rotheme.Default.Colors.InputFocus, 2)
+	}
+}
+
+func (w *inventoryGridWidget) IsFocusable() bool {
+	return w != nil && w.IsVisible() && w.IsEnabled() && len(w.cfg.items) > 0
 }
 
 func drawInventoryGridCellShadow(canvas widget.Canvas, cell geometry.Rect, hovered bool) {
@@ -616,6 +624,11 @@ func (w *inventoryGridWidget) visibleRows(canvas widget.Canvas) (int, int) {
 
 func (w *inventoryGridWidget) Event(ctx widget.Context, e event.Event) bool {
 	switch ev := e.(type) {
+	case *event.KeyEvent:
+		if !w.IsFocused() || !w.IsFocusable() || ev.KeyType == event.KeyRelease {
+			return false
+		}
+		return w.handleControllerKey(ev.Key)
 	case *event.MouseEvent:
 		index := w.indexAt(ev.Position)
 		switch ev.MouseType {
@@ -660,6 +673,53 @@ func (w *inventoryGridWidget) Event(ctx widget.Context, e event.Event) bool {
 		return true
 	}
 	return false
+}
+
+func (w *inventoryGridWidget) handleControllerKey(key event.Key) bool {
+	if w.focused < 0 {
+		w.focused = 0
+	}
+	cols := w.cols()
+	if cols <= 0 {
+		return false
+	}
+	next := w.focused
+	switch key {
+	case event.KeyLeft:
+		next--
+	case event.KeyRight:
+		next++
+	case event.KeyUp:
+		next -= cols
+	case event.KeyDown:
+		next += cols
+	case event.KeyPageUp:
+		next -= cols * maxInt(1, w.minRows())
+	case event.KeyPageDown:
+		next += cols * maxInt(1, w.minRows())
+	case event.KeyEnter, event.KeyNumpadEnter, event.KeySpace:
+		if w.focused < len(w.cfg.items) && w.cfg.onPress != nil {
+			w.cfg.onPress(w.cfg.items[w.focused])
+		}
+		return true
+	default:
+		return false
+	}
+	if next < 0 {
+		next = 0
+	}
+	if next >= len(w.cfg.items) {
+		next = len(w.cfg.items) - 1
+	}
+	if next != w.focused {
+		w.focused = next
+		w.hovered = next
+		if w.cfg.onHover != nil {
+			w.cfg.onHover(w.cfg.items[next])
+		}
+		w.SetNeedsRedraw(true)
+	}
+	return true
 }
 
 func (w *inventoryGridWidget) cellBounds(index int) geometry.Rect {
