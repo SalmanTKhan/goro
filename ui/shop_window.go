@@ -304,7 +304,7 @@ func (w *ShopWindow) ensureDealWindow() {
 
 func (w *ShopWindow) openDealWindow(ctx Context) {
 	w.ensureDealWindow()
-	width, height := ctx.ScreenSize()
+	width, height := ctx.UIScreenSize()
 	x := (width - shopDealWidth) / 2
 	y := (height - shopDealHeight) * 2 / 3
 	w.dealWindow.OpenAt(x, y, w.dealWidgetTree(ctx))
@@ -1221,7 +1221,7 @@ func (w *ShopWindow) sendDealSelection(ctx Context, dealType uint8) {
 }
 
 func (w *ShopWindow) ensureBuyPosition(ctx Context) {
-	width, height := ctx.ScreenSize()
+	width, height := ctx.UIScreenSize()
 	totalWidth := shopBuyListWindowW + 20 + shopBuyCartWindowW
 	totalHeight := maxInt(shopListWindowHeight(), w.cartWindowHeight())
 	w.x = maxInt(windowScreenMargin, (width-totalWidth)/2)

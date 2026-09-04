@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"image"
 	"sort"
 	"strings"
 	"time"
@@ -23,27 +24,36 @@ import (
 )
 
 type Game struct {
-	cfg               config.Config
-	input             *input.State
-	resource          *res.Manager
-	assets            client.AssetAvailability
-	session           *session.Session
-	world             *world.World
-	network           *network.Client
-	offline           *session.OfflineSession
-	audio             *gameaudio.BGM
-	modes             *game.Manager
-	runtime           *runtimeSettings
-	uiApp             client.UIApp
-	ui                *gameui.Manager
-	started           time.Time
-	lastUpdate        time.Time
-	screenW           int
-	screenH           int
-	quit              func()
-	quitting          bool
-	pendingScreenshot string
-	mobileTarget      mobileui.TargetHUDModel
+	cfg                   config.Config
+	input                 *input.State
+	resource              *res.Manager
+	assets                client.AssetAvailability
+	session               *session.Session
+	world                 *world.World
+	network               *network.Client
+	offline               *session.OfflineSession
+	audio                 *gameaudio.BGM
+	modes                 *game.Manager
+	runtime               *runtimeSettings
+	uiApp                 client.UIApp
+	ui                    *gameui.Manager
+	started               time.Time
+	lastUpdate            time.Time
+	screenW               int
+	screenH               int
+	uiW                   int
+	uiH                   int
+	quit                  func()
+	quitting              bool
+	pendingScreenshot     string
+	mobileTarget          mobileui.TargetHUDModel
+	mobileSettingsChanged func(input.MobileSettings)
+}
+
+func (g *Game) SetMobileSettingsChanged(callback func(input.MobileSettings)) {
+	if g != nil {
+		g.mobileSettingsChanged = callback
+	}
 }
 
 func New(cfg config.Config) (*Game, error) {
@@ -106,6 +116,21 @@ func New(cfg config.Config) (*Game, error) {
 // rendering, projections, and mobile commands shared with the online client.
 func NewOffline(cfg config.Config) (*Game, error) {
 	return NewOfflineAtMap(cfg, "prontera")
+}
+
+// NewOfflineAtLogin loads the same local authority as NewOfflineAtMap but
+// enters through the shared desktop login and character-select presentation.
+func NewOfflineAtLogin(cfg config.Config, startMap string) (*Game, error) {
+	g, err := NewOfflineAtMap(cfg, startMap)
+	if err != nil {
+		return nil, err
+	}
+	character := g.session.Selected
+	character.Slot = 0
+	g.session.Characters = []session.Character{character}
+	g.session.Playing = false
+	g.modes = game.NewManager(g.modeContext(), game.NewOfflineLoginMode())
+	return g, nil
 }
 
 // NewOfflineAtMap is the profile-aware offline entry point used by mobile
@@ -424,6 +449,16 @@ func (g *Game) DrawMobileProfilePreview(screen *render.Frame, profile mobileui.M
 	g.modes.DrawMobileProfilePreview(screen, character, profile.Sex, x, y, width, height)
 }
 
+// MobileProfilePreviewImage bakes the profile's appearance into an image for
+// the desktop character windows, which take their preview as image data.
+func (g *Game) MobileProfilePreviewImage(profile mobileui.MobileProfileModel, width, height int) image.Image {
+	if g == nil || g.modes == nil {
+		return nil
+	}
+	character := session.Character{Name: profile.Name, Job: 0, Hair: int16(profile.HairStyle), HairColor: uint8(profile.HairColor)}
+	return g.modes.MobileProfilePreviewImage(character, profile.Sex, width, height)
+}
+
 func (g *Game) DrawMobileEquipmentPreview(screen *render.Frame, x, y, width, height int) {
 	if g == nil || g.modes == nil {
 		return
@@ -697,6 +732,27 @@ func (g *Game) SetUIApp(uiApp client.UIApp) {
 	}
 }
 
+func (g *Game) SetUIViewport(width, height int) {
+	if g == nil {
+		return
+	}
+	oldWidth, oldHeight := g.uiW, g.uiH
+	if oldWidth == width && oldHeight == height {
+		return
+	}
+	g.uiW, g.uiH = width, height
+	if responsive, ok := any(g.ui).(client.UIViewportManager); ok {
+		responsive.ViewportChanged(oldWidth, oldHeight, width, height)
+	}
+}
+
+func (g *Game) ContextUIManager() client.UIManager {
+	if g == nil {
+		return nil
+	}
+	return g.ui
+}
+
 func (g *Game) RequestQuit() {
 	if g.quitting {
 		return
@@ -773,22 +829,26 @@ func loadClientUIFont(resource *res.Manager) {
 
 func (g *Game) modeContext() client.Context {
 	return client.Context{
-		Config:            g.cfg,
-		Input:             g.input,
-		Resources:         g.resource,
-		Assets:            g.assets,
-		Session:           g.session,
-		World:             g.world,
-		Network:           g.network,
-		Offline:           g.offline,
-		Audio:             g.audio,
-		Started:           g.started,
-		ScreenW:           g.screenW,
-		ScreenH:           g.screenH,
-		Runtime:           g.runtime,
-		RequestQuit:       g.RequestQuit,
-		RequestScreenshot: g.RequestScreenshot,
-		UIApp:             g.uiApp,
-		UIManager:         g.ui,
+		Config:             g.cfg,
+		Input:              g.input,
+		Resources:          g.resource,
+		Assets:             g.assets,
+		Session:            g.session,
+		World:              g.world,
+		Network:            g.network,
+		Offline:            g.offline,
+		Audio:              g.audio,
+		Started:            g.started,
+		ScreenW:            g.screenW,
+		ScreenH:            g.screenH,
+		UIWidth:            g.uiW,
+		UIHeight:           g.uiH,
+		Runtime:            g.runtime,
+		RequestQuit:        g.RequestQuit,
+		RequestScreenshot:  g.RequestScreenshot,
+		UIApp:              g.uiApp,
+		UIManager:          g.ui,
+		MobileSettingsHost: g,
+		UISettingsHost:     g,
 	}
 }

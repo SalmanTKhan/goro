@@ -61,8 +61,8 @@ func TestSkillPagingButtonsAppearOnlyOnOverflow(t *testing.T) {
 }
 
 func TestControllerSkillPagingAdvancesAndClamps(t *testing.T) {
-	viewport := Viewport{Width: 1080, Height: 2340} // perPage = 6
-	c := NewController(Fixture("skills-paged"), viewport, nil)               // 9 skills -> 2 pages
+	viewport := Viewport{Width: 1080, Height: 2340}            // perPage = 6
+	c := NewController(Fixture("skills-paged"), viewport, nil) // 9 skills -> 2 pages
 	c.Layout = LayoutHUD(viewport, c.tokens, c.Model, c.Navigation)
 
 	next := c.Layout.SkillPageNext

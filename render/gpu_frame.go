@@ -235,13 +235,13 @@ func (r *gpuRenderer) buildFrame(screen *Frame) drawFrame {
 			continue
 		}
 		indexCountBefore := len(frame.indices)
-		frame.floats, frame.indices = appendDrawCommand(frame.floats, frame.indices, cmd, w, h, screen.screenScaleX, screen.screenScaleY)
+		frame.floats, frame.indices = appendDrawCommand(frame.floats, frame.indices, cmd, w, h, cmd.ScreenScaleX, cmd.ScreenScaleY, cmd.ScreenOffsetX, cmd.ScreenOffsetY)
 		current.indexCount += uint32(len(frame.indices) - indexCountBefore)
 	}
 	return frame
 }
 
-func appendDrawCommand(floats []float32, indices []uint32, cmd DrawCommand, width, height int, scaleX, scaleY float32) ([]float32, []uint32) {
+func appendDrawCommand(floats []float32, indices []uint32, cmd DrawCommand, width, height int, scaleX, scaleY, offsetX, offsetY float32) ([]float32, []uint32) {
 	if scaleX <= 0 {
 		scaleX = 1
 	}
@@ -252,7 +252,7 @@ func appendDrawCommand(floats []float32, indices []uint32, cmd DrawCommand, widt
 	invW, invH := 1/float32(width), 1/float32(height)
 	for _, v := range cmd.Vertices {
 		floats = append(floats,
-			v.DstX*scaleX, v.DstY*scaleY,
+			v.DstX*scaleX+offsetX, v.DstY*scaleY+offsetY,
 			v.SrcX*invW, v.SrcY*invH,
 			saneColor(v.ColorR), saneColor(v.ColorG), saneColor(v.ColorB), saneColor(v.ColorA),
 		)

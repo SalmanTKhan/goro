@@ -633,7 +633,7 @@ func (w *HomunculusSkillWindow) visibleSkills(ctx Context) []session.Skill {
 }
 
 func homunculusSkillDefaultPosition(ctx Context) (int, int) {
-	width, height := ctx.ScreenSize()
+	width, height := ctx.UIScreenSize()
 	x := minInt(characterWindowX+characterWindowWidth+12, maxInt(windowScreenMargin, width-homunculusSkillWindowWidth-windowScreenMargin))
 	y := minInt(characterWindowY+32, maxInt(windowScreenMargin, height-homunculusSkillWindowHeight-windowScreenMargin))
 	return maxInt(windowScreenMargin, x), maxInt(windowScreenMargin, y)

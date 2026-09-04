@@ -15,6 +15,7 @@ const (
 	GestureDrag
 	GestureTwoFingerDrag
 	GesturePinch
+	GestureTwoFingerTap
 	GestureTouchCancel
 )
 
@@ -60,13 +61,16 @@ type touchTrack struct {
 }
 
 type GestureRecognizer struct {
-	config       GestureConfig
-	tracks       map[TouchID]touchTrack
-	previous     []TouchPoint
-	pinching     bool
-	lastDistance float64
-	multiTouch   bool
-	lastMidpoint WorldPosition
+	config              GestureConfig
+	tracks              map[TouchID]touchTrack
+	previous            []TouchPoint
+	pinching            bool
+	lastDistance        float64
+	multiTouch          bool
+	lastMidpoint        WorldPosition
+	multiTouchStartedAt time.Time
+	multiTouchMoved     bool
+	multiTouchPosition  WorldPosition
 }
 
 func NewGestureRecognizer(config GestureConfig) *GestureRecognizer {
@@ -86,6 +90,9 @@ func (r *GestureRecognizer) Reset() {
 	r.lastDistance = 0
 	r.multiTouch = false
 	r.lastMidpoint = WorldPosition{}
+	r.multiTouchStartedAt = time.Time{}
+	r.multiTouchMoved = false
+	r.multiTouchPosition = WorldPosition{}
 }
 
 func (r *GestureRecognizer) Update(frame TouchFrame) []GestureEvent {
@@ -118,15 +125,21 @@ func (r *GestureRecognizer) Update(frame TouchFrame) []GestureEvent {
 			r.pinching = true
 			r.lastDistance = distance
 			r.lastMidpoint = center
+			r.multiTouchStartedAt = frame.At
+			r.multiTouchPosition = center
 		} else if delta := distance - r.lastDistance; math.Abs(delta) >= r.config.PinchActivation {
 			events = append(events, GestureEvent{Kind: GesturePinch, Position: midpoint(points[0], points[1]), Delta: delta})
 			r.lastDistance = distance
+			r.multiTouchMoved = true
 		}
 		if r.multiTouch {
 			deltaX := center.X - r.lastMidpoint.X
 			deltaY := center.Y - r.lastMidpoint.Y
 			if deltaX != 0 || deltaY != 0 {
 				events = append(events, GestureEvent{Kind: GestureTwoFingerDrag, Position: center, DeltaX: deltaX, DeltaY: deltaY})
+				if math.Hypot(deltaX, deltaY) >= r.config.TapMaxMovement {
+					r.multiTouchMoved = true
+				}
 			}
 		}
 		r.multiTouch = true
@@ -135,6 +148,9 @@ func (r *GestureRecognizer) Update(frame TouchFrame) []GestureEvent {
 		r.pinching = false
 		r.lastDistance = 0
 		r.lastMidpoint = WorldPosition{}
+	}
+	if len(points) == 0 && r.multiTouch && !r.multiTouchMoved && !r.multiTouchStartedAt.IsZero() && frame.At.Sub(r.multiTouchStartedAt) <= r.config.TapMaxDuration {
+		events = append(events, GestureEvent{Kind: GestureTwoFingerTap, Position: r.multiTouchPosition})
 	}
 
 	for _, point := range points {
@@ -174,6 +190,9 @@ func (r *GestureRecognizer) Update(frame TouchFrame) []GestureEvent {
 	}
 	if len(points) == 0 {
 		r.multiTouch = false
+		r.multiTouchStartedAt = time.Time{}
+		r.multiTouchMoved = false
+		r.multiTouchPosition = WorldPosition{}
 	}
 	r.previous = points
 	return events

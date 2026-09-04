@@ -19,6 +19,7 @@ import (
 )
 
 type LoginMode struct {
+	offline             bool
 	selectedLoginServer int
 	phase               loginPhase
 	status              string
@@ -107,6 +108,10 @@ func NewLoginMode() *LoginMode {
 	return &LoginMode{status: "select a server", maxSlots: 9}
 }
 
+func NewOfflineLoginMode() *LoginMode {
+	return &LoginMode{status: "select offline character", maxSlots: 9, offline: true}
+}
+
 func (m *LoginMode) Status() string {
 	if m == nil || strings.TrimSpace(m.status) == "" {
 		return "waiting for login"
@@ -145,7 +150,9 @@ func (m *LoginMode) Enter(ctx client.Context) {
 	if m.phase == loginPhaseCharacter {
 		m.prepareCharacterSelectFromSession(ctx)
 		m.showCharacterSelectWindow(ctx)
-		m.reconnectCharacterServer(ctx)
+		if !m.offline {
+			m.reconnectCharacterServer(ctx)
+		}
 	}
 	if m.phase == loginPhaseAccount && len(ctx.Resources.ClientInfo.Connections) == 0 {
 		m.status = "no login servers discovered"
@@ -198,6 +205,9 @@ func (m *LoginMode) Update(ctx client.Context) (Mode, error) {
 
 	m.maybeSendLoginServerPing(ctx, now)
 	m.maybeSendCharServerPing(ctx, now)
+	if m.offline {
+		return nil, nil
+	}
 
 	if len(conns) == 0 {
 		return nil, nil
@@ -784,6 +794,8 @@ func (m *LoginMode) drawFade(ctx client.Context, screen *render.Frame, now time.
 	if alpha == 0 {
 		return
 	}
+	// Like the backdrop, the fade covers the whole display rather than the
+	// logical UI viewport.
 	width, height := ctx.ScreenSize()
 	render.DrawRect(screen, 0, 0, float64(width), float64(height), color.RGBA{A: alpha})
 }
@@ -816,6 +828,18 @@ func (m *LoginMode) submitSelectedCharacter(ctx client.Context) bool {
 		return false
 	}
 	if ctx.Network == nil {
+		if m.offline {
+			// Offline initialization already seeded the authoritative inventory,
+			// skills, and position. Selecting the local profile must not reset
+			// that state the way the network character handoff does.
+			ctx.Session.CharID = character.ID
+			ctx.Session.Selected = character
+			ctx.Session.Playing = true
+			m.status = fmt.Sprintf("selected character %s", character.Name)
+			m.playConfirmSFX(ctx)
+			m.startWorldFade(time.Now())
+			return true
+		}
 		m.status = "select character failed: not connected"
 		return false
 	}
@@ -831,6 +855,11 @@ func (m *LoginMode) submitSelectedCharacter(ctx client.Context) bool {
 
 func (m *LoginMode) drawBackground(ctx client.Context, screen *render.Frame) {
 	screen.Fill(color.Black)
+	// The backdrop is composited straight onto the frame without the UI's
+	// logical transform, so it must be sized in physical pixels. Using the
+	// logical size leaves it covering only part of the display wherever the two
+	// differ — on Android the UI viewport is deliberately smaller than the
+	// screen so desktop windows render large enough to read.
 	width, height := ctx.ScreenSize()
 	if width <= 0 || height <= 0 {
 		return

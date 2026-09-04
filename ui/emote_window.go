@@ -211,7 +211,7 @@ func (w *EmoteWindow) renderKey(ctx Context) string {
 }
 
 func emoteDefaultPosition(ctx Context) (int, int) {
-	screenW, screenH := ctx.ScreenSize()
+	screenW, screenH := ctx.UIScreenSize()
 	maxX := maxInt(windowScreenMargin, screenW-emoteWindowWidth-windowScreenMargin)
 	maxY := maxInt(windowScreenMargin, screenH-emoteWindowHeight-windowScreenMargin)
 	x := clampWindowInt(emoteDefaultX, windowScreenMargin, maxX)

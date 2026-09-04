@@ -74,6 +74,25 @@ func (m *WorldMode) DrawMobileProfilePreview(screen *render.Frame, manager *res.
 	m.drawHumanoidPreviewScaledNearest(screen, view, x, y, width, height, 4.0)
 }
 
+// MobileProfilePreviewImage renders the same appearance as
+// DrawMobileProfilePreview into a standalone image.
+//
+// The desktop character windows take their preview as an image.Image rather
+// than drawing it themselves, so the mobile presentation needs the sprite
+// baked rather than blitted over a frame.
+func (m *WorldMode) MobileProfilePreviewImage(manager *res.Manager, character session.Character, sex byte, width, height int) image.Image {
+	if manager == nil || width <= 0 || height <= 0 {
+		return nil
+	}
+	view, _ := loadPlayerHumanoidSpriteView(manager, character, sex, false)
+	if view == nil {
+		return nil
+	}
+	target := render.NewImage(width, height)
+	m.drawHumanoidPreviewScaledNearest(target, view, 0, 0, width, height, 4.0)
+	return target.RGBA()
+}
+
 func (m *WorldMode) SkillIconImage(manager *res.Manager, skill session.Skill, size int) image.Image {
 	if manager == nil || skill.ID == 0 {
 		return nil

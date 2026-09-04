@@ -91,7 +91,7 @@ func (n *LevelUpNotifications) Update(ctx Context) LevelUpNotificationAction {
 		n.loadImages(ctx.Resources)
 	}
 	width, height := n.imageSize()
-	screenW, screenH := ctx.ScreenSize()
+	screenW, screenH := ctx.UIScreenSize()
 	y := maxInt(0, screenH-height-levelUpNotificationBottom)
 	n.syncIcon(ctx, &n.job, n.showJob, 0, y, width, height, LevelUpNotificationJob)
 	n.syncIcon(ctx, &n.base, n.showBase, maxInt(0, screenW-width), y, width, height, LevelUpNotificationBase)

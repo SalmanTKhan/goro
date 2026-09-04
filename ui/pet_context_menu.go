@@ -31,7 +31,7 @@ func (m *PetContextMenu) Open(ctx Context, x, y int) {
 	m.EnsureWindow(petContextMenuWidth, m.height())
 	m.titleHeight = 0
 	m.ctx = ctx
-	screenW, screenH := ctx.ScreenSize()
+	screenW, screenH := ctx.UIScreenSize()
 	x = clampWindowInt(x, windowScreenMargin, maxInt(windowScreenMargin, screenW-petContextMenuWidth-windowScreenMargin))
 	y = clampWindowInt(y, windowScreenMargin, maxInt(windowScreenMargin, screenH-m.height()-windowScreenMargin))
 	m.OpenAt(x, y, m.widgetTree())

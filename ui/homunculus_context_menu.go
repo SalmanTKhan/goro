@@ -31,7 +31,7 @@ func (m *HomunculusContextMenu) Open(ctx Context, x, y int, aggressive bool) {
 	m.titleHeight = 0
 	m.ctx = ctx
 	m.aggressive = aggressive
-	screenW, screenH := ctx.ScreenSize()
+	screenW, screenH := ctx.UIScreenSize()
 	x = clampWindowInt(x, windowScreenMargin, maxInt(windowScreenMargin, screenW-homunculusContextMenuWidth-windowScreenMargin))
 	y = clampWindowInt(y, windowScreenMargin, maxInt(windowScreenMargin, screenH-m.height()-windowScreenMargin))
 	m.OpenAt(x, y, m.widgetTree())

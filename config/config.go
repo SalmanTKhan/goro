@@ -25,6 +25,7 @@ type Config struct {
 	MobileSession MobileSessionConfig
 	Fog           FogConfig
 	Gameplay      GameplayConfig
+	UI            input.UISettings
 	Mobile        input.MobileControls
 	MobileDisplay input.MobileDisplaySettings
 	Script        ScriptConfig
@@ -124,6 +125,7 @@ func LoadConfig(args []string) (Config, error) {
 }
 
 type UserSettings struct {
+	UIScale       float32
 	Fullscreen    bool
 	VSync         bool
 	FPS           bool
@@ -182,6 +184,7 @@ func LoadUserMobileSettings() (input.MobileSettings, error) {
 		return input.MobileSettings{}, err
 	}
 	return input.MobileSettings{
+		UI:       cfg.UI,
 		Controls: cfg.Mobile,
 		Audio: input.MobileAudioSettings{
 			BGMEnabled: cfg.Audio.BGM,
@@ -230,6 +233,9 @@ func SaveUserSettings(settings UserSettings) (string, error) {
 		return "", err
 	}
 	values := map[string]map[string]string{
+		"ui": {
+			"scale": formatINIValueFloat(float64(input.UISettings{Scale: settings.UIScale}.Normalized().Scale)),
+		},
 		"window": {
 			"fullscreen": formatINIValueBool(settings.Fullscreen),
 		},
@@ -263,6 +269,7 @@ func SaveUserSettings(settings UserSettings) (string, error) {
 	if settings.MobileDisplay != nil {
 		values["mobile"] = ensureINISection(values["mobile"])
 		values["mobile"]["show_minimap"] = formatINIValueBool(settings.MobileDisplay.ShowMinimap)
+		values["mobile"]["presentation"] = string(settings.MobileDisplay.Presentation)
 	}
 	existing, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
@@ -323,6 +330,7 @@ func SaveMobileSettings(settings input.MobileSettings) (string, error) {
 		return "", err
 	}
 	values := map[string]map[string]string{
+		"ui": {"scale": formatINIValueFloat(float64(settings.UI.Normalized().Scale))},
 		"mobile": {
 			"movement":           formatINIMobileMovement(settings.Controls.MovementMode),
 			"camera_sensitivity": formatINIValueFloat(settings.Controls.CameraSensitivity),
@@ -331,6 +339,7 @@ func SaveMobileSettings(settings input.MobileSettings) (string, error) {
 			"long_press_ms":      strconv.Itoa(settings.Controls.LongPressMS),
 			"show_target_names":  formatINIValueBool(settings.Controls.ShowTargetNames),
 			"show_minimap":       formatINIValueBool(settings.Display.ShowMinimap),
+			"presentation":       string(settings.Display.Presentation),
 		},
 		"audio": {
 			"bgm":        formatINIValueBool(settings.Audio.BGMEnabled),
@@ -392,8 +401,9 @@ func defaultConfig() Config {
 		Gameplay: GameplayConfig{
 			NoCtrl: true,
 		},
+		UI:            input.DefaultUISettings(),
 		Mobile:        input.DefaultMobileControls(),
-		MobileDisplay: input.MobileDisplaySettings{ShowMinimap: true},
+		MobileDisplay: input.MobileDisplaySettings{ShowMinimap: true, Presentation: input.MobilePresentationMobileUI},
 		Log: LogConfig{
 			Level: "info",
 		},
@@ -575,6 +585,13 @@ func applyConfigValue(cfg *Config, section, key, value string) error {
 		return setBool(value, &cfg.Render.Stats)
 	case "render.worlddebugstats":
 		return setBool(value, &cfg.Render.WorldDebugStats)
+	case "ui.scale":
+		var scale float64
+		if err := setFloat(value, &scale); err != nil {
+			return err
+		}
+		cfg.UI.Scale = float32(scale)
+		return nil
 	case "network.trace":
 		return setBool(value, &cfg.Network.Trace)
 	case "mobile.mode":
@@ -621,6 +638,13 @@ func applyConfigValue(cfg *Config, section, key, value string) error {
 		return setBool(value, &cfg.Mobile.ShowTargetNames)
 	case "mobile.showminimap":
 		return setBool(value, &cfg.MobileDisplay.ShowMinimap)
+	case "mobile.presentation":
+		mode := input.MobilePresentationMode(strings.ToLower(strings.TrimSpace(value)))
+		if !mode.Valid() {
+			return fmt.Errorf("mobile.presentation must be %q or %q, got %q", input.MobilePresentationMobileUI, input.MobilePresentationDesktop, value)
+		}
+		cfg.MobileDisplay.Presentation = mode
+		return nil
 	case ".script", "script.path":
 		cfg.Script.Path = value
 	case "log.level":
@@ -656,6 +680,7 @@ func validateConfig(cfg *Config) error {
 	if cfg.Audio.SFXVolume < 0 || cfg.Audio.SFXVolume > 1 {
 		return fmt.Errorf("sfx volume must be between 0 and 1")
 	}
+	cfg.UI = cfg.UI.Normalized()
 	if cfg.Render.BenchSeconds < 0 || cfg.Render.BenchWarmupSeconds < 0 {
 		return fmt.Errorf("benchmark durations must be non-negative")
 	}
@@ -671,7 +696,7 @@ func validateConfig(cfg *Config) error {
 }
 
 func upsertINIValues(src string, values map[string]map[string]string) string {
-	sectionOrder := []string{"window", "render", "audio", "gameplay", "mobile"}
+	sectionOrder := []string{"window", "render", "ui", "audio", "gameplay", "mobile"}
 	seenSections := make(map[string]bool)
 	written := make(map[string]map[string]bool)
 	for section := range values {
@@ -742,7 +767,7 @@ func upsertINIValues(src string, values map[string]map[string]string) string {
 }
 
 func sortedINIKeys(values map[string]string) []string {
-	preferred := []string{"fullscreen", "vsync", "fps", "bgm", "bgm_volume", "sfx_volume", "no_shift", "no_ctrl", "less_effects", "snap", "itemsnap", "movement", "camera_sensitivity", "zoom_sensitivity", "invert_camera_y", "long_press_ms", "show_target_names", "show_minimap"}
+	preferred := []string{"fullscreen", "vsync", "fps", "scale", "bgm", "bgm_volume", "sfx_volume", "no_shift", "no_ctrl", "less_effects", "snap", "itemsnap", "movement", "camera_sensitivity", "zoom_sensitivity", "invert_camera_y", "long_press_ms", "show_target_names", "show_minimap", "presentation"}
 	keys := make([]string, 0, len(values))
 	seen := make(map[string]bool, len(values))
 	for _, key := range preferred {

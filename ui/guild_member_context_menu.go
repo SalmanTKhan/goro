@@ -46,7 +46,7 @@ func (m *GuildMemberContextMenu) Open(ctx Context, x, y int, member session.Guil
 	m.isSelf = isSelf
 	m.isMaster = isMaster
 	m.action = GuildMemberAction{}
-	screenW, screenH := ctx.ScreenSize()
+	screenW, screenH := ctx.UIScreenSize()
 	height := m.height()
 	m.SetSize(guildMemberContextMenuWidth, height)
 	x = clampWindowInt(x, windowScreenMargin, maxInt(windowScreenMargin, screenW-guildMemberContextMenuWidth-windowScreenMargin))

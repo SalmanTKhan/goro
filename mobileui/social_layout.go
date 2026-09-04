@@ -1,5 +1,9 @@
 package mobileui
 
+// socialRowExtent is the pitch of one friend or party row. Each stacks a name
+// over a status line, so it needs room for two lines of the real UI font.
+const socialRowExtent float32 = 96
+
 type SocialRowKind uint8
 
 const (
@@ -59,7 +63,7 @@ func LayoutSocial(viewport Viewport, tokens SocialTokens, model MobileSocialMode
 	contentX := safe.X + (safe.W-contentW)/2
 	l.Panel = Rect{contentX, safe.Y + tokens.Edge, contentW, maxf(0, safe.H-2*tokens.Edge)}
 	l.Header = Rect{contentX, safe.Y + tokens.Edge, contentW, tokens.HeaderHeight}
-	l.BackButton = Rect{l.Header.X, l.Header.Y, 104, l.Header.H}
+	l.BackButton = Rect{l.Header.X, l.Header.Y, BackButtonWidth(), l.Header.H}
 	tabY := l.Header.Bottom() + tokens.Gap
 	tabW := minf(180, maxf(tokens.MinTouchTarget, (contentW-tokens.Gap)/2))
 	l.FriendsTab = Rect{contentX, tabY, tabW, tokens.TabHeight}
@@ -77,7 +81,7 @@ func LayoutSocial(viewport Viewport, tokens SocialTokens, model MobileSocialMode
 		l.DetailPanel = Rect{l.ListViewport.Right() + tokens.Gap, contentY, maxf(0, contentW-listW-tokens.Gap), l.ListViewport.H}
 	}
 	rowArea := Rect{l.ListViewport.X + tokens.Gap, l.ListViewport.Y + 48, maxf(0, l.ListViewport.W-2*tokens.Gap), maxf(0, l.ListViewport.H-56)}
-	rowH := maxf(tokens.MinTouchTarget, 68)
+	rowH := maxf(tokens.MinTouchTarget, socialRowExtent)
 	count := len(model.Friends)
 	kind := SocialRowFriend
 	if state.Tab == SocialTabParty {
@@ -147,7 +151,7 @@ func SocialScrollExtent(model MobileSocialModel, state SocialInteractionState, l
 	if state.Tab == SocialTabParty {
 		count = len(model.PartyMembers)
 	}
-	rowH := maxf(tokens.MinTouchTarget, 68)
+	rowH := maxf(tokens.MinTouchTarget, socialRowExtent)
 	viewportH := maxf(0, layout.ListViewport.H-56)
 	return ScrollState{ViewportExtent: viewportH, ContentExtent: maxf(0, float32(count)*rowH-tokens.Gap), Offset: state.Scroll.Offset, RowExtent: rowH}
 }

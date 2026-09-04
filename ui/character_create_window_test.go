@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/gogpu/ui/geometry"
+	"github.com/gogpu/ui/primitives"
 	"github.com/gogpu/ui/widget"
 	"github.com/kivutar/goro/session"
 	"github.com/kivutar/goro/ui/rotheme"
@@ -389,4 +390,39 @@ func graphSegmentsCross(a1, a2, b1, b2 [2]float64) bool {
 
 func graphOrientation(a, b, c [2]float64) float64 {
 	return (b[0]-a[0])*(c[1]-a[1]) - (b[1]-a[1])*(c[0]-a[0])
+}
+
+// TestCharacterCreateSexControlIsOptional pins the seam that lets the offline
+// mobile presentation edit sex without changing the online client, which takes
+// sex from the account and must keep the footer it has always had.
+func TestCharacterCreateSexControlIsOptional(t *testing.T) {
+	desktop := (&CharacterCreateWindow{}).footerWidgets()
+	offline := (&CharacterCreateWindow{
+		opts:      CharacterCreateWindowOptions{SexLabel: "FEMALE"},
+		callbacks: CharacterCreateWindowCallbacks{OnToggleSex: func() {}},
+	}).footerWidgets()
+
+	if len(offline) != len(desktop)+1 {
+		t.Fatalf("offline footer has %d widgets, want one more than desktop's %d",
+			len(offline), len(desktop))
+	}
+	// The toggle leads the footer, so it sits left of the spacer that pushes
+	// Make and Cancel to the trailing edge.
+	if _, spacer := desktop[0].(*primitives.ExpandedWidget); !spacer {
+		t.Fatalf("desktop footer starts with %T, want the trailing-edge spacer", desktop[0])
+	}
+	if _, spacer := offline[0].(*primitives.ExpandedWidget); spacer {
+		t.Fatal("offline footer starts with the spacer, want the sex toggle first")
+	}
+}
+
+// TestCharacterCreateSexLabelRebuildsTree guards against the toggle appearing
+// to do nothing: the options comparison decides whether the tree is rebuilt, so
+// a changed label has to count as a difference.
+func TestCharacterCreateSexLabelRebuildsTree(t *testing.T) {
+	female := CharacterCreateWindowOptions{SexLabel: "FEMALE"}
+	male := CharacterCreateWindowOptions{SexLabel: "MALE"}
+	if characterCreateWindowTreeEqual(female, male) {
+		t.Fatal("tree treated as unchanged across a sex change, so the footer would keep the old label")
+	}
 }

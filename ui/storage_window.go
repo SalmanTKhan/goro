@@ -584,7 +584,7 @@ func (w *StorageWindow) itemAt(s *session.Session, mx, my int) (session.Inventor
 }
 
 func storageDefaultPosition(ctx Context) (int, int) {
-	width, _ := ctx.ScreenSize()
+	width, _ := ctx.UIScreenSize()
 	return maxInt(windowScreenMargin, width-storageWindowWidth-windowScreenMargin), 118
 }
 

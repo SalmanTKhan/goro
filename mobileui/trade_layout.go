@@ -1,5 +1,15 @@
 package mobileui
 
+const (
+	// TradeSectionHeader is the space each trade panel reserves above its rows
+	// for its title. The previous 48 pixels were sized for the old bitmap text
+	// and the title overlapped the first row at the real font size.
+	TradeSectionHeader float32 = 68
+	// tradeRowExtent is the pitch of one row: an item name over its count or
+	// offer state needs two lines of the real UI font.
+	tradeRowExtent float32 = 92
+)
+
 type TradeRowKind uint8
 
 const (
@@ -115,7 +125,7 @@ func LayoutTrade(viewport Viewport, model MobileTradeModel, state TradeInteracti
 	contentX := safe.X + (safe.W-contentW)/2
 	l.Panel = Rect{contentX, safe.Y + tokens.Edge, contentW, maxf(0, safe.H-2*tokens.Edge)}
 	l.Header = Rect{contentX, safe.Y + tokens.Edge, contentW, tokens.HeaderHeight}
-	l.BackButton = Rect{l.Header.X, l.Header.Y, 112, l.Header.H}
+	l.BackButton = Rect{l.Header.X, l.Header.Y, BackButtonWidth(), l.Header.H}
 	l.RequestModal, l.RequestAccept, l.RequestDecline = centeredTradeModal(safe, tokens, 760, 380)
 	if !model.Open {
 		return l
@@ -138,8 +148,8 @@ func LayoutTrade(viewport Viewport, model MobileTradeModel, state TradeInteracti
 		l.PartnerPanel = Rect{offerX, l.OwnPanel.Bottom() + tokens.Gap, offerW, maxf(0, contentBottom-l.OwnPanel.Bottom()-tokens.Gap)}
 	}
 
-	rowH := maxf(tokens.MinTouchTarget, 64)
-	inventoryArea := Rect{l.InventoryPanel.X + tokens.Gap, l.InventoryPanel.Y + 48, maxf(0, l.InventoryPanel.W-2*tokens.Gap), maxf(0, l.InventoryPanel.H-60)}
+	rowH := maxf(tokens.MinTouchTarget, tradeRowExtent)
+	inventoryArea := Rect{l.InventoryPanel.X + tokens.Gap, l.InventoryPanel.Y + TradeSectionHeader, maxf(0, l.InventoryPanel.W-2*tokens.Gap), maxf(0, l.InventoryPanel.H-TradeSectionHeader-12)}
 	first := int(state.Scroll.Offset / rowH)
 	visible := maxInt(1, int(inventoryArea.H/rowH)+2)
 	last := minInt(len(model.Inventory), first+visible)
@@ -149,10 +159,10 @@ func LayoutTrade(viewport Viewport, model MobileTradeModel, state TradeInteracti
 	}
 	addRows := func(area Rect, count int, kind TradeRowKind) []TradeRowRect {
 		result := []TradeRowRect{}
-		if area.W <= 0 || area.H <= 48 {
+		if area.W <= 0 || area.H <= TradeSectionHeader {
 			return result
 		}
-		rowArea := Rect{area.X + tokens.Gap, area.Y + 48, maxf(0, area.W-2*tokens.Gap), maxf(0, area.H-88)}
+		rowArea := Rect{area.X + tokens.Gap, area.Y + TradeSectionHeader, maxf(0, area.W-2*tokens.Gap), maxf(0, area.H-TradeSectionHeader-40)}
 		maxRows := maxInt(1, int(rowArea.H/rowH))
 		if count < maxRows {
 			maxRows = count

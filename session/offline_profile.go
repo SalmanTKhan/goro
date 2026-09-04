@@ -13,6 +13,26 @@ const (
 	offlineProfileHairColors   = 10
 )
 
+// clampProfileHairStyle and clampProfileHairColor hold an appearance inside the
+// range SetProfile validates, so a profile projected from world state is always
+// one the client will accept back.
+func clampProfileHairStyle(hair int16) int16 {
+	if hair < offlineProfileMinHairStyle {
+		return offlineProfileMinHairStyle
+	}
+	if hair > offlineProfileMaxHairStyle {
+		return offlineProfileMaxHairStyle
+	}
+	return hair
+}
+
+func clampProfileHairColor(color uint8) uint8 {
+	if int(color) >= offlineProfileHairColors {
+		return offlineProfileHairColors - 1
+	}
+	return color
+}
+
 // EnsureProfile upgrades legacy saves and freshly-created offline sessions to
 // the profile contract without changing the existing gameplay state.
 func (s *OfflineSession) EnsureProfile(state *Session) {
@@ -24,10 +44,7 @@ func (s *OfflineSession) EnsureProfile(state *Session) {
 	if name == "" {
 		name = "Offline Adventurer"
 	}
-	hair := character.Hair
-	if hair < offlineProfileMinHairStyle {
-		hair = offlineProfileMinHairStyle
-	}
+	hair := clampProfileHairStyle(character.Hair)
 	stats := [6]uint8{5, 5, 5, 5, 5, 5}
 	for i, value := range [6]int{state.Stats.Str, state.Stats.Agi, state.Stats.Vit, state.Stats.Int, state.Stats.Dex, state.Stats.Luk} {
 		if value >= 1 && value <= 9 {
@@ -48,8 +65,12 @@ func (s *OfflineSession) syncProfile(state *Session) {
 		s.Profile.Name = strings.TrimSpace(character.Name)
 	}
 	s.Profile.Sex = state.Sex
-	s.Profile.HairStyle = character.Hair
-	s.Profile.HairColor = character.HairColor
+	// Clamped for the same reason EnsureProfile clamps: the appearance is copied
+	// from the world character, whose hair may sit outside the range SetProfile
+	// accepts. Taking it raw produced a profile the client's own validator
+	// rejected, so saving from the character screen failed for good.
+	s.Profile.HairStyle = clampProfileHairStyle(character.Hair)
+	s.Profile.HairColor = clampProfileHairColor(character.HairColor)
 	if state.Stats.Str >= 1 && state.Stats.Str <= 9 {
 		s.Profile.Stats[0] = uint8(state.Stats.Str)
 	}

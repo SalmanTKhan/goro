@@ -59,7 +59,7 @@ func LayoutSurface(viewport Viewport, model SurfaceModel, state SurfaceInteracti
 		pad = 16
 	}
 	layout.Header = Rect{X: layout.Panel.X + pad, Y: layout.Panel.Y + 12, W: layout.Panel.W - 2*pad, H: 56}
-	layout.Back = Rect{X: layout.Header.X, Y: layout.Header.Y, W: 104, H: 52}
+	layout.Back = Rect{X: layout.Header.X, Y: layout.Header.Y, W: BackButtonWidth(), H: 52}
 	listY := layout.Header.Bottom() + 12
 	listBottom := layout.Panel.Bottom() - 12
 	if model.Notice != "" {
@@ -72,9 +72,11 @@ func LayoutSurface(viewport Viewport, model SurfaceModel, state SurfaceInteracti
 		listBottom = layout.DetailSheet.Y - 12
 	}
 	layout.ListViewport = Rect{X: layout.Panel.X + pad, Y: listY, W: layout.Panel.W - 2*pad, H: maxf(0, listBottom-listY)}
-	rowExtent := float32(64)
-	for i, item := range model.Items {
-		rect := Rect{X: layout.ListViewport.X, Y: layout.ListViewport.Y + float32(i)*rowExtent - offset, W: layout.ListViewport.W, H: 56}
+	cursor := layout.ListViewport.Y - offset
+	for _, item := range model.Items {
+		height := SurfaceRowHeight(item)
+		rect := Rect{X: layout.ListViewport.X, Y: cursor, W: layout.ListViewport.W, H: height}
+		cursor += height + surfaceRowGap
 		if rect.Y < layout.ListViewport.Y || rect.Bottom() > layout.ListViewport.Bottom() {
 			continue
 		}
@@ -84,13 +86,57 @@ func LayoutSurface(viewport Viewport, model SurfaceModel, state SurfaceInteracti
 	return layout
 }
 
-func SurfaceScrollExtent(layout SurfaceLayout, itemCount int, offset float32) ScrollState {
-	rowExtent := float32(64)
-	content := float32(itemCount) * rowExtent
-	if content > 0 {
-		content -= 8
+const (
+	// surfaceRowLabel is the height of a row's label line.
+	surfaceRowLabel = 56
+	// surfaceDetailLine is one line of a row's help text.
+	surfaceDetailLine = 36
+	// surfaceDetailLines is how many lines of help text a row may show. Two
+	// lines hold the longest settings descriptions without making every row in
+	// the list taller.
+	surfaceDetailLines = 2
+	// surfaceRowGap separates consecutive rows.
+	surfaceRowGap = 8
+)
+
+// SurfaceRowHeight reports how tall a row must be to show its content. Rows
+// carrying help text need room for it: a fixed height truncated the longer
+// settings descriptions mid-sentence.
+func SurfaceRowHeight(item SurfaceItem) float32 {
+	if item.Detail == "" {
+		return surfaceRowLabel
 	}
-	return ScrollState{ViewportExtent: layout.ListViewport.H, ContentExtent: content, Offset: offset, RowExtent: rowExtent}
+	if item.Kind == SurfaceItemSection {
+		// Section blurbs are a single short sentence.
+		return surfaceRowLabel + surfaceDetailLine
+	}
+	return surfaceRowLabel + surfaceDetailLines*surfaceDetailLine
+}
+
+// SurfaceRowLabelHeight reports the height of the label line within a row, so
+// the renderer splits label from detail exactly where the layout expects.
+func SurfaceRowLabelHeight() float32 { return surfaceRowLabel }
+
+func SurfaceScrollExtent(layout SurfaceLayout, itemCount int, offset float32) ScrollState {
+	return SurfaceScrollExtentForItems(layout, nil, itemCount, offset)
+}
+
+// SurfaceScrollExtentForItems measures the real content height. Rows are no
+// longer uniform, so the extent has to sum them; passing nil items falls back
+// to the plain row height for callers that only know a count.
+func SurfaceScrollExtentForItems(layout SurfaceLayout, items []SurfaceItem, itemCount int, offset float32) ScrollState {
+	var content float32
+	if len(items) > 0 {
+		for _, item := range items {
+			content += SurfaceRowHeight(item) + surfaceRowGap
+		}
+	} else {
+		content = float32(itemCount) * (surfaceRowLabel + surfaceRowGap)
+	}
+	if content > 0 {
+		content -= surfaceRowGap
+	}
+	return ScrollState{ViewportExtent: layout.ListViewport.H, ContentExtent: content, Offset: offset, RowExtent: surfaceRowLabel + surfaceRowGap}
 }
 
 type SurfaceController struct {
@@ -214,7 +260,7 @@ func (c *SurfaceController) relayout() {
 		return
 	}
 	base := LayoutSurface(c.Viewport, c.Model, c.State, 0)
-	c.Scroll = SurfaceScrollExtent(base, len(c.Model.Items), c.Scroll.Offset)
+	c.Scroll = SurfaceScrollExtentForItems(base, c.Model.Items, len(c.Model.Items), c.Scroll.Offset)
 	c.Scroll.SetOffset(c.Scroll.Offset)
 	c.Layout = LayoutSurface(c.Viewport, c.Model, c.State, c.Scroll.Offset)
 }
@@ -251,7 +297,9 @@ func SettingsSurfaceForSettings(settings input.MobileSettings) SurfaceModel {
 			{ID: "bgm-volume", Label: "BGM volume", Value: fmt.Sprintf("%d%%", int(settings.Audio.BGMVolume*100+0.5)), Enabled: true},
 			{ID: "sfx-volume", Label: "SFX volume", Value: fmt.Sprintf("%d%%", int(settings.Audio.SFXVolume*100+0.5)), Enabled: true},
 			{ID: "section-display", Label: "DISPLAY", Value: "", Detail: "Mobile HUD visibility.", Enabled: false, Kind: SurfaceItemSection},
+			{ID: "ui-scale", Label: "UI scale", Value: settings.UI.Label(), Detail: "Cycles Small, Default, and Large. Applies immediately.", Enabled: true},
 			{ID: "show-minimap", Label: "Show minimap", Value: onOff(settings.Display.ShowMinimap), Enabled: true},
+			{ID: "presentation", Label: "UI presentation", Value: presentationLabel(settings.Display.Presentation), Detail: "Changes apply after restarting the client.", Enabled: true},
 			{ID: "section-gameplay", Label: "GAMEPLAY", Value: "", Detail: "Shared client gameplay behavior.", Enabled: false, Kind: SurfaceItemSection},
 			{ID: "no-shift", Label: "No Shift targeting", Value: onOff(settings.Gameplay.NoShift), Enabled: true},
 			{ID: "no-ctrl", Label: "No Ctrl attacking", Value: onOff(settings.Gameplay.NoCtrl), Enabled: true},
@@ -261,6 +309,13 @@ func SettingsSurfaceForSettings(settings input.MobileSettings) SurfaceModel {
 			{ID: "reset-all", Label: "Reset all mobile settings", Value: "Defaults", Detail: "Restore controls, audio, display, and gameplay settings to their validated defaults.", Enabled: true},
 		},
 	}
+}
+
+func presentationLabel(mode input.MobilePresentationMode) string {
+	if mode == input.MobilePresentationDesktop {
+		return "Desktop optimized"
+	}
+	return "Mobile replacement"
 }
 
 // SettingsSurfaceForSession adds the connection controls that are only

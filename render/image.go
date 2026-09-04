@@ -75,3 +75,17 @@ func (i *Image) Fill(c color.Color) {
 	draw.Draw(i.pix, i.pix.Bounds(), &image.Uniform{C: c}, image.Point{}, draw.Src)
 	i.version++
 }
+
+// UpdateFromImage replaces the CPU pixels while retaining the Image identity,
+// allowing the GPU renderer to update its existing texture on the next draw.
+func (i *Image) UpdateFromImage(src image.Image) {
+	if i == nil || src == nil {
+		return
+	}
+	b := src.Bounds()
+	if i.pix == nil || i.pix.Bounds().Dx() != b.Dx() || i.pix.Bounds().Dy() != b.Dy() {
+		i.pix = image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
+	}
+	draw.Draw(i.pix, i.pix.Bounds(), src, b.Min, draw.Src)
+	i.version++
+}

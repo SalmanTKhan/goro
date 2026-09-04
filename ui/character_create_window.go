@@ -56,6 +56,9 @@ type CharacterCreateWindowOptions struct {
 	Name    string
 	Stats   [CharacterCreateStatCount]uint8
 	Preview image.Image
+	// SexLabel names the current sex on the optional sex control. It is only
+	// read when OnToggleSex is set.
+	SexLabel string
 }
 
 type CharacterCreateWindowCallbacks struct {
@@ -66,6 +69,11 @@ type CharacterCreateWindowCallbacks struct {
 	OnHairNext   func()
 	OnHairColor  func()
 	OnStat       func(int)
+	// OnToggleSex is optional. The online client takes sex from the account, so
+	// login mode leaves this nil and the window has no sex control. The offline
+	// mobile presentation owns the appearance outright and sets it, which adds a
+	// toggle to the footer.
+	OnToggleSex func()
 }
 
 type CharacterCreateWindow struct {
@@ -119,7 +127,8 @@ func (w *CharacterCreateWindow) Update(ctx client.Context) bool {
 
 func characterCreateWindowTreeEqual(a, b CharacterCreateWindowOptions) bool {
 	return a.Preview == b.Preview &&
-		a.Stats == b.Stats
+		a.Stats == b.Stats &&
+		a.SexLabel == b.SexLabel
 }
 
 func (w *CharacterCreateWindow) widgetTree() widget.Widget {
@@ -197,19 +206,33 @@ func (w *CharacterCreateWindow) widgetTree() widget.Widget {
 				PaddingLeft(32).
 				PaddingRight(32),
 		),
-		Footer(
-			primitives.Expanded(primitives.Box()),
-			rotheme.Button("Make", func() {
-				if w.callbacks.OnSubmit != nil {
-					w.callbacks.OnSubmit()
-				}
-			}),
-			rotheme.Button("Cancel", func() {
-				if w.callbacks.OnCancel != nil {
-					w.callbacks.OnCancel()
-				}
-			}),
-		),
+		Footer(w.footerWidgets()...),
+	)
+}
+
+// footerWidgets builds the footer, which carries the sex toggle on the left
+// when the host owns sex, and Make/Cancel on the right always.
+func (w *CharacterCreateWindow) footerWidgets() []widget.Widget {
+	var footer []widget.Widget
+	if w.callbacks.OnToggleSex != nil {
+		label := w.opts.SexLabel
+		if label == "" {
+			label = "Sex"
+		}
+		footer = append(footer, rotheme.Button(label, w.callbacks.OnToggleSex))
+	}
+	return append(footer,
+		primitives.Expanded(primitives.Box()),
+		rotheme.Button("Make", func() {
+			if w.callbacks.OnSubmit != nil {
+				w.callbacks.OnSubmit()
+			}
+		}),
+		rotheme.Button("Cancel", func() {
+			if w.callbacks.OnCancel != nil {
+				w.callbacks.OnCancel()
+			}
+		}),
 	)
 }
 

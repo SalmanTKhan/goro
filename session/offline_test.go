@@ -84,3 +84,36 @@ func TestOfflineSessionSaveLoadPersistsRuntimeWorldState(t *testing.T) {
 		t.Fatalf("runtime state mismatch: monsters=%+v drops=%+v", monsters, drops)
 	}
 }
+
+// TestProfileSnapshotStaysSaveable closes a loop where the client rejected its
+// own data: the profile's appearance is projected from the world character,
+// whose hair may sit outside the range SetProfile validates. Taking it raw
+// produced a snapshot that could never be saved back, so the character screen's
+// save silently failed for any character with hair below the minimum.
+func TestProfileSnapshotStaysSaveable(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		hair  int16
+		color uint8
+	}{
+		{"hair below the minimum", 1, 0},
+		{"hair above the maximum", 99, 0},
+		{"colour past the last palette", 5, 200},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			state := &Session{}
+			state.SelectCharacter(Character{
+				ID: 1, Name: "Offline Adventurer", Hair: tc.hair, HairColor: tc.color,
+			})
+			offline := NewOfflineSession("prontera")
+
+			profile, ok := offline.ProfileSnapshot(state)
+			if !ok {
+				t.Fatal("no profile snapshot")
+			}
+			if err := offline.SetProfile(profile); err != nil {
+				t.Fatalf("the client rejected its own snapshot: %v", err)
+			}
+		})
+	}
+}

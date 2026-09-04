@@ -108,7 +108,7 @@ func (w *StatsWindow) close(ctx Context) {
 }
 
 func statsWindowPosition(ctx Context) (int, int) {
-	width, height := ctx.ScreenSize()
+	width, height := ctx.UIScreenSize()
 	x := minInt(characterWindowX+characterWindowWidth+12, maxInt(windowScreenMargin, width-statsWindowWidth-windowScreenMargin))
 	y := minInt(characterWindowY, maxInt(windowScreenMargin, height-statsWindowHeight-windowScreenMargin))
 	if x < windowScreenMargin {

@@ -1,5 +1,13 @@
 package mobileui
 
+const (
+	// vendingRowHeight fits an item name over its stock line at the real font
+	// size; 60 pixels was sized for the old bitmap text.
+	vendingRowHeight float32 = 84
+	// vendingRowExtent is the row height plus the gap between rows.
+	vendingRowExtent float32 = vendingRowHeight + 8
+)
+
 type VendingLayout struct {
 	Safe, Panel, Header, Back, Close, ListViewport, DetailPanel, BuyButton      Rect
 	Rows                                                                        []Rect
@@ -32,8 +40,8 @@ func LayoutVendingScrolled(viewport Viewport, rowCount int, offset float32) Vend
 	if portrait {
 		pad = 12
 	}
-	l.Header = Rect{X: l.Panel.X + pad, Y: l.Panel.Y + 16, W: l.Panel.W - 2*pad, H: 56}
-	l.Back = Rect{X: l.Header.X, Y: l.Header.Y, W: 112, H: 52}
+	l.Header = Rect{X: l.Panel.X + pad, Y: l.Panel.Y + 16, W: l.Panel.W - 2*pad, H: StackedHeaderHeight()}
+	l.Back = Rect{X: l.Header.X, Y: l.Header.Y, W: BackButtonWidth(), H: 52}
 	l.Close = Rect{X: l.Header.Right() - 112, Y: l.Header.Y, W: 112, H: 52}
 	contentY := l.Header.Bottom() + 12
 	if portrait {
@@ -47,7 +55,7 @@ func LayoutVendingScrolled(viewport Viewport, rowCount int, offset float32) Vend
 		detailX := l.ListViewport.Right() + 16
 		l.DetailPanel = Rect{X: detailX, Y: contentY, W: maxf(0, l.Panel.Right()-pad-detailX), H: l.ListViewport.H}
 	}
-	rowExtent := float32(68)
+	rowExtent := vendingRowExtent
 	scroll := InventoryScrollState{ViewportExtent: l.ListViewport.H, ContentExtent: vendingContentExtent(rowCount), RowExtent: rowExtent}
 	scroll.SetOffset(offset)
 	clamped := scroll.Offset
@@ -55,7 +63,7 @@ func LayoutVendingScrolled(viewport Viewport, rowCount int, offset float32) Vend
 	visible := int(l.ListViewport.H/rowExtent) + 2
 	last := minInt(rowCount, first+visible)
 	for i := first; i < last; i++ {
-		row := Rect{X: l.ListViewport.X, Y: l.ListViewport.Y + float32(i)*rowExtent - clamped, W: l.ListViewport.W, H: 60}
+		row := Rect{X: l.ListViewport.X, Y: l.ListViewport.Y + float32(i)*rowExtent - clamped, W: l.ListViewport.W, H: vendingRowHeight}
 		if row.Bottom() <= l.ListViewport.Y || row.Y >= l.ListViewport.Bottom() {
 			continue
 		}

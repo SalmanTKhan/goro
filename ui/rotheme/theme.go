@@ -46,6 +46,7 @@ type Typography struct {
 type Theme struct {
 	Colors     Colors
 	Typography Typography
+	Metrics    Metrics
 }
 
 var Default = Theme{
@@ -73,6 +74,20 @@ var Default = Theme{
 		BoldFontFamily: dejavuBoldFamily,
 		TextSize:       11,
 	},
+	Metrics: DesktopMetrics(),
+}
+
+// Mobile is the touch variant of Default. It keeps the Ragnarok palette exactly
+// — the mobile presentation is the same game, not a second visual identity —
+// and changes only the things a finger cares about: text size and geometry.
+var Mobile = Theme{
+	Colors: Default.Colors,
+	Typography: Typography{
+		FontFamily:     dejavuFamily,
+		BoldFontFamily: dejavuBoldFamily,
+		TextSize:       28,
+	},
+	Metrics: MobileMetrics(),
 }
 
 func init() {

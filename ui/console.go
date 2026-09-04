@@ -182,12 +182,12 @@ func (c *ChatConsole) clickedOutside(ctx client.Context) bool {
 	if ctx.Input == nil || !ctx.Input.MouseJustPressed(input.MouseButtonLeft) {
 		return false
 	}
-	x, y, width, height := consoleBounds(ctx.ScreenSize())
+	x, y, width, height := consoleBounds(ctx.UIScreenSize())
 	return !pointInRect(ctx.Input.MouseX, ctx.Input.MouseY, x, y, width, height)
 }
 
 func (c *ChatConsole) ensureWindow(ctx client.Context) {
-	screenW, screenH := ctx.ScreenSize()
+	screenW, screenH := ctx.UIScreenSize()
 	x, y, width, height := consoleBounds(screenW, screenH)
 	key := c.renderKey(width, height)
 	if c.window.width == 0 {

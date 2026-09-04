@@ -41,6 +41,38 @@ type MobileSpacing struct{ XXS, XS, S, M, L, XL float32 }
 
 func DefaultSpacing() MobileSpacing { return MobileSpacing{XXS: 4, XS: 8, S: 12, M: 16, L: 24, XL: 32} }
 
+// LabelWidth estimates the rendered width of a label at a typography size.
+//
+// mobileui has no font backend by design, so this is an estimate rather than a
+// measurement. It is deliberately generous: reserving slightly too much space
+// costs a few pixels, while reserving too little clips the label, which is the
+// failure this exists to prevent.
+func LabelWidth(label string, size float32) float32 {
+	return float32(len([]rune(label))) * size * 0.6
+}
+
+// ControlWidth reserves room for a label plus the padding a control draws
+// around it.
+func ControlWidth(label string, size float32) float32 {
+	return LabelWidth(label, size) + 2*DefaultSpacing().M
+}
+
+// BackLabel is the canonical back-navigation label. Layouts reserve space for
+// it and renderers draw it, so the two cannot disagree about how wide the
+// control has to be.
+const BackLabel = "‹ Back"
+
+// BackButtonWidth is the width every screen's back control should use.
+func BackButtonWidth() float32 {
+	return ControlWidth(BackLabel, DefaultTypography().Body)
+}
+
+// StackedHeaderHeight is the height a screen header needs when it stacks two
+// lines — a name over a job, a map over its coordinates. One line box of the
+// real UI font is about 36 pixels, so a 56-pixel header crushed the two
+// together.
+func StackedHeaderHeight() float32 { return 96 }
+
 func DefaultTokens() MobileTokens {
 	return MobileTokens{
 		Edge:           16,

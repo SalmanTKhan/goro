@@ -12,6 +12,27 @@ func LayoutCharacter(viewport Viewport, model MobileCharacterModel) CharacterLay
 	return LayoutCharacterScrolled(viewport, model, 0)
 }
 
+// characterCardRow is the height one label/value row occupies on the mobile
+// status screen. It matches the mobile theme's table row height; the renderer
+// clips gracefully if the two ever diverge.
+const characterCardRow = 56
+
+// characterCardPad is the inset above and below a card's rows.
+const characterCardPad = 12
+
+// characterCombatRows is how many rows the derived-combat card needs: seven
+// figures laid out in two columns.
+const characterCombatRows = 4
+
+// characterCardHeight sizes a card from the number of header and body rows it
+// has to show.
+func characterCardHeight(headerRows, bodyRows int) float32 {
+	if bodyRows < 0 {
+		bodyRows = 0
+	}
+	return 2*characterCardPad + float32(headerRows+bodyRows)*characterCardRow
+}
+
 func LayoutCharacterScrolled(viewport Viewport, model MobileCharacterModel, offset float32) CharacterLayout {
 	safe := viewport.SafeRect()
 	layout := CharacterLayout{Safe: safe, ScrollOffset: maxf(0, offset)}
@@ -35,8 +56,8 @@ func LayoutCharacterScrolled(viewport Viewport, model MobileCharacterModel, offs
 	if !stacked {
 		headerPad = 20
 	}
-	layout.Header = Rect{X: layout.Panel.X + headerPad, Y: layout.Panel.Y + headerPad, W: layout.Panel.W - 2*headerPad, H: 56}
-	layout.BackButton = Rect{X: layout.Header.X, Y: layout.Header.Y, W: 112, H: 52}
+	layout.Header = Rect{X: layout.Panel.X + headerPad, Y: layout.Panel.Y + headerPad, W: layout.Panel.W - 2*headerPad, H: StackedHeaderHeight()}
+	layout.BackButton = Rect{X: layout.Header.X, Y: layout.Header.Y, W: BackButtonWidth(), H: 52}
 	contentX, contentY := layout.Panel.X+headerPad, layout.Header.Bottom()+12
 	contentW := maxf(0, layout.Panel.W-2*headerPad)
 	contentBottom := layout.Panel.Bottom() - 12
@@ -44,13 +65,16 @@ func LayoutCharacterScrolled(viewport Viewport, model MobileCharacterModel, offs
 	if stacked {
 		gap := float32(12)
 		cursor := contentY - layout.ScrollOffset
-		layout.Vitals = Rect{X: contentX, Y: cursor, W: contentW, H: 112}
+		// Card heights follow their row counts rather than fixed pixels: the
+		// mobile presentation renders with the real UI font, so a card sized for
+		// the old bitmap text silently truncated its last rows.
+		layout.Vitals = Rect{X: contentX, Y: cursor, W: contentW, H: characterCardHeight(0, 2)}
 		cursor = layout.Vitals.Bottom() + gap
-		layout.Progress = Rect{X: contentX, Y: cursor, W: contentW, H: 100}
+		layout.Progress = Rect{X: contentX, Y: cursor, W: contentW, H: characterCardHeight(0, 3)}
 		cursor = layout.Progress.Bottom() + gap
-		layout.Stats = Rect{X: contentX, Y: cursor, W: contentW, H: 252}
+		layout.Stats = Rect{X: contentX, Y: cursor, W: contentW, H: characterCardHeight(1, len(model.Stats))}
 		cursor = layout.Stats.Bottom() + gap
-		layout.Combat = Rect{X: contentX, Y: cursor, W: contentW, H: 340}
+		layout.Combat = Rect{X: contentX, Y: cursor, W: contentW, H: characterCardHeight(1, characterCombatRows)}
 		cursor = layout.Combat.Bottom() + gap
 		layout.SkillsButton = Rect{X: contentX, Y: cursor, W: contentW, H: 52}
 		layout.ContentExtent = cursor + layout.SkillsButton.H - (contentY - layout.ScrollOffset)
@@ -100,7 +124,7 @@ func LayoutSkills(viewport Viewport, model MobileSkillsModel, offset float32) Sk
 		pad = 20
 	}
 	layout.Header = Rect{X: layout.Panel.X + pad, Y: layout.Panel.Y + pad, W: layout.Panel.W - 2*pad, H: 56}
-	layout.BackButton = Rect{X: layout.Header.X, Y: layout.Header.Y, W: 112, H: 52}
+	layout.BackButton = Rect{X: layout.Header.X, Y: layout.Header.Y, W: BackButtonWidth(), H: 52}
 	layout.CharacterButton = Rect{X: layout.Header.Right() - 156, Y: layout.Header.Y, W: 144, H: 52}
 	contentY := layout.Header.Bottom() + 16
 	contentH := maxf(0, layout.Panel.Bottom()-contentY-20)

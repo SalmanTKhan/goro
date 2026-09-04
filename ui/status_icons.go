@@ -50,7 +50,7 @@ func (s *StatusIcons) Update(ctx Context, now time.Time) bool {
 	if s.widget == nil {
 		s.widget = newStatusIconsWidget()
 	}
-	width, height := ctx.ScreenSize()
+	width, height := ctx.UIScreenSize()
 	x, y, w, h := statusIconOverlayBounds(width, height, len(ids))
 	s.widget.ctx = ctx
 	s.widget.now = now
@@ -264,7 +264,7 @@ func (w *statusIconsWidget) drawTooltip(canvas widget.Canvas, statusID uint16, e
 	if len(lines) == 0 {
 		return
 	}
-	width, height := w.ctx.ScreenSize()
+	width, height := w.ctx.UIScreenSize()
 	tipW := statusIconTooltipWidth(lines)
 	tipH := len(lines)*16 + 6
 	x := clampWindowInt(mouseX+12, 4, maxInt(4, width-tipW-4))

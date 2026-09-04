@@ -443,7 +443,7 @@ func snapScreenPoint(dst *Frame, x, y float64) (float64, float64) {
 	if dst == nil {
 		return x, y
 	}
-	return snapScreenValue(x, float64(dst.screenScaleX)), snapScreenValue(y, float64(dst.screenScaleY))
+	return snapScreenValue(x, float64(dst.screenScaleX)) + float64(dst.screenOffsetX), snapScreenValue(y, float64(dst.screenScaleY)) + float64(dst.screenOffsetY)
 }
 
 func SnapScreenPoint(dst *Frame, x, y float64) (float64, float64) {

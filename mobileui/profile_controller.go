@@ -74,6 +74,120 @@ func (c *MobileProfileController) Close() bool {
 	return true
 }
 
+// The methods below are the controller's edit vocabulary. Tap resolves a
+// rectangle to one of them, and the Android host binds the same set to the
+// desktop character windows' callbacks, so both input paths share one
+// implementation of what an edit means.
+
+// SetDraftName replaces the name being edited, applying the same length and
+// character limits the on-screen keyboard enforces.
+func (c *MobileProfileController) SetDraftName(name string) {
+	if c == nil {
+		return
+	}
+	c.Draft.Name = appendProfileName("", name)
+}
+
+// ToggleSex flips the draft between the two sexes.
+func (c *MobileProfileController) ToggleSex() {
+	if c == nil {
+		return
+	}
+	c.Draft.Sex = 1 - c.Draft.Sex
+	c.Draft.SexLabel = ProfileSexLabel(c.Draft.Sex)
+}
+
+// PreviousHairStyle and NextHairStyle walk the hair styles the client ships,
+// wrapping at both ends.
+func (c *MobileProfileController) PreviousHairStyle() {
+	if c == nil {
+		return
+	}
+	c.Draft.HairStyle--
+	if c.Draft.HairStyle < profileMinHairStyle {
+		c.Draft.HairStyle = profileMaxHairStyle
+	}
+}
+
+func (c *MobileProfileController) NextHairStyle() {
+	if c == nil {
+		return
+	}
+	c.Draft.HairStyle++
+	if c.Draft.HairStyle > profileMaxHairStyle {
+		c.Draft.HairStyle = profileMinHairStyle
+	}
+}
+
+// CycleHairColor advances to the next palette.
+func (c *MobileProfileController) CycleHairColor() {
+	if c == nil {
+		return
+	}
+	c.Draft.HairColor = (c.Draft.HairColor + 1) % profileHairColors
+}
+
+// BumpStat moves one starter stat by delta, taking the difference from its
+// paired stat so the total stays fixed. It is a no-op when either side would
+// leave the legal 1..9 range.
+func (c *MobileProfileController) BumpStat(index, delta int) {
+	c.bumpStat(index, delta)
+}
+
+// BeginEdit opens the editor on the saved profile.
+func (c *MobileProfileController) BeginEdit() {
+	if c == nil || !c.Model.Editable {
+		return
+	}
+	c.Draft, c.Editor, c.NewProfile, c.EditingName = c.Model, true, false, false
+	c.relayout()
+}
+
+// CancelEdit discards the draft and returns to the read-only view.
+func (c *MobileProfileController) CancelEdit() {
+	if c == nil {
+		return
+	}
+	c.Editor, c.EditingName, c.NewProfile = false, false, false
+	c.Draft = c.Model
+	c.relayout()
+}
+
+// SaveDraft emits the save command and, if the sink accepts it, promotes the
+// draft to the saved profile. It reports whether the save was accepted.
+func (c *MobileProfileController) SaveDraft() bool {
+	if c == nil {
+		return false
+	}
+	command := input.PlayerCommand{
+		Kind:             input.CommandSaveOfflineProfile,
+		Text:             strings.TrimSpace(c.Draft.Name),
+		ProfileID:        c.Draft.ProfileID,
+		ProfileSex:       c.Draft.Sex,
+		ProfileHairStyle: int16(c.Draft.HairStyle),
+		ProfileHairColor: uint8(c.Draft.HairColor),
+		ProfileStats:     c.Draft.Stats,
+		ProfileNew:       c.NewProfile,
+	}
+	if c.Sink == nil || !c.Sink.Emit(command) {
+		return false
+	}
+	c.Model = c.Draft
+	c.Model.Notice = "Profile saved."
+	c.Editor, c.EditingName, c.NewProfile = false, false, false
+	c.relayout()
+	return true
+}
+
+// RequestStart asks the host to enter the world with the saved profile.
+func (c *MobileProfileController) RequestStart() {
+	if c == nil {
+		return
+	}
+	c.StartRequested = true
+	c.Close()
+}
+
 func (c *MobileProfileController) ConsumeTouch(point input.TouchPoint) bool {
 	_ = point
 	return c != nil && c.Open
@@ -108,9 +222,7 @@ func (c *MobileProfileController) Tap(x, y float32) bool {
 	}
 	if c.Layout.BackButton.Contains(x, y) {
 		if c.Editor {
-			c.Editor, c.NewProfile = false, false
-			c.Draft = c.Model
-			c.relayout()
+			c.CancelEdit()
 			return true
 		}
 		c.Close()
@@ -118,13 +230,11 @@ func (c *MobileProfileController) Tap(x, y float32) bool {
 	}
 	if !c.Editor {
 		if c.Layout.ContinueButton.Contains(x, y) {
-			c.StartRequested = true
-			c.Close()
+			c.RequestStart()
 			return true
 		}
 		if c.Layout.EditButton.Contains(x, y) && c.Model.Editable {
-			c.Draft, c.Editor, c.NewProfile = c.Model, true, false
-			c.relayout()
+			c.BeginEdit()
 			return true
 		}
 		if c.Layout.NewButton.Contains(x, y) && c.Model.Editable {
@@ -139,26 +249,19 @@ func (c *MobileProfileController) Tap(x, y float32) bool {
 		return true
 	}
 	if c.Layout.SexButton.Contains(x, y) {
-		c.Draft.Sex = 1 - c.Draft.Sex
-		c.Draft.SexLabel = profileSexLabel(c.Draft.Sex)
+		c.ToggleSex()
 		return true
 	}
 	if c.Layout.HairPrev.Contains(x, y) {
-		c.Draft.HairStyle--
-		if c.Draft.HairStyle < 2 {
-			c.Draft.HairStyle = 23
-		}
+		c.PreviousHairStyle()
 		return true
 	}
 	if c.Layout.HairNext.Contains(x, y) {
-		c.Draft.HairStyle++
-		if c.Draft.HairStyle > 23 {
-			c.Draft.HairStyle = 2
-		}
+		c.NextHairStyle()
 		return true
 	}
 	if c.Layout.HairColor.Contains(x, y) {
-		c.Draft.HairColor = (c.Draft.HairColor + 1) % 10
+		c.CycleHairColor()
 		return true
 	}
 	for i := range c.Draft.Stats {
@@ -172,19 +275,11 @@ func (c *MobileProfileController) Tap(x, y float32) bool {
 		}
 	}
 	if c.Layout.SaveButton.Contains(x, y) {
-		command := input.PlayerCommand{Kind: input.CommandSaveOfflineProfile, Text: strings.TrimSpace(c.Draft.Name), ProfileID: c.Draft.ProfileID, ProfileSex: c.Draft.Sex, ProfileHairStyle: int16(c.Draft.HairStyle), ProfileHairColor: uint8(c.Draft.HairColor), ProfileStats: c.Draft.Stats, ProfileNew: c.NewProfile}
-		if c.Sink != nil && c.Sink.Emit(command) {
-			c.Model = c.Draft
-			c.Model.Notice = "Profile saved."
-			c.Editor, c.EditingName, c.NewProfile = false, false, false
-			c.relayout()
-		}
+		c.SaveDraft()
 		return true
 	}
 	if c.Layout.CancelButton.Contains(x, y) {
-		c.Editor, c.EditingName, c.NewProfile = false, false, false
-		c.Draft = c.Model
-		c.relayout()
+		c.CancelEdit()
 		return true
 	}
 	return true
@@ -200,9 +295,7 @@ func (c *MobileProfileController) Back() bool {
 		return true
 	}
 	if c.Editor {
-		c.Editor, c.NewProfile = false, false
-		c.Draft = c.Model
-		c.relayout()
+		c.CancelEdit()
 		return true
 	}
 	return c.Close()

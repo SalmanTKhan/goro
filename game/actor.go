@@ -877,8 +877,14 @@ func (m *WorldMode) collectSceneActorEntries(screen *render.Frame, ctx client.Co
 		}
 	}
 	player.Dir = ctx.World.Dir
+	// appendActorDrawEntry drops an actor whose anchor falls outside the
+	// viewport, so the player does not always produce an entry. Indexing the
+	// tail unconditionally crashed the client whenever it did not.
+	placed := len(entries)
 	entries = appendActorDrawEntry(entries, ctx.World, projection, player, true, now, width, height)
-	entries[len(entries)-1].hidden = localActorHidden(ctx)
+	if len(entries) > placed {
+		entries[len(entries)-1].hidden = localActorHidden(ctx)
+	}
 	for _, actor := range ctx.World.Actors {
 		if actor.ID == ctx.Session.AccountID || actor.ID == ctx.Session.CharID {
 			continue

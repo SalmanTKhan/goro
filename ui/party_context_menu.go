@@ -29,7 +29,7 @@ func (m *PartyContextMenu) Open(ctx Context, x, y int, member session.PartyMembe
 	m.member = member
 	m.canManage = canManage
 	m.isSelf = isSelf
-	screenW, screenH := ctx.ScreenSize()
+	screenW, screenH := ctx.UIScreenSize()
 	height := m.height()
 	m.SetSize(partyContextMenuWidth, height)
 	x = clampWindowInt(x, windowScreenMargin, maxInt(windowScreenMargin, screenW-partyContextMenuWidth-windowScreenMargin))

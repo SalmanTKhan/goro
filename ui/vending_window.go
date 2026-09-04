@@ -201,7 +201,7 @@ func (w *VendingWindow) DrawDragGhost(screen *render.Frame, ctx Context, assets 
 
 func (w *VendingWindow) ensurePosition(ctx Context) {
 	w.ensureWindows()
-	screenW, screenH := ctx.ScreenSize()
+	screenW, screenH := ctx.UIScreenSize()
 	totalW := vendingWindowW*2 + vendingWindowGap
 	leftX := maxInt(windowScreenMargin, (screenW-totalW)/2)
 	leftY := maxInt(windowScreenMargin, (screenH-w.leftHeight())/2)

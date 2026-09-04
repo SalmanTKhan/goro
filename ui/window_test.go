@@ -288,7 +288,7 @@ func TestWindowDragContinuesAcrossEarlierUpdatedWindow(t *testing.T) {
 	}
 }
 
-func TestDamagedPositionedOverlayClearsPreexistingChildDirty(t *testing.T) {
+func TestDamagedPositionedOverlayMarksCompleteChildTreeDirty(t *testing.T) {
 	child := newWindowDragEventRecorder()
 	overlay := positionedWidget(child, 10, 20, 100, 80).(*positionedOverlay)
 	child.SetNeedsRedraw(true)
@@ -296,8 +296,8 @@ func TestDamagedPositionedOverlayClearsPreexistingChildDirty(t *testing.T) {
 
 	overlay.Draw(widget.NewContext(), &uitest.MockCanvas{})
 
-	if child.NeedsRedraw() {
-		t.Fatal("damaged overlay left preexisting child redraw dirty for another frame")
+	if !child.NeedsRedraw() {
+		t.Fatal("damaged overlay did not retain child redraw until draw-tree finalization")
 	}
 }
 
@@ -407,4 +407,29 @@ func (w *windowDragEventRecorder) Draw(widget.Context, widget.Canvas) {
 func (w *windowDragEventRecorder) Event(widget.Context, event.Event) bool {
 	w.events++
 	return true
+}
+
+func TestUserMovedWindowReflowsAndClampsOnViewportChange(t *testing.T) {
+	w := NewWindow(200, 100)
+	w.open = true
+	w.positioned = true
+	w.userMoved = true
+	w.dragging = true
+	w.x = 400
+	w.y = 200
+
+	w.viewportChanged(1000, 500, 500, 1000)
+
+	if w.dragging {
+		t.Fatal("window remained in dragging state after viewport change")
+	}
+	if w.x != 150 || w.y != 450 {
+		t.Fatalf("reflowed position = %d,%d, want 150,450", w.x, w.y)
+	}
+
+	w.x, w.y = 900, 900
+	w.viewportChanged(1000, 1000, 500, 500)
+	if w.x != 292 || w.y != 392 {
+		t.Fatalf("clamped position = %d,%d, want 292,392", w.x, w.y)
+	}
 }

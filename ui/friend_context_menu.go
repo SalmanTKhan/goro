@@ -25,7 +25,7 @@ func (m *FriendContextMenu) Open(ctx Context, x, y int, friend session.Friend) {
 	m.titleHeight = 0
 	m.ctx = ctx
 	m.friend = friend
-	screenW, screenH := ctx.ScreenSize()
+	screenW, screenH := ctx.UIScreenSize()
 	height := m.height()
 	m.SetSize(friendContextMenuWidth, height)
 	x = clampWindowInt(x, windowScreenMargin, maxInt(windowScreenMargin, screenW-friendContextMenuWidth-windowScreenMargin))

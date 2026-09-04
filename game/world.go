@@ -1112,14 +1112,14 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 		m.nextHeldWalkAt = now.Add(heldWalkRepeatInterval)
 	}
 	if leftClick && m.pendingSkill.skill.ID != 0 {
-		screenW, screenH := ctx.ScreenSize()
+		screenW, screenH := ctx.UIScreenSize()
 		projection := m.sceneProjection(ctx, screenW, screenH, now)
 		m.skills().HandleClick(ctx, projection, now)
 		return nil, nil
 	}
 
 	if leftClick {
-		screenW, screenH := ctx.ScreenSize()
+		screenW, screenH := ctx.UIScreenSize()
 		projection := m.sceneProjection(ctx, screenW, screenH, now)
 		if m.handlePetCaptureClick(ctx, projection, now) {
 			return nil, nil

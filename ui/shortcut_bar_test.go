@@ -661,3 +661,20 @@ func TestShortcutTooltipShowsHotkeyForEmptySlot(t *testing.T) {
 		t.Fatalf("published empty tooltip text = %q, want F2", got)
 	}
 }
+
+func TestShortcutBarReflowsBelowTopHUDInPortrait(t *testing.T) {
+	bar := &ShortcutBar{}
+	portrait := Context{UIWidth: 640, UIHeight: 1280}
+	x, y := bar.bounds(portrait)
+	_, menuHeight := basicMenuSize()
+	wantY := maxInt(characterWindowY+characterWindowHeight+basicMenuFollowGap+menuHeight, minimapMargin+minimapHeight) + windowScreenMargin
+	if x != (640-shortcutBarWidth())/2 || y != wantY {
+		t.Fatalf("portrait bounds = %d,%d, want %d,%d", x, y, (640-shortcutBarWidth())/2, wantY)
+	}
+
+	landscape := Context{UIWidth: 1280, UIHeight: 640}
+	_, y = bar.bounds(landscape)
+	if y != windowScreenMargin {
+		t.Fatalf("landscape y = %d, want %d", y, windowScreenMargin)
+	}
+}

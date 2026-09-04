@@ -9,6 +9,15 @@ type EconomyLayout struct {
 	Portrait                                                                    bool
 }
 
+const (
+	// economyRowHeight fits two lines: an item's name over its stock or the
+	// quantity already held. A 56-pixel row was sized for the old bitmap text
+	// and collided the two lines at the real font size.
+	economyRowHeight float32 = 84
+	// economyRowExtent is the row height plus the gap between rows.
+	economyRowExtent float32 = economyRowHeight + 8
+)
+
 type EconomyTabRect struct {
 	Tab  ShopTab
 	Rect Rect
@@ -128,7 +137,7 @@ func LayoutEconomyQuantity(viewport Viewport) (modal, minus, plus, confirm, canc
 }
 
 func EconomyScrollExtent(viewport Rect, rowCount int) InventoryScrollState {
-	rowExtent := float32(64)
+	rowExtent := economyRowExtent
 	content := float32(rowCount) * rowExtent
 	if content > 0 {
 		content -= 8
@@ -142,15 +151,17 @@ func economyVisibleRows(viewport Rect, rowCount int, offset float32) ([]Rect, []
 	}
 	maxOffset := EconomyScrollExtent(viewport, rowCount).MaxOffset()
 	offset = clampf(offset, 0, maxOffset)
-	rowExtent := float32(64)
+	rowExtent := economyRowExtent
 	first := int(offset / rowExtent)
 	visible := int(viewport.H/rowExtent) + 2
 	last := minInt(rowCount, first+visible)
 	rows := make([]Rect, 0, last-first)
 	indices := make([]int, 0, last-first)
 	for i := first; i < last; i++ {
-		row := Rect{X: viewport.X, Y: viewport.Y + float32(i)*rowExtent - offset, W: viewport.W, H: 56}
-		if row.Bottom() <= viewport.Y || row.Y >= viewport.Bottom() {
+		row := Rect{X: viewport.X, Y: viewport.Y + float32(i)*rowExtent - offset, W: viewport.W, H: economyRowHeight}
+		// Only fully visible rows are emitted. A row straddling the edge is
+		// drawn unclipped by the renderer, so it would spill past the panel.
+		if row.Y < viewport.Y || row.Bottom() > viewport.Bottom() {
 			continue
 		}
 		rows = append(rows, row)

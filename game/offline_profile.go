@@ -33,7 +33,13 @@ func (m *WorldMode) applyOfflineProfile(ctx client.Context, command input.Player
 	character.HairColor = profile.HairColor
 	ctx.Session.Selected = character
 	ctx.Session.Sex = profile.Sex
+	// worldActorForSelectedCharacter builds an actor with no position — its
+	// other caller places the player itself on map entry. Editing an appearance
+	// must not move the player, so carry the current position across the
+	// rebuild; without this the player is rebuilt at 0,0.
+	x, y, dir := ctx.World.Player.X, ctx.World.Player.Y, ctx.World.Player.Dir
 	ctx.World.Player = worldActorForSelectedCharacter(ctx)
+	ctx.World.SetPlayerPosition(x, y, dir)
 	m.reloadPlayerSpriteView(ctx, "offline profile updated")
 	return true
 }

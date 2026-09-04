@@ -12,7 +12,19 @@ type MobileAudioSettings struct {
 // real presentation effect. The target-name option remains part of
 // MobileControls because it belongs to touch inspection.
 type MobileDisplaySettings struct {
-	ShowMinimap bool
+	ShowMinimap  bool
+	Presentation MobilePresentationMode
+}
+
+type MobilePresentationMode string
+
+const (
+	MobilePresentationMobileUI MobilePresentationMode = "mobileui"
+	MobilePresentationDesktop  MobilePresentationMode = "desktop"
+)
+
+func (m MobilePresentationMode) Valid() bool {
+	return m == MobilePresentationMobileUI || m == MobilePresentationDesktop
 }
 
 // MobileGameplaySettings mirrors the existing desktop gameplay switches so
@@ -29,6 +41,7 @@ type MobileGameplaySettings struct {
 // settings page. It contains no touch IDs, screen coordinates, or renderer
 // objects.
 type MobileSettings struct {
+	UI       UISettings
 	Controls MobileControls
 	Audio    MobileAudioSettings
 	Display  MobileDisplaySettings
@@ -37,13 +50,14 @@ type MobileSettings struct {
 
 func DefaultMobileSettings() MobileSettings {
 	return MobileSettings{
+		UI:       DefaultUISettings(),
 		Controls: DefaultMobileControls(),
 		Audio: MobileAudioSettings{
 			BGMEnabled: true,
 			BGMVolume:  0.55,
 			SFXVolume:  0.55,
 		},
-		Display: MobileDisplaySettings{ShowMinimap: true},
+		Display: MobileDisplaySettings{ShowMinimap: true, Presentation: MobilePresentationMobileUI},
 		Gameplay: MobileGameplaySettings{
 			NoCtrl: true,
 		},
@@ -52,7 +66,11 @@ func DefaultMobileSettings() MobileSettings {
 
 func (s MobileSettings) Normalized() MobileSettings {
 	defaults := DefaultMobileSettings()
+	s.UI = s.UI.Normalized()
 	s.Controls = s.Controls.Normalized()
+	if !s.Display.Presentation.Valid() {
+		s.Display.Presentation = defaults.Display.Presentation
+	}
 	s.Audio.BGMVolume = clampMobileVolume(s.Audio.BGMVolume, defaults.Audio.BGMVolume)
 	s.Audio.SFXVolume = clampMobileVolume(s.Audio.SFXVolume, defaults.Audio.SFXVolume)
 	return s

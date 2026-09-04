@@ -38,6 +38,51 @@ type Game interface {
 	InputState() *input.State
 }
 
+type uiScaleProvider interface {
+	UISettings() input.UISettings
+}
+
+type scaledUIEventSource struct {
+	source gpucontext.EventSource
+	scale  func() float64
+	width  func() int
+	height func() int
+}
+
+func (s scaledUIEventSource) point(x, y float64) (float64, float64) {
+	scale := s.scale()
+	if scale <= 0 {
+		scale = 1
+	}
+	// The UI surface is centered and scaled around the physical window center.
+	// The framework still receives its normal logical surface coordinates.
+	return (x - (float64(s.width())*(1-scale))/2) / scale, (y - (float64(s.height())*(1-scale))/2) / scale
+}
+func (s scaledUIEventSource) OnKeyPress(fn func(gpucontext.Key, gpucontext.Modifiers)) {
+	s.source.OnKeyPress(fn)
+}
+func (s scaledUIEventSource) OnKeyRelease(fn func(gpucontext.Key, gpucontext.Modifiers)) {
+	s.source.OnKeyRelease(fn)
+}
+func (s scaledUIEventSource) OnTextInput(fn func(string)) { s.source.OnTextInput(fn) }
+func (s scaledUIEventSource) OnMouseMove(fn func(float64, float64)) {
+	s.source.OnMouseMove(func(x, y float64) { fn(s.point(x, y)) })
+}
+func (s scaledUIEventSource) OnMousePress(fn func(gpucontext.MouseButton, float64, float64)) {
+	s.source.OnMousePress(func(button gpucontext.MouseButton, x, y float64) { lx, ly := s.point(x, y); fn(button, lx, ly) })
+}
+func (s scaledUIEventSource) OnMouseRelease(fn func(gpucontext.MouseButton, float64, float64)) {
+	s.source.OnMouseRelease(func(button gpucontext.MouseButton, x, y float64) { lx, ly := s.point(x, y); fn(button, lx, ly) })
+}
+func (s scaledUIEventSource) OnScroll(fn func(float64, float64)) { s.source.OnScroll(fn) }
+func (s scaledUIEventSource) OnResize(fn func(int, int))         { s.source.OnResize(fn) }
+func (s scaledUIEventSource) OnFocus(fn func(bool))              { s.source.OnFocus(fn) }
+func (s scaledUIEventSource) OnIMECompositionStart(fn func())    { s.source.OnIMECompositionStart(fn) }
+func (s scaledUIEventSource) OnIMECompositionUpdate(fn func(gpucontext.IMEState)) {
+	s.source.OnIMECompositionUpdate(fn)
+}
+func (s scaledUIEventSource) OnIMECompositionEnd(fn func(string)) { s.source.OnIMECompositionEnd(fn) }
+
 type quitReceiver interface {
 	SetQuitFunc(func())
 }
@@ -302,12 +347,23 @@ func Run(game Game, cfg config.WindowConfig, renderCfg config.RenderConfig) erro
 	setCursorApp(gg)
 	defer setCursorApp(nil)
 	events := newFanoutEventSource(gg.EventSource())
+	uiWidth, uiHeight := cfg.Width, cfg.Height
+	uiEvents := scaledUIEventSource{
+		source: events,
+		scale: func() float64 {
+			if provider, ok := game.(uiScaleProvider); ok {
+				return float64(provider.UISettings().Normalized().Scale)
+			}
+			return 1
+		},
+		width: func() int { return uiWidth }, height: func() int { return uiHeight },
+	}
 	uiTheme := rotheme.Default.AsTheme()
 	uiTheme.Colors.Background = widget.RGBA8(0, 0, 0, 0)
 	ui := uiapp.New(
 		uiapp.WithWindowProvider(gg),
 		uiapp.WithPlatformProvider(roCursorPlatformProvider{PlatformProvider: gg}),
-		uiapp.WithEventSource(events),
+		uiapp.WithEventSource(uiEvents),
 		uiapp.WithTheme(uiTheme),
 		uiapp.WithRenderMode(uiapp.RenderModeFrameworkManaged),
 	)
@@ -340,6 +396,7 @@ func Run(game Game, cfg config.WindowConfig, renderCfg config.RenderConfig) erro
 			return
 		}
 		r.width, r.height = width, height
+		uiWidth, uiHeight = width, height
 		r.screen = nil
 		r.game.Resize(width, height)
 	})
@@ -1149,7 +1206,14 @@ func (r *runner) drawUIPublishedImage(screen *Frame, width, height int) error {
 	if r.uiDrawnOnce && r.uiImage != nil {
 		var opts DrawImageOptions
 		if b := r.uiImage.Bounds(); b.Dx() > 0 && b.Dy() > 0 {
-			opts.GeoM.Scale(float64(width)/float64(b.Dx()), float64(height)/float64(b.Dy()))
+			scale := 1.0
+			if provider, ok := r.game.(uiScaleProvider); ok {
+				scale = float64(provider.UISettings().Normalized().Scale)
+			}
+			baseX := float64(width) / float64(b.Dx())
+			baseY := float64(height) / float64(b.Dy())
+			opts.GeoM.Scale(baseX*scale, baseY*scale)
+			opts.GeoM.Translate(float64(width)*(1-scale)/2, float64(height)*(1-scale)/2)
 		}
 		opts.Filter = FilterNearest
 		screen.DrawImage(r.uiImage, &opts)

@@ -428,7 +428,7 @@ func (w *CartWindow) hideTooltip() {
 }
 
 func cartDefaultPosition(ctx Context) (int, int) {
-	width, _ := ctx.ScreenSize()
+	width, _ := ctx.UIScreenSize()
 	return maxInt(windowScreenMargin, width-cartWindowWidth-windowScreenMargin), 118
 }
 

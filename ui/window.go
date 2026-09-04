@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"math"
+
 	"github.com/gogpu/ui/event"
 	"github.com/gogpu/ui/geometry"
 	"github.com/gogpu/ui/primitives"
@@ -361,6 +363,25 @@ func (w *Window) SetAutoPosition(x, y int) bool {
 	return true
 }
 
+func (w *Window) viewportChanged(oldWidth, oldHeight, width, height int) {
+	if w == nil || width <= 0 || height <= 0 {
+		return
+	}
+	w.cancelDragLayer(w.ctx)
+	w.dragging = false
+	x, y := w.x, w.y
+	if w.userMoved && oldWidth > 0 && oldHeight > 0 {
+		centerX := float64(w.x) + float64(w.width)/2
+		centerY := float64(w.y) + float64(w.height)/2
+		x = int(math.Round(centerX*float64(width)/float64(oldWidth) - float64(w.width)/2))
+		y = int(math.Round(centerY*float64(height)/float64(oldHeight) - float64(w.height)/2))
+	}
+	x = clampWindowInt(x, windowScreenMargin, maxInt(windowScreenMargin, width-w.width-windowScreenMargin))
+	dragHeight := w.height + maxInt(0, w.dragBottom)
+	y = clampWindowInt(y, windowScreenMargin, maxInt(windowScreenMargin, height-dragHeight-windowScreenMargin))
+	w.setPosition(w.ctx, x, y)
+}
+
 func (w *Window) Update(ctx client.Context) bool {
 	w.ctx = ctx
 	if !w.open || ctx.Input == nil {
@@ -373,7 +394,7 @@ func (w *Window) Update(ctx client.Context) bool {
 		return false
 	}
 	w.ensurePosition(ctx)
-	screenW, screenH := ctx.ScreenSize()
+	screenW, screenH := ctx.UIScreenSize()
 	if w.dragging {
 		if ctx.Input.MousePressed(input.MouseButtonLeft) {
 			x := clampWindowInt(ctx.Input.MouseX-w.dragDX, windowScreenMargin, maxInt(windowScreenMargin, screenW-w.width-windowScreenMargin))
@@ -415,7 +436,7 @@ func (w *Window) ensurePosition(ctx client.Context) {
 	if w.positioned {
 		return
 	}
-	screenW, screenH := ctx.ScreenSize()
+	screenW, screenH := ctx.UIScreenSize()
 	w.x = maxInt(windowScreenMargin, (screenW-w.width)/2)
 	w.y = maxInt(windowScreenMargin, (screenH-w.height)/2)
 	w.positioned = true
@@ -456,6 +477,7 @@ func (w *Window) Widget() widget.Widget {
 		w.placed = positionedWidget(w.content, w.x, w.y, w.width, w.height)
 		if overlay := w.positionedOverlay(); overlay != nil {
 			overlay.raiseOnPress = true
+			overlay.owner = w
 		}
 	} else if overlay, ok := w.placed.(*positionedOverlay); ok {
 		overlay.setFrame(w.x, w.y, w.width, w.height)
@@ -676,6 +698,13 @@ type positionedOverlay struct {
 	hasDamage     bool
 	hidden        bool
 	raiseOnPress  bool
+	owner         *Window
+}
+
+func (w *positionedOverlay) viewportChanged(oldWidth, oldHeight, width, height int) {
+	if w != nil && w.owner != nil {
+		w.owner.viewportChanged(oldWidth, oldHeight, width, height)
+	}
 }
 
 func (w *positionedOverlay) setFrame(x, y, width, height int) geometry.Rect {
@@ -773,7 +802,10 @@ func (w *positionedOverlay) Draw(ctx widget.Context, canvas widget.Canvas) {
 	canvas.PushTransform(w.Bounds().Min)
 	widget.StampScreenOrigin(w.child, canvas)
 	if w.hasDamage {
-		widget.ClearRedrawInTree(w.child)
+		// A damaged positioned overlay is redrawn as a complete unit. This is
+		// required by Android's host-managed fresh raster, and is also correct for
+		// the desktop dirty rectangle covering the entire overlay frame.
+		widget.MarkRedrawInTree(w.child)
 	}
 	widget.DrawChild(w.child, ctx, canvas)
 	canvas.PopTransform()
@@ -813,7 +845,7 @@ func (w *positionedOverlay) Children() []widget.Widget {
 }
 
 func centeredWindowRect(ctx client.Context, width, height int) (int, int, int, int) {
-	screenW, screenH := ctx.ScreenSize()
+	screenW, screenH := ctx.UIScreenSize()
 	x := (screenW - width) / 2
 	y := (screenH - height) / 2
 	if x < windowScreenMargin {

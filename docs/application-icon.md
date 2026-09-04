@@ -15,6 +15,9 @@ The generator creates:
   variants. The release workflow compiles this into each Windows executable.
 - `packaging/linux/goro.png`, a 256x256 nearest-neighbor variant for desktop
   packaging.
+- `android/host/app/src/main/res/mipmap-{mdpi,hdpi,xhdpi,xxhdpi,xxxhdpi}/ic_launcher.png`,
+  the Android launcher icon (48/72/96/144/192 px). The manifest references it as
+  `@mipmap/ic_launcher`.
 
 `packaging/linux/goro.desktop` is a template for distribution packages. Install
 the desktop file and PNG in the appropriate XDG application and icon directories.

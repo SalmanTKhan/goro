@@ -1,5 +1,15 @@
 package mobileui
 
+const (
+	// profileLabelRow is one line box of the real UI font. Label rows were 18
+	// pixels, sized for the old bitmap text, and the real font spilled past the
+	// panel borders.
+	profileLabelRow float32 = 32
+	// profileIdentityHeight keeps the panel's original budget: growing it
+	// pushed the stats card off the bottom of short viewports.
+	profileIdentityHeight float32 = 136
+)
+
 type ProfileKeyRect struct {
 	Key  string
 	Rect Rect
@@ -32,7 +42,7 @@ func LayoutMobileProfile(viewport Viewport, model MobileProfileModel, editor, ed
 	layout.Panel = centeredMobileRail(safe, panelWidth, 16)
 	pad := float32(16)
 	layout.Header = Rect{X: layout.Panel.X + pad, Y: layout.Panel.Y + pad, W: layout.Panel.W - 2*pad, H: 56}
-	layout.BackButton = Rect{X: layout.Header.X, Y: layout.Header.Y, W: 112, H: 52}
+	layout.BackButton = Rect{X: layout.Header.X, Y: layout.Header.Y, W: BackButtonWidth(), H: 52}
 	layout.HeaderTitle = Rect{X: layout.BackButton.Right() + 16, Y: layout.Header.Y, W: maxf(0, layout.Header.Right()-layout.BackButton.Right()-16), H: layout.Header.H}
 	contentX := layout.Panel.X + pad
 	contentY := layout.Header.Bottom() + 16
@@ -45,7 +55,7 @@ func LayoutMobileProfile(viewport Viewport, model MobileProfileModel, editor, ed
 		layout.Preview = Rect{X: contentX, Y: contentY, W: contentW, H: previewH}
 		// Three identity rows need their own vertical space: section header,
 		// name label/field, and the read-only sex label.
-		layout.Identity = Rect{X: contentX, Y: layout.Preview.Bottom() + 12, W: contentW, H: 136}
+		layout.Identity = Rect{X: contentX, Y: layout.Preview.Bottom() + 12, W: contentW, H: profileIdentityHeight}
 		appearanceH := float32(112)
 		if editor {
 			// Editor controls occupy two non-overlapping rows below the header:
@@ -59,7 +69,7 @@ func LayoutMobileProfile(viewport Viewport, model MobileProfileModel, editor, ed
 		layout.Preview = Rect{X: contentX, Y: contentY, W: previewW, H: layout.Panel.Bottom() - contentY - 16}
 		rightX := layout.Preview.Right() + 16
 		rightW := maxf(0, layout.Panel.Right()-pad-rightX)
-		layout.Identity = Rect{X: rightX, Y: contentY, W: rightW, H: 132}
+		layout.Identity = Rect{X: rightX, Y: contentY, W: rightW, H: profileIdentityHeight}
 		appearanceH := float32(116)
 		if editor {
 			appearanceH = 164
@@ -69,10 +79,12 @@ func LayoutMobileProfile(viewport Viewport, model MobileProfileModel, editor, ed
 		statsX, statsW = rightX, rightW
 	}
 
-	layout.NameLabel = Rect{X: layout.Identity.X + 12, Y: layout.Identity.Y + 36, W: maxf(0, layout.Identity.W-24), H: 18}
-	layout.NameField = Rect{X: layout.Identity.X + 12, Y: layout.Identity.Y + 58, W: maxf(0, layout.Identity.W-24), H: 48}
-	layout.SexLabel = Rect{X: layout.Identity.X + 12, Y: layout.NameField.Bottom() + 6, W: maxf(0, layout.Identity.W-24), H: 18}
-	layout.AppearanceLabel = Rect{X: layout.Appearance.X + 12, Y: layout.Appearance.Y + 36, W: maxf(0, layout.Appearance.W-24), H: 18}
+	// Label rows are a full line box tall. At 18 pixels they were sized for the
+	// old bitmap text and the real font spilled past the panel borders.
+	layout.NameLabel = Rect{X: layout.Identity.X + 12, Y: layout.Identity.Y + 6, W: maxf(0, layout.Identity.W-24), H: profileLabelRow}
+	layout.NameField = Rect{X: layout.Identity.X + 12, Y: layout.NameLabel.Bottom() + 2, W: maxf(0, layout.Identity.W-24), H: 48}
+	layout.SexLabel = Rect{X: layout.Identity.X + 12, Y: layout.NameField.Bottom() + 2, W: maxf(0, layout.Identity.W-24), H: profileLabelRow}
+	layout.AppearanceLabel = Rect{X: layout.Appearance.X + 12, Y: layout.Appearance.Y + 8, W: maxf(0, layout.Appearance.W-24), H: profileLabelRow}
 	layout.SexButton = Rect{X: layout.Appearance.X + 12, Y: layout.Appearance.Y + 58, W: maxf(110, minf(190, layout.Appearance.W*0.30)), H: 48}
 	layout.HairPrev = Rect{X: layout.Appearance.X + 12, Y: layout.Appearance.Y + 112, W: 52, H: 48}
 	layout.HairNext = Rect{X: layout.HairPrev.Right() + 8, Y: layout.HairPrev.Y, W: 52, H: 48}
@@ -90,7 +102,7 @@ func LayoutMobileProfile(viewport Viewport, model MobileProfileModel, editor, ed
 		}
 		statsBottom := maxf(statsY, buttonY-12)
 		layout.Stats = Rect{X: statsX, Y: statsY, W: statsW, H: maxf(0, statsBottom-statsY)}
-		layout.StarterTotal = Rect{X: layout.Stats.X + 16, Y: layout.Stats.Y + 8, W: maxf(0, layout.Stats.W-32), H: 20}
+		layout.StarterTotal = Rect{X: layout.Stats.X + 16, Y: layout.Stats.Y + 8, W: maxf(0, layout.Stats.W-32), H: profileLabelRow}
 		layout.SaveButton = Rect{X: layout.Panel.Right() - 252, Y: buttonY, W: 116, H: 52}
 		layout.CancelButton = Rect{X: layout.SaveButton.Right() + 12, Y: buttonY, W: 116, H: 52}
 	} else {

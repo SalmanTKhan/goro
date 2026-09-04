@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"github.com/gogpu/ui/core/checkbox"
 	"github.com/gogpu/ui/core/textfield"
 	"github.com/gogpu/ui/primitives"
 	"github.com/gogpu/ui/widget"
@@ -13,18 +14,21 @@ type loginWindowLayout struct {
 }
 
 type LoginWindowCallbacks struct {
-	OnSubmit func()
+	OnSubmit        func()
+	OnOfflineSubmit func()
 }
 
 type LoginWindow struct {
 	Username string
 	Password string
+	Offline  bool
 
 	Window
 	layout    loginWindowLayout
 	callbacks LoginWindowCallbacks
 	user      *textfield.Widget
 	password  *textfield.Widget
+	offline   *checkbox.Widget
 }
 
 const (
@@ -83,6 +87,10 @@ func (w *LoginWindow) rebuild() {
 
 func (w *LoginWindow) widgetTree() widget.Widget {
 	submit := func() {
+		if w.Offline && w.callbacks.OnOfflineSubmit != nil {
+			w.callbacks.OnOfflineSubmit()
+			return
+		}
 		if w.callbacks.OnSubmit != nil {
 			w.callbacks.OnSubmit()
 		}
@@ -109,6 +117,12 @@ func (w *LoginWindow) widgetTree() widget.Widget {
 	password.SetFocused(passwordFocused)
 	w.user = user
 	w.password = password
+	offline := rotheme.Checkbox(
+		checkbox.Checked(w.Offline),
+		checkbox.LabelOpt("Offline"),
+		checkbox.OnToggle(func(enabled bool) { w.Offline = enabled }),
+	)
+	w.offline = offline
 	labelW := float32(loginWindowFieldLeft - 36)
 	fieldW := float32(w.layout.W - loginWindowFieldLeft - loginWindowFieldRightPad)
 	fieldH := float32(loginWindowFieldH)
@@ -131,6 +145,7 @@ func (w *LoginWindow) widgetTree() widget.Widget {
 				).
 					CrossAlign(primitives.CrossAxisCenter).
 					Gap(12),
+				primitives.Box(offline).Height(fieldH),
 				primitives.HBox(
 					primitives.Box(
 						rotheme.Text("Password").
@@ -152,7 +167,13 @@ func (w *LoginWindow) widgetTree() widget.Widget {
 		),
 		Footer(
 			primitives.Expanded(primitives.Box()),
-			rotheme.Button("Login", submit),
+			rotheme.Button("Login", func() {
+				if w.Offline && w.callbacks.OnOfflineSubmit != nil {
+					w.callbacks.OnOfflineSubmit()
+					return
+				}
+				submit()
+			}),
 		),
 	)
 }
@@ -188,7 +209,7 @@ func loginWindowLayoutEqual(a, b loginWindowLayout) bool {
 }
 
 func loginWindowLayoutForContext(ctx client.Context) loginWindowLayout {
-	width, height := ctx.ScreenSize()
+	width, height := ctx.UIScreenSize()
 	w, h := loginWindowSize()
 	x := (width - w) / 2
 	y := (height*2)/3 - h/2
@@ -205,5 +226,5 @@ func loginWindowLayoutForContext(ctx client.Context) loginWindowLayout {
 }
 
 func loginWindowSize() (int, int) {
-	return 304, ROWindowTitleHeight + loginWindowFormTopPad + loginWindowFieldH*2 + loginWindowFieldGap + 16 + ROWindowFooterHeight
+	return 304, ROWindowTitleHeight + loginWindowFormTopPad + loginWindowFieldH*3 + loginWindowFieldGap*2 + 16 + ROWindowFooterHeight
 }

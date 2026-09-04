@@ -98,7 +98,7 @@ type minimapPlayerMarkerState struct {
 
 func (m *Minimap) Update(ctx Context) bool {
 	now := time.Now()
-	width, height := ctx.ScreenSize()
+	width, height := ctx.UIScreenSize()
 	x, y, w, h := minimapBounds(width, height)
 	m.ensureWindow(w, h)
 	if ctx.World == nil || m.hidden {

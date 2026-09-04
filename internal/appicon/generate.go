@@ -24,10 +24,24 @@ func main() {
 		check(fmt.Errorf("source icon must be square, got %dx%d", bounds.Dx(), bounds.Dy()))
 	}
 
-	frames := makeFrames(source, []int{16, 32, 48, 64, 256})
+	// Android launcher densities: mdpi 48, hdpi 72, xhdpi 96, xxhdpi 144, xxxhdpi 192.
+	androidBuckets := map[string]int{
+		"mdpi":    48,
+		"hdpi":    72,
+		"xhdpi":   96,
+		"xxhdpi":  144,
+		"xxxhdpi": 192,
+	}
+
+	frames := makeFrames(source, []int{16, 32, 48, 64, 72, 96, 144, 192, 256})
 	projectRoot := filepath.Join("..", "..")
 	writeFile(filepath.Join(projectRoot, "packaging", "windows", "goro.ico"), encodeICO(frames, []int{16, 32, 48, 64, 256}))
 	writeFile(filepath.Join(projectRoot, "packaging", "linux", "goro.png"), frames[256])
+
+	androidRes := filepath.Join(projectRoot, "android", "host", "app", "src", "main", "res")
+	for density, size := range androidBuckets {
+		writeFile(filepath.Join(androidRes, "mipmap-"+density, "ic_launcher.png"), frames[size])
+	}
 }
 
 func makeFrames(source image.Image, sizes []int) map[int][]byte {

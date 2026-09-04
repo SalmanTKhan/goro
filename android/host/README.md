@@ -26,9 +26,24 @@ not a substitute for the ARM64 physical-device gate.
 - touch events are forwarded to `goro/input.State` without mouse emulation;
 - Java `WindowInsets` are forwarded to the mobile safe-area layout.
 - one-finger world input uses the persisted Hold-to-move/Tap-to-move setting;
-- two-finger drag rotates the camera and pinch remains zoom;
+- one-finger world dragging never rotates the camera;
+- two-finger drag rotates the camera, pinch remains zoom, and a short
+  two-finger tap performs secondary actor inspection;
+- moving across an actor refreshes its target name without attacking it;
 - the active ground touch shows the shared classic green walk-cell highlight;
 - settings changes apply on the render thread and are saved in the user INI.
+
+## UI presentation modes
+
+The persisted `[mobile] presentation` setting accepts `mobileui` (the default
+touch-first replacement UI) or `desktop`. Desktop mode reuses the shared
+desktop Gogpu widget tree, fits its 1280x720 logical surface into the Android
+safe area in either orientation, and maps touch input back to that surface.
+Mode changes are saved immediately and take effect on the next launch.
+
+Desktop mode enters through the shared account window. Its Offline checkbox
+continues through the normal character-select and world transition using the
+local offline authority; it does not connect to a server.
 
 ## Dependencies
 

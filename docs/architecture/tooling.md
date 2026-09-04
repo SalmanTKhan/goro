@@ -61,9 +61,10 @@ in via `rsrc` from `packaging/windows/goro.ico`.
 
 `internal/appicon/icon.png` is the canonical 32x32 pixel-art source, embedded in
 the binary and handed to GoGPU. Regenerate platform assets with
-`go generate ./internal/appicon`, which writes `packaging/windows/goro.ico` and
-`packaging/linux/goro.png`. `packaging/linux/goro.desktop` is a distribution
-template. macOS releases are bare binaries with no app bundle. Details:
+`go generate ./internal/appicon`, which writes `packaging/windows/goro.ico`,
+`packaging/linux/goro.png`, and the Android launcher icons under
+`android/host/app/src/main/res/mipmap-*/ic_launcher.png`.
+`packaging/linux/goro.desktop` is a distribution template. macOS releases are bare binaries with no app bundle. Details:
 `docs/application-icon.md`.
 
 ## Website

@@ -8,12 +8,13 @@ import (
 	"github.com/kivutar/goro/client"
 	"github.com/kivutar/goro/config"
 	"github.com/kivutar/goro/glog"
+	"github.com/kivutar/goro/input"
 	"github.com/kivutar/goro/ui/rotheme"
 )
 
 const (
 	settingsWindowW = 300
-	settingsWindowH = 430
+	settingsWindowH = 520
 )
 
 type SettingsWindow struct {
@@ -67,6 +68,31 @@ func (w *SettingsWindow) contentTree(ctx client.Context) widget.Widget {
 					ctx.Runtime.SetFullscreen(enabled)
 				}
 				w.saveSettings(ctx)
+				w.refresh(ctx)
+			}),
+		),
+
+		rotheme.Button("UI scale: "+settingsUIScale(ctx).Label(), func() {
+			if ctx.UISettingsHost != nil {
+				ctx.UISettingsHost.ApplyUISettings(ctx.UISettingsHost.UISettings().NextPreset())
+			}
+			w.saveSettings(ctx)
+			w.refresh(ctx)
+		}),
+
+		rotheme.Checkbox(
+			checkbox.Checked(ctx.MobileSettingsHost != nil && ctx.MobileSettingsHost.MobileSettings().Display.Presentation == input.MobilePresentationDesktop),
+			checkbox.LabelOpt("Desktop UI on mobile (Restart)"),
+			checkbox.OnToggle(func(enabled bool) {
+				if ctx.MobileSettingsHost != nil {
+					settings := ctx.MobileSettingsHost.MobileSettings()
+					if enabled {
+						settings.Display.Presentation = input.MobilePresentationDesktop
+					} else {
+						settings.Display.Presentation = input.MobilePresentationMobileUI
+					}
+					ctx.MobileSettingsHost.ApplyMobileSettings(settings)
+				}
 				w.refresh(ctx)
 			}),
 		),
@@ -211,6 +237,7 @@ func (w *SettingsWindow) refresh(ctx client.Context) {
 
 func (w *SettingsWindow) saveSettings(ctx client.Context) {
 	settings := config.UserSettings{
+		UIScale:     settingsUIScale(ctx).Scale,
 		Fullscreen:  settingsRuntimeFullscreen(ctx),
 		VSync:       settingsRuntimeVSync(ctx),
 		FPS:         settingsRuntimeFPS(ctx),
@@ -228,6 +255,13 @@ func (w *SettingsWindow) saveSettings(ctx client.Context) {
 		return
 	}
 	glog.Debugf("settings saved path=%s", path)
+}
+
+func settingsUIScale(ctx client.Context) input.UISettings {
+	if ctx.UISettingsHost != nil {
+		return ctx.UISettingsHost.UISettings().Normalized()
+	}
+	return ctx.Config.UI.Normalized()
 }
 
 func settingsVolumeBGM(ctx client.Context) float64 {

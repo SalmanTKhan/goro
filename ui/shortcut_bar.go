@@ -328,8 +328,18 @@ func (b *ShortcutBar) pointInside(ctx Context, mx, my int) bool {
 }
 
 func (b *ShortcutBar) bounds(ctx Context) (int, int) {
-	width, _ := ctx.ScreenSize()
-	return maxInt(windowScreenMargin, (width-shortcutBarWidth())/2), windowScreenMargin
+	width, height := ctx.UIScreenSize()
+	x := maxInt(windowScreenMargin, (width-shortcutBarWidth())/2)
+	y := windowScreenMargin
+	// On a narrow/portrait viewport the centered bar intersects both top HUD
+	// columns. Keep the readable desktop scale and move it below the character
+	// + menu group and minimap instead of shrinking the entire interface.
+	_, menuHeight := basicMenuSize()
+	topGroupBottom := maxInt(characterWindowY+characterWindowHeight+basicMenuFollowGap+menuHeight, minimapMargin+minimapHeight)
+	if width < height && (x < characterWindowX+characterWindowWidth+windowScreenMargin || x+shortcutBarWidth() > width-minimapWidth-minimapMargin-windowScreenMargin) {
+		y = topGroupBottom + windowScreenMargin
+	}
+	return x, y
 }
 
 func (b *ShortcutBar) slotBounds(ctx Context, slot int) (int, int) {

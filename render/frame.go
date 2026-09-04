@@ -12,8 +12,10 @@ type Frame struct {
 	width  int
 	height int
 
-	screenScaleX float32
-	screenScaleY float32
+	screenScaleX  float32
+	screenScaleY  float32
+	screenOffsetX float32
+	screenOffsetY float32
 
 	commands        []DrawCommand
 	worldCommands   []WorldCommand
@@ -76,6 +78,10 @@ func (f *Frame) clearUIOverlayCommands() {
 }
 
 func (f *Frame) SetScreenScale(x, y float32) {
+	f.SetScreenTransform(x, y, 0, 0)
+}
+
+func (f *Frame) SetScreenTransform(x, y, offsetX, offsetY float32) {
 	if f == nil {
 		return
 	}
@@ -87,6 +93,8 @@ func (f *Frame) SetScreenScale(x, y float32) {
 	}
 	f.screenScaleX = x
 	f.screenScaleY = y
+	f.screenOffsetX = offsetX
+	f.screenOffsetY = offsetY
 }
 
 func (f *Frame) SetCamera3D(camera Camera3D) {
@@ -146,10 +154,14 @@ func (f *Frame) DrawTrianglesOwned(vertices []Vertex, indices []uint16, texture 
 		o = *opts
 	}
 	f.commands = append(f.commands, DrawCommand{
-		Vertices: vertices,
-		Indices:  indices,
-		Texture:  texture,
-		Options:  o,
+		Vertices:      vertices,
+		Indices:       indices,
+		Texture:       texture,
+		Options:       o,
+		ScreenScaleX:  f.screenScaleX,
+		ScreenScaleY:  f.screenScaleY,
+		ScreenOffsetX: f.screenOffsetX,
+		ScreenOffsetY: f.screenOffsetY,
 	})
 }
 

@@ -54,7 +54,7 @@ func TestMapScrollClampsAndConsumesScreenInput(t *testing.T) {
 		t.Fatal("map panel did not consume touch")
 	}
 	c.ScrollBy(10000)
-	maxOffset := float32(len(c.Model.Warps))*56 - (c.Layout.DetailPanel.Y - c.Layout.WarpPanel.Y - 52)
+	maxOffset := float32(len(c.Model.Warps))*mapWarpRowExtent - (c.Layout.DetailPanel.Y - c.Layout.WarpPanel.Y - 52)
 	if c.State.ScrollOffset != maxOffset {
 		t.Fatalf("scroll offset = %v, max = %v", c.State.ScrollOffset, maxOffset)
 	}

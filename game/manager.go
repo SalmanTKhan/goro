@@ -1,6 +1,8 @@
 package game
 
 import (
+	"image"
+
 	"github.com/kivutar/goro/client"
 	"github.com/kivutar/goro/input"
 	"github.com/kivutar/goro/mobileui"
@@ -225,6 +227,16 @@ func (m *Manager) DrawMobileProfilePreview(screen *render.Frame, character sessi
 	if mode, ok := m.mode.(*WorldMode); ok {
 		mode.DrawMobileProfilePreview(screen, m.ctx.Resources, character, sex, x, y, width, height)
 	}
+}
+
+func (m *Manager) MobileProfilePreviewImage(character session.Character, sex byte, width, height int) image.Image {
+	if m == nil {
+		return nil
+	}
+	if mode, ok := m.mode.(*WorldMode); ok {
+		return mode.MobileProfilePreviewImage(m.ctx.Resources, character, sex, width, height)
+	}
+	return nil
 }
 
 func (m *Manager) MobileChatModel() mobileui.MobileChatModel {

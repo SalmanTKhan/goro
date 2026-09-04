@@ -1,6 +1,7 @@
 package mobileui
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/kivutar/goro/input"
@@ -129,4 +130,64 @@ func TestProfileLayoutReservesTextAndActionRows(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestProfileEditVocabulary pins the exported edit methods. The Android host
+// binds the desktop character windows' callbacks to these, so they are now a
+// second entry point into the same edits Tap performs and cannot be treated as
+// internal helpers.
+func TestProfileEditVocabulary(t *testing.T) {
+	c := NewProfileController(MobileProfileModel{}, Viewport{Width: 390, Height: 844}, nil)
+	c.BeginNew()
+
+	t.Run("name is bounded like the keyboard's", func(t *testing.T) {
+		c.SetDraftName("Aria")
+		if c.Draft.Name != "Aria" {
+			t.Fatalf("name = %q, want %q", c.Draft.Name, "Aria")
+		}
+		c.SetDraftName(strings.Repeat("x", 40))
+		if len(c.Draft.Name) > 23 {
+			t.Fatalf("name kept %d bytes, want the 23-byte limit enforced", len(c.Draft.Name))
+		}
+	})
+
+	t.Run("hair styles wrap within the shipped range", func(t *testing.T) {
+		c.Draft.HairStyle = profileMinHairStyle
+		c.PreviousHairStyle()
+		if c.Draft.HairStyle != profileMaxHairStyle {
+			t.Fatalf("hair below the first style = %d, want wrap to %d", c.Draft.HairStyle, profileMaxHairStyle)
+		}
+		c.NextHairStyle()
+		if c.Draft.HairStyle != profileMinHairStyle {
+			t.Fatalf("hair past the last style = %d, want wrap to %d", c.Draft.HairStyle, profileMinHairStyle)
+		}
+	})
+
+	t.Run("a stat point comes off its pair", func(t *testing.T) {
+		c.Draft.Stats = [6]uint8{5, 5, 5, 5, 5, 5}
+		before := statTotal(c.Draft.Stats)
+		c.BumpStat(0, 1)
+		if c.Draft.Stats[0] != 6 || c.Draft.Stats[3] != 4 {
+			t.Fatalf("stats = %v, want STR raised to 6 and its pair INT lowered to 4", c.Draft.Stats)
+		}
+		if got := statTotal(c.Draft.Stats); got != before {
+			t.Fatalf("total = %d, want it held at %d", got, before)
+		}
+	})
+
+	t.Run("sex toggles with its label", func(t *testing.T) {
+		c.Draft.Sex = 0
+		c.ToggleSex()
+		if c.Draft.Sex != 1 || c.Draft.SexLabel != ProfileSexLabel(1) {
+			t.Fatalf("sex = %d label = %q, want 1 and %q", c.Draft.Sex, c.Draft.SexLabel, ProfileSexLabel(1))
+		}
+	})
+}
+
+func statTotal(stats [6]uint8) int {
+	total := 0
+	for _, stat := range stats {
+		total += int(stat)
+	}
+	return total
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"unicode"
@@ -71,11 +72,22 @@ func (p mobileWorldPicker) Pick(position input.WorldPosition) (input.PickedTarge
 	return p.presentation.game.PickMobileTarget(position)
 }
 
+type gameWorldPicker struct{ game *app.Game }
+
+func (p gameWorldPicker) Pick(position input.WorldPosition) (input.PickedTarget, bool) {
+	if p.game == nil {
+		return input.PickedTarget{}, false
+	}
+	return p.game.PickMobileTarget(position)
+}
+
 type mobilePresentation struct {
 	game               *app.Game
 	modeChanged        func(online bool) bool
 	startup            *mobileui.StartupController
 	viewport           mobileui.Viewport
+	physicalWidth      int
+	physicalHeight     int
 	navigation         mobileui.Navigation
 	hudController      *mobileui.Controller
 	hud                mobileui.HUDLayout
@@ -95,6 +107,10 @@ type mobilePresentation struct {
 	socialController   *mobileui.MobileSocialController
 	tradeController    *mobileui.MobileTradeController
 	vendingController  *mobileui.MobileVendingController
+	widgets            *mobileWidgets
+	characters         *characterWindows
+	widgetSnapshot     app.MobileSnapshot
+	widgetSnapshotSet  bool
 	minimapImage       *render.Image
 	minimapSignature   string
 	touch              mobileui.TouchSession
@@ -108,7 +124,7 @@ type mobilePresentation struct {
 }
 
 func newMobilePresentation(game *app.Game, width, height int) *mobilePresentation {
-	p := &mobilePresentation{game: game}
+	p := &mobilePresentation{game: game, widgets: newMobileWidgets(), characters: newCharacterWindows()}
 	if game != nil {
 		p.settings = game.MobileSettings()
 		p.controls = p.settings.Controls
@@ -179,6 +195,9 @@ func (p *mobilePresentation) SetGame(game *app.Game) {
 		p.controls = p.settings.Controls
 	}
 	p.Refresh()
+	if p.widgets != nil {
+		p.widgets.Invalidate()
+	}
 }
 
 // SetChatDraft is fed by the Android IME bridge. The text field remains a
@@ -194,6 +213,10 @@ const (
 	androidTextInputNone uint32 = iota
 	androidTextInputChat
 	androidTextInputSocial
+	// androidTextInputCharacter feeds the character create window's name field.
+	// That window is a real desktop text field rather than the mobile on-screen
+	// keyboard, so the platform editor types into it.
+	androidTextInputCharacter
 )
 
 // SetTextInput routes the single host-native editor to the currently visible
@@ -204,6 +227,11 @@ func (p *mobilePresentation) SetTextInput(mode uint32, text string) {
 		return
 	}
 	switch mode {
+	case androidTextInputCharacter:
+		if p.profileController != nil && p.profileController.Editor {
+			p.profileController.SetDraftName(text)
+			p.characters.Invalidate()
+		}
 	case androidTextInputSocial:
 		if p.socialController != nil && p.socialController.TextInputActive() {
 			p.socialController.SetTextInputDraft(text)
@@ -215,7 +243,11 @@ func (p *mobilePresentation) SetTextInput(mode uint32, text string) {
 
 func (p *mobilePresentation) syncTextInputState() {
 	active := androidTextInputNone
-	if p != nil && p.game != nil && p.game.Online() && p.chatController != nil && p.chatController.Model.Open && p.chatController.Model.CanSend {
+	if p != nil && p.characters.active(p) && p.profileController.Editor && p.characters.TextInputActive() {
+		// The character screen is an offline surface, so unlike chat and social
+		// this does not depend on being connected.
+		active = androidTextInputCharacter
+	} else if p != nil && p.game != nil && p.game.Online() && p.chatController != nil && p.chatController.Model.Open && p.chatController.Model.CanSend {
 		active = androidTextInputChat
 	} else if p != nil && p.game != nil && p.game.Online() && p.socialController != nil && p.socialController.TextInputActive() {
 		active = androidTextInputSocial
@@ -244,6 +276,12 @@ func (p *mobilePresentation) SetSettings(settings input.MobileSettings) {
 	}
 	p.settings = settings.Normalized()
 	p.controls = p.settings.Controls
+	if p.widgets != nil {
+		p.widgets.Invalidate()
+	}
+	if p.physicalWidth > 0 && p.physicalHeight > 0 {
+		p.Resize(p.physicalWidth, p.physicalHeight)
+	}
 	if p.settingsController != nil {
 		p.settingsController.SetModel(p.settingsSurfaceModel())
 	}
@@ -303,6 +341,14 @@ func (p *mobilePresentation) handleSettingsItem(item mobileui.SurfaceItem) bool 
 		settings.Audio.SFXVolume = nextMobileVolume(settings.Audio.SFXVolume)
 	case "show-minimap":
 		settings.Display.ShowMinimap = !settings.Display.ShowMinimap
+	case "ui-scale":
+		settings.UI = settings.UI.NextPreset()
+	case "presentation":
+		if settings.Display.Presentation == input.MobilePresentationDesktop {
+			settings.Display.Presentation = input.MobilePresentationMobileUI
+		} else {
+			settings.Display.Presentation = input.MobilePresentationDesktop
+		}
 	case "no-shift":
 		settings.Gameplay.NoShift = !settings.Gameplay.NoShift
 	case "no-ctrl":
@@ -389,7 +435,12 @@ func (p *mobilePresentation) Resize(width, height int) {
 	if p == nil {
 		return
 	}
-	p.viewport = mobileui.Viewport{Width: float32(width), Height: float32(height), SafeLeft: p.safeLeft, SafeTop: p.safeTop, SafeRight: p.safeRight, SafeBottom: p.safeBottom}
+	p.physicalWidth, p.physicalHeight = width, height
+	scale := float32(1)
+	if p.settings.UI.Scale > 0 {
+		scale = p.settings.UI.Normalized().Scale
+	}
+	p.viewport = mobileui.Viewport{Width: float32(width) / scale, Height: float32(height) / scale, SafeLeft: p.safeLeft / scale, SafeTop: p.safeTop / scale, SafeRight: p.safeRight / scale, SafeBottom: p.safeBottom / scale}
 	if p.startup != nil {
 		p.startup.Resize(p.viewport)
 	}
@@ -460,7 +511,18 @@ func (p *mobilePresentation) SetSafeInsets(left, top, right, bottom int) {
 		return
 	}
 	p.safeLeft, p.safeTop, p.safeRight, p.safeBottom = float32(left), float32(top), float32(right), float32(bottom)
-	p.Resize(int(p.viewport.Width), int(p.viewport.Height))
+	p.Resize(p.physicalWidth, p.physicalHeight)
+}
+
+func (p *mobilePresentation) logicalPoint(x, y int) (int, int) {
+	if p == nil {
+		return x, y
+	}
+	scale := p.settings.UI.Normalized().Scale
+	if scale <= 0 {
+		scale = 1
+	}
+	return int(float32(x) / scale), int(float32(y) / scale)
 }
 
 // Back applies Android's system-back gesture/button to the same priority
@@ -556,6 +618,11 @@ func (p *mobilePresentation) Refresh() {
 		return
 	}
 	snapshot := p.game.MobileSnapshot(0)
+	if p.widgetSnapshotSet && !reflect.DeepEqual(p.widgetSnapshot, snapshot) && p.widgets != nil {
+		p.widgets.Invalidate()
+	}
+	p.widgetSnapshot = snapshot
+	p.widgetSnapshotSet = true
 	playing := p.game.SessionPlaying()
 	if p.playingInitialized && playing && !p.lastPlaying {
 		// A reconnect may complete while a full-screen surface (for example
@@ -701,6 +768,7 @@ func (p *mobilePresentation) ConsumeTouch(point input.TouchPoint) bool {
 	if p.game != nil && p.game.Online() && !p.game.SessionPlaying() {
 		return true
 	}
+	point.X, point.Y = p.logicalPoint(point.X, point.Y)
 	if p.tradeController != nil && p.tradeController.IsOpen() {
 		return p.tradeController.ConsumeTouch(point)
 	}
@@ -746,7 +814,8 @@ func (p *mobilePresentation) BeginTouch(id input.TouchID, x, y int) bool {
 	if p == nil {
 		return false
 	}
-	point := input.TouchPoint{ID: id, X: x, Y: y}
+	lx, ly := p.logicalPoint(x, y)
+	point := input.TouchPoint{ID: id, X: lx, Y: ly}
 	owner := mobileui.TouchUnclaimed
 	switch {
 	case p.startup != nil && p.startup.Phase == mobileui.StartupTitle:
@@ -798,7 +867,8 @@ func (p *mobilePresentation) Move(id input.TouchID, x, y int) {
 	if p == nil {
 		return
 	}
-	_, dy, owned := p.touch.Move(input.TouchPoint{ID: id, X: x, Y: y})
+	lx, ly := p.logicalPoint(x, y)
+	_, dy, owned := p.touch.Move(input.TouchPoint{ID: id, X: lx, Y: ly})
 	if !owned {
 		return
 	}
@@ -835,6 +905,8 @@ func (p *mobilePresentation) Release(id input.TouchID, x, y int) {
 	if p == nil {
 		return
 	}
+	rawX, rawY := x, y
+	x, y = p.logicalPoint(x, y)
 	owner, moved := p.touch.End(id)
 	if owner == mobileui.TouchUnclaimed || moved {
 		return
@@ -872,8 +944,14 @@ func (p *mobilePresentation) Release(id input.TouchID, x, y int) {
 		return
 	}
 	if p.profileController != nil && p.profileController.Open {
-		wasBack := p.profileController.Layout.BackButton.Contains(float32(x), float32(y))
-		p.profileController.Tap(float32(x), float32(y))
+		// The desktop character windows own this screen, so the tap goes to
+		// them rather than to the controller's own hit tests. They drive the
+		// same controller, so the outcomes checked below are unchanged.
+		wasBack := false
+		if p.characters == nil || !p.characters.tap(p, x, y) {
+			wasBack = p.profileController.Layout.BackButton.Contains(float32(x), float32(y))
+			p.profileController.Tap(float32(x), float32(y))
+		}
 		if p.profileController.StartRequested {
 			p.profileController.StartRequested = false
 			p.startup.EnterWorld()
@@ -947,7 +1025,7 @@ func (p *mobilePresentation) Release(id input.TouchID, x, y int) {
 			p.hud = mobileui.LayoutHUD(p.viewport, mobileui.DefaultTokens(), p.hudModel, p.navigation)
 			return
 		}
-		if target, ok := p.game.PickMobileTarget(input.WorldPosition{X: float64(x), Y: float64(y)}); ok {
+		if target, ok := p.game.PickMobileTarget(input.WorldPosition{X: float64(rawX), Y: float64(rawY)}); ok {
 			if command, ok := p.navigation.Targeting.Select(target); ok {
 				mobileCommandSink{game: p.game, presentation: p}.Emit(command)
 			}
@@ -1007,6 +1085,19 @@ func (p *mobilePresentation) Release(id input.TouchID, x, y int) {
 
 func (p *mobilePresentation) Draw(frame *render.Frame) {
 	if p == nil || frame == nil {
+		return
+	}
+	scale := p.settings.UI.Normalized().Scale
+	frame.SetScreenScale(scale, scale)
+	defer frame.SetScreenScale(1, 1)
+	// Character selection and creation run the real desktop windows, scaled to
+	// the phone, rather than a mobile redesign of them.
+	if p.characters != nil && p.characters.draw(p, frame) {
+		return
+	}
+	// The shared ui/mobile widget layer draws every screen that has a builder.
+	// Screens without one still fall through to the host's own drawing below.
+	if p.widgets != nil && p.widgets.drawWidgets(p, frame) {
 		return
 	}
 	if p.startup != nil && p.startup.Phase == mobileui.StartupTitle {

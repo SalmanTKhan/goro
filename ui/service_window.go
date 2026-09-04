@@ -155,7 +155,7 @@ func (w *ServiceWindow) cancel() {
 }
 
 func serviceWindowPosition(ctx client.Context) (int, int) {
-	width, height := ctx.ScreenSize()
+	width, height := ctx.UIScreenSize()
 	x := (width - serviceWindowWidth) / 2
 	y := (height*2)/3 - serviceWindowHeight/2
 	if y < 48 {

@@ -449,7 +449,7 @@ func (d *NPCDialog) chooseSelected(ctx Context) {
 }
 
 func (d *NPCDialog) ensureWindows(ctx Context) {
-	width, height := ctx.ScreenSize()
+	width, height := ctx.UIScreenSize()
 	x, y, w, h := npcDialogBounds(width, height)
 	if d.dialogWindow.width == 0 {
 		d.dialogWindow = NewWindow(w, h)

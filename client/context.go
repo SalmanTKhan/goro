@@ -14,23 +14,27 @@ import (
 )
 
 type Context struct {
-	Config            config.Config
-	Input             *input.State
-	Resources         *res.Manager
-	Assets            AssetAvailability
-	Session           *session.Session
-	World             *world.World
-	Network           *network.Client
-	Offline           *session.OfflineSession
-	Audio             *audio.BGM
-	Started           time.Time
-	ScreenW           int
-	ScreenH           int
-	Runtime           RuntimeSettings
-	RequestQuit       func()
-	RequestScreenshot func() (string, error)
-	UIApp             UIApp
-	UIManager         UIManager
+	Config             config.Config
+	Input              *input.State
+	Resources          *res.Manager
+	Assets             AssetAvailability
+	Session            *session.Session
+	World              *world.World
+	Network            *network.Client
+	Offline            *session.OfflineSession
+	Audio              *audio.BGM
+	Started            time.Time
+	ScreenW            int
+	ScreenH            int
+	UIWidth            int
+	UIHeight           int
+	Runtime            RuntimeSettings
+	RequestQuit        func()
+	RequestScreenshot  func() (string, error)
+	UIApp              UIApp
+	UIManager          UIManager
+	MobileSettingsHost MobileSettingsHost
+	UISettingsHost     UISettingsHost
 }
 
 type PackState string
@@ -78,6 +82,23 @@ type UIManager interface {
 	Clear()
 }
 
+// UIViewportManager is the optional responsive extension implemented by UI
+// managers that own positioned overlays. Keeping it separate preserves small
+// test and headless UIManager implementations.
+type UIViewportManager interface {
+	ViewportChanged(oldWidth, oldHeight, width, height int)
+}
+
+type MobileSettingsHost interface {
+	MobileSettings() input.MobileSettings
+	ApplyMobileSettings(input.MobileSettings) bool
+}
+
+type UISettingsHost interface {
+	UISettings() input.UISettings
+	ApplyUISettings(input.UISettings) bool
+}
+
 type RuntimeSettings interface {
 	Fullscreen() bool
 	SetFullscreen(bool)
@@ -94,6 +115,14 @@ func (c Context) ScreenSize() (int, int) {
 	}
 	if height <= 0 {
 		height = c.Config.Window.Height
+	}
+	return width, height
+}
+
+func (c Context) UIScreenSize() (int, int) {
+	width, height := c.UIWidth, c.UIHeight
+	if width <= 0 || height <= 0 {
+		return c.ScreenSize()
 	}
 	return width, height
 }

@@ -361,6 +361,7 @@ func TestMobileSettingsRoundTripPreservesAllSupportedValues(t *testing.T) {
 	settings.Audio.BGMEnabled = false
 	settings.Audio.BGMVolume = 0.25
 	settings.Audio.SFXVolume = 0.75
+	settings.UI.Scale = input.UIScaleLargeValue
 	settings.Display.ShowMinimap = false
 	settings.Gameplay.NoShift = true
 	settings.Gameplay.NoCtrl = false
@@ -382,7 +383,7 @@ func TestMobileSettingsRoundTripPreservesAllSupportedValues(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	for _, want := range []string{"username = KeepMe", "trace = true", "movement = tap", "bgm = false", "bgm_volume = 0.25", "sfx_volume = 0.75", "show_minimap = false", "no_shift = true", "itemsnap = true"} {
+	for _, want := range []string{"username = KeepMe", "trace = true", "scale = 1.20", "movement = tap", "bgm = false", "bgm_volume = 0.25", "sfx_volume = 0.75", "show_minimap = false", "no_shift = true", "itemsnap = true"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("saved config missing %q:\n%s", want, text)
 		}

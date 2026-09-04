@@ -32,12 +32,13 @@ func (a DesktopInputAdapter) Update(frame DesktopFrame) {
 }
 
 type MobileInputAdapter struct {
-	Recognizer *GestureRecognizer
-	Picker     WorldPicker
-	UI         UIHitTester
-	Sink       CommandSink
-	controls   MobileControls
-	uiTouches  map[TouchID]bool
+	Recognizer         *GestureRecognizer
+	Picker             WorldPicker
+	UI                 UIHitTester
+	Sink               CommandSink
+	controls           MobileControls
+	uiTouches          map[TouchID]bool
+	lastInspectedActor uint32
 }
 
 func NewMobileInputAdapter(config GestureConfig, picker WorldPicker, ui UIHitTester, sink CommandSink) *MobileInputAdapter {
@@ -101,6 +102,9 @@ func (a *MobileInputAdapter) Update(frame TouchFrame) {
 		a.Recognizer.Reset()
 		return
 	}
+	if len(filtered) == 0 {
+		a.lastInspectedActor = 0
+	}
 	for _, event := range a.Recognizer.Update(TouchFrame{Points: filtered, At: frame.At}) {
 		a.emitGesture(event)
 	}
@@ -113,13 +117,17 @@ func (a *MobileInputAdapter) emitGesture(event GestureEvent) {
 	case GestureLongPress:
 		a.emitLongPress(event.Position)
 	case GestureDragStart:
+		a.emitHover(event.Position)
 		if a.controls.MovementMode == MovementHoldToMove {
 			a.emitGroundMove(event.Position)
 		}
 	case GestureDrag:
+		a.emitHover(event.Position)
 		if a.controls.MovementMode == MovementHoldToMove {
 			a.emitGroundMove(event.Position)
 		}
+	case GestureTwoFingerTap:
+		a.emitHover(event.Position)
 	case GestureTwoFingerDrag:
 		deltaY := event.DeltaY * a.controls.CameraSensitivity
 		if a.controls.InvertCameraY {
@@ -131,6 +139,23 @@ func (a *MobileInputAdapter) emitGesture(event GestureEvent) {
 	case GestureTouchCancel:
 		a.Sink.Emit(PlayerCommand{Kind: CommandCancelAction})
 	}
+}
+
+// emitHover mirrors desktop's pointer-over-actor behavior. A touch moving
+// across an actor updates the target HUD, but does not attack or interact.
+func (a *MobileInputAdapter) emitHover(position WorldPosition) {
+	if a == nil || a.Picker == nil {
+		return
+	}
+	target, ok := a.Picker.Pick(position)
+	if !ok || (target.Kind != TargetActor && target.Kind != TargetNPC) {
+		return
+	}
+	if target.ActorID == 0 || target.ActorID == a.lastInspectedActor {
+		return
+	}
+	a.lastInspectedActor = target.ActorID
+	a.Sink.Emit(PlayerCommand{Kind: CommandInspectActor, ActorID: target.ActorID, Position: position})
 }
 
 func (a *MobileInputAdapter) emitLongPress(position WorldPosition) {

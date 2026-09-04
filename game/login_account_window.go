@@ -56,6 +56,16 @@ func (m *LoginMode) updateLoginWindow(ctx client.Context) {
 					m.connectAndMaybeLogin(ctx, conn, true)
 				}
 			},
+			OnOfflineSubmit: func() {
+				m.username = m.loginWindow.Username
+				m.password = m.loginWindow.Password
+				m.offline = true
+				m.phase = loginPhaseCharacter
+				m.accountStep = loginAccountCredentials
+				m.status = "select an offline character"
+				m.prepareCharacterSelectFromSession(ctx)
+				m.showCharacterSelectWindow(ctx)
+			},
 		})
 		m.loginWindow.Publish(ctx)
 		return

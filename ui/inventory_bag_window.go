@@ -324,7 +324,7 @@ func (w *InventoryBagWindow) AcceptStorageDrop(ctx Context, item session.Invento
 }
 
 func inventoryBagDefaultPosition(ctx Context) (int, int) {
-	width, height := ctx.ScreenSize()
+	width, height := ctx.UIScreenSize()
 	menuX, menuY, _, menuH := basicMenuBounds()
 	x := clampWindowInt(menuX, windowScreenMargin, maxInt(windowScreenMargin, width-inventoryBagWidth-windowScreenMargin))
 	y := clampWindowInt(menuY+menuH+8, windowScreenMargin, maxInt(windowScreenMargin, height-inventoryBagHeight-windowScreenMargin))

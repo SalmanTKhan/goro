@@ -165,7 +165,7 @@ func (c *ChatController) relayout() {
 	l.Panel = Rect{safe.X + (safe.W-panelW)/2, safe.Y + (safe.H-panelH)/2, panelW, panelH}
 	pad := float32(16)
 	l.Header = Rect{l.Panel.X + pad, l.Panel.Y + 12, l.Panel.W - 2*pad, 56}
-	l.Back = Rect{l.Header.X, l.Header.Y, 104, 52}
+	l.Back = Rect{l.Header.X, l.Header.Y, BackButtonWidth(), 52}
 	l.Composer = Rect{l.Panel.X + pad, l.Panel.Bottom() - pad - 56, l.Panel.W - 136 - pad, 56}
 	l.Send = Rect{l.Composer.Right() + 8, l.Composer.Y, 112, 56}
 	l.MessageViewport = Rect{l.Panel.X + pad, l.Header.Bottom() + 12, l.Panel.W - 2*pad, maxf(0, l.Composer.Y-l.Header.Bottom()-24)}

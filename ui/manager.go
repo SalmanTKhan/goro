@@ -93,6 +93,27 @@ func (m *Manager) PointerBlocked(x, y int) bool {
 	return m != nil && m.root != nil && m.root.PointerBlocked(geometry.Pt(float32(x), float32(y)))
 }
 
+func (m *Manager) ViewportChanged(oldWidth, oldHeight, width, height int) {
+	if m == nil || width <= 0 || height <= 0 || (oldWidth == width && oldHeight == height) {
+		return
+	}
+	overlays := append([]widget.Widget(nil), m.overlays...)
+	for _, overlay := range overlays {
+		if responsive, ok := overlay.(interface {
+			viewportChanged(oldWidth, oldHeight, width, height int)
+		}); ok {
+			responsive.viewportChanged(oldWidth, oldHeight, width, height)
+		}
+	}
+	if m.root != nil {
+		widget.MarkRedrawInTree(m.root)
+		m.root.SetNeedsRedraw(true)
+	}
+	if m.app != nil {
+		m.app.Invalidate()
+	}
+}
+
 func (m *Manager) RaiseOverlay(root widget.Widget) {
 	m.raiseOverlay(root)
 }

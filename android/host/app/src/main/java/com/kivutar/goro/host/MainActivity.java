@@ -514,6 +514,18 @@ public final class MainActivity extends Activity {
                 copyAsset(assets, "offline/content.json", content);
                 Log.i("GoroAndroidHost", "offline-content path=" + content.getAbsolutePath() + " size=" + content.length());
             }
+
+            // Keep the fixture-local config beside the extracted resources so
+            // the embedded Go config loader can select the requested desktop
+            // or mobile presentation mode during test installs.
+            if (assetExists("goro-fixture/goro/goro.ini")) {
+                File config = new File(destination, "goro/goro.ini");
+                if (!config.isFile()) {
+                    config.getParentFile().mkdirs();
+                    copyAsset(assets, "goro-fixture/goro/goro.ini", config);
+                    Log.i("GoroAndroidHost", "fixture-config path=" + config.getAbsolutePath());
+                }
+            }
         } catch (Exception error) {
             Log.i("GoroAndroidHost", "fixture status=absent reason=" + error.getClass().getSimpleName());
         }

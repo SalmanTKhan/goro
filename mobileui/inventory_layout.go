@@ -50,7 +50,7 @@ func LayoutInventory(viewport Viewport, tokens InventoryTokens, model MobileInve
 	contentX := safe.X + (safe.W-contentW)/2
 	layout.Portrait = viewport.IsPortrait()
 	layout.Header = Rect{contentX, safe.Y + tokens.Edge, contentW, tokens.HeaderHeight}
-	layout.BackButton = Rect{layout.Header.X, layout.Header.Y, 100, layout.Header.H}
+	layout.BackButton = Rect{layout.Header.X, layout.Header.Y, BackButtonWidth(), layout.Header.H}
 
 	// Browsing uses the same compact category tabs in portrait and landscape.
 	// Equipment is header navigation, not a full-width content row.
@@ -61,7 +61,11 @@ func LayoutInventory(viewport Viewport, tokens InventoryTokens, model MobileInve
 	for i, category := range []InventoryCategory{InventoryCategoryAll, InventoryCategoryEquipment, InventoryCategoryUsable, InventoryCategoryEtc, InventoryCategoryCards} {
 		layout.Tabs = append(layout.Tabs, InventoryTabRect{Category: category, Rect: Rect{layout.TabsArea.X + float32(i)*(tabW+tabGap), tabY, tabW, tokens.TabHeight}})
 	}
-	layout.EquipmentButton = Rect{layout.Header.Right() - 112, layout.Header.Y, 112, layout.Header.H}
+	// Header action widths are token-derived rather than fixed pixels: the
+	// mobile presentation now renders labels with the real UI font, which is
+	// wider than the bitmap text these rectangles were originally sized for.
+	actionW := minf(maxf(3*tokens.MinTouchTarget, ControlWidth("Equipment", DefaultTypography().Body)), contentW/3)
+	layout.EquipmentButton = Rect{layout.Header.Right() - actionW, layout.Header.Y, actionW, layout.Header.H}
 
 	contentY := layout.TabsArea.Bottom() + tokens.Gap
 	contentH := maxf(0, safe.Bottom()-tokens.Edge-contentY)
@@ -147,7 +151,8 @@ func LayoutInventory(viewport Viewport, tokens InventoryTokens, model MobileInve
 		layout.QuantityMinus = Rect{layout.QuantityModal.X + tokens.Gap, buttonY, buttonW, 52}
 		layout.QuantityPlus = Rect{layout.QuantityMinus.Right() + tokens.Gap, buttonY, buttonW, 52}
 		layout.QuantityConfirm = Rect{layout.QuantityPlus.Right() + tokens.Gap, buttonY, buttonW, 52}
-		layout.QuantityCancel = Rect{layout.QuantityModal.Right() - 112 - tokens.Gap, layout.QuantityModal.Y + tokens.Gap, 112, 48}
+		cancelW := minf(maxf(2*tokens.MinTouchTarget, 128), layout.QuantityModal.W/2)
+		layout.QuantityCancel = Rect{layout.QuantityModal.Right() - cancelW - tokens.Gap, layout.QuantityModal.Y + tokens.Gap, cancelW, 48}
 	}
 	return layout
 }
@@ -196,7 +201,7 @@ func LayoutEquipment(viewport Viewport, tokens InventoryTokens, model MobileEqui
 	contentW := minf(safe.W-2*tokens.Edge, tokens.ContentMaxWidth)
 	contentX := safe.X + (safe.W-contentW)/2
 	layout.Header = Rect{contentX, safe.Y + tokens.Edge, contentW, tokens.HeaderHeight}
-	layout.BackButton = Rect{layout.Header.X, layout.Header.Y, 100, layout.Header.H}
+	layout.BackButton = Rect{layout.Header.X, layout.Header.Y, BackButtonWidth(), layout.Header.H}
 	content := Rect{contentX, layout.Header.Bottom() + tokens.Gap, contentW, safe.Bottom() - layout.Header.Bottom() - tokens.Gap - tokens.Edge}
 	layout.Portrait = viewport.IsPortrait()
 	// Portrait uses a compact paper-doll cluster followed by a bounded summary

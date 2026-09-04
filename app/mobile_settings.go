@@ -13,13 +13,14 @@ func (g *Game) MobileSettings() input.MobileSettings {
 		return input.DefaultMobileSettings()
 	}
 	settings := input.MobileSettings{
+		UI:       g.cfg.UI,
 		Controls: g.cfg.Mobile,
 		Audio: input.MobileAudioSettings{
 			BGMEnabled: g.cfg.Audio.BGM,
 			BGMVolume:  g.cfg.Audio.BGMVolume,
 			SFXVolume:  g.cfg.Audio.SFXVolume,
 		},
-		Display: input.MobileDisplaySettings{ShowMinimap: g.cfg.MobileDisplay.ShowMinimap},
+		Display: input.MobileDisplaySettings{ShowMinimap: g.cfg.MobileDisplay.ShowMinimap, Presentation: g.cfg.MobileDisplay.Presentation},
 		Gameplay: input.MobileGameplaySettings{
 			NoShift:     g.cfg.Gameplay.NoShift,
 			NoCtrl:      g.cfg.Gameplay.NoCtrl,
@@ -31,6 +32,27 @@ func (g *Game) MobileSettings() input.MobileSettings {
 	return settings.Normalized()
 }
 
+func (g *Game) UISettings() input.UISettings {
+	if g == nil {
+		return input.DefaultUISettings()
+	}
+	return g.cfg.UI.Normalized()
+}
+
+func (g *Game) ApplyUISettings(settings input.UISettings) bool {
+	if g == nil {
+		return false
+	}
+	g.cfg.UI = settings.Normalized()
+	if g.uiApp != nil {
+		if scaled, ok := g.uiApp.(interface{ SetUISettings(input.UISettings) }); ok {
+			scaled.SetUISettings(g.cfg.UI)
+		}
+		g.uiApp.Invalidate()
+	}
+	return true
+}
+
 // ApplyMobileSettings updates all supported mobile settings at runtime. The
 // Android presentation owns persistence, while this method owns the live
 // audio, session, and renderer-facing state.
@@ -39,6 +61,7 @@ func (g *Game) ApplyMobileSettings(settings input.MobileSettings) bool {
 		return false
 	}
 	settings = settings.Normalized()
+	g.ApplyUISettings(settings.UI)
 	g.cfg.Mobile = settings.Controls
 	g.cfg.MobileDisplay = settings.Display
 	g.cfg.Audio.BGM = settings.Audio.BGMEnabled
@@ -70,6 +93,9 @@ func (g *Game) ApplyMobileSettings(settings input.MobileSettings) bool {
 	}
 	if g.network != nil {
 		_ = g.network.SendLessEffect(settings.Gameplay.LessEffects)
+	}
+	if g.mobileSettingsChanged != nil {
+		g.mobileSettingsChanged(settings)
 	}
 	return true
 }

@@ -8,6 +8,12 @@ func DefaultMapTokens() MapTokens {
 	return MapTokens{Edge: 20, Gap: 16, HeaderHeight: 64, ContentMaxWidth: 1800, WarpListWidth: 520, MinTouchTarget: 48}
 }
 
+// mapWarpRowExtent is the pitch of one warp row. Each row stacks the exit's
+// name over its destination, so it needs room for two lines of the real UI
+// font; the previous 56-64 pixel rows were sized for the old bitmap text and
+// overlapped the two.
+const mapWarpRowExtent float32 = 92
+
 type MapWarpRect struct {
 	ID   uint32
 	Rect Rect
@@ -41,7 +47,7 @@ func LayoutMap(viewport Viewport, tokens MapTokens, model MobileMapModel, state 
 	contentX := safe.X + (safe.W-contentW)/2
 	layout.Portrait = viewport.IsPortrait()
 	layout.Header = Rect{contentX, safe.Y + tokens.Edge, contentW, tokens.HeaderHeight}
-	layout.BackButton = Rect{layout.Header.X, layout.Header.Y, 100, layout.Header.H}
+	layout.BackButton = Rect{layout.Header.X, layout.Header.Y, BackButtonWidth(), layout.Header.H}
 	contentY := layout.Header.Bottom() + tokens.Gap
 	contentH := maxf(0, safe.Bottom()-tokens.Edge-contentY)
 	if layout.Portrait {
@@ -57,7 +63,7 @@ func LayoutMap(viewport Viewport, tokens MapTokens, model MobileMapModel, state 
 		layout.WarpPanel = Rect{contentX, listY, contentW, maxf(0, listBottom-listY)}
 		rowArea := Rect{contentX + tokens.Gap, listY + 44, contentW - 2*tokens.Gap, maxf(0, layout.WarpPanel.Bottom()-listY-52)}
 		layout.WarpListViewport = rowArea
-		rowH := maxf(tokens.MinTouchTarget, 64)
+		rowH := maxf(tokens.MinTouchTarget, mapWarpRowExtent)
 		first := int(state.ScrollOffset / rowH)
 		visible := maxInt(1, int(rowArea.H/rowH))
 		last := minInt(len(model.Warps), first+visible)
@@ -85,7 +91,7 @@ func LayoutMap(viewport Viewport, tokens MapTokens, model MobileMapModel, state 
 	layout.DetailPanel = Rect{layout.WarpPanel.X + tokens.Gap, layout.WarpPanel.Bottom() - detailH - tokens.Gap, layout.WarpPanel.W - 2*tokens.Gap, detailH}
 	rowArea := Rect{layout.WarpPanel.X + tokens.Gap, layout.WarpPanel.Y + 44, layout.WarpPanel.W - 2*tokens.Gap, maxf(0, layout.DetailPanel.Y-layout.WarpPanel.Y-52)}
 	layout.WarpListViewport = rowArea
-	rowH := maxf(tokens.MinTouchTarget, 56)
+	rowH := maxf(tokens.MinTouchTarget, mapWarpRowExtent)
 	first := int(state.ScrollOffset / rowH)
 	visible := maxInt(1, int(rowArea.H/rowH)+1)
 	last := minInt(len(model.Warps), first+visible)
@@ -110,9 +116,6 @@ func MapScrollExtent(model MobileMapModel, layout MobileMapLayout, tokens MapTok
 		tokens = DefaultMapTokens()
 	}
 	rowAreaH := layout.WarpListViewport.H
-	rowH := maxf(tokens.MinTouchTarget, 56)
-	if layout.Portrait {
-		rowH = maxf(tokens.MinTouchTarget, 64)
-	}
+	rowH := maxf(tokens.MinTouchTarget, mapWarpRowExtent)
 	return InventoryScrollState{ViewportExtent: rowAreaH, ContentExtent: float32(len(model.Warps)) * rowH, Offset: 0, RowExtent: rowH}
 }

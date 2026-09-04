@@ -54,7 +54,7 @@ func (w *ItemInfoWindow) openItem(ctx Context, item session.InventoryItem, mouse
 
 	height := w.windowHeight(ctx)
 	w.SetSize(itemInfoWindowWidth, height)
-	screenW, screenH := ctx.ScreenSize()
+	screenW, screenH := ctx.UIScreenSize()
 	x := clampWindowInt(mouseX+14, windowScreenMargin, maxInt(windowScreenMargin, screenW-itemInfoWindowWidth-windowScreenMargin))
 	y := clampWindowInt(mouseY-22, windowScreenMargin, maxInt(windowScreenMargin, screenH-height-windowScreenMargin))
 	w.OpenAt(x, y, w.widgetTree(ctx))

@@ -1,7 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-feature android:name="android.hardware.vulkan.version" android:version="0x00400000" android:required="true" />
-    <application android:theme="@style/AppTheme" android:label="Goro Android Host" android:allowBackup="false" android:supportsRtl="true">
+    <application android:theme="@style/AppTheme" android:label="Goro Android Host" android:icon="@mipmap/ic_launcher" android:allowBackup="false" android:supportsRtl="true">
         <activity android:name=".MainActivity" android:screenOrientation="unspecified" android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

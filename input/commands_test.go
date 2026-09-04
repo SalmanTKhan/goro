@@ -91,6 +91,29 @@ func TestMobileLongPressInspectsActor(t *testing.T) {
 	}
 }
 
+func TestMobileTwoFingerTapInspectsActor(t *testing.T) {
+	var sink CommandBuffer
+	adapter := NewMobileInputAdapterWithControls(DefaultMobileControls(), testPicker{target: PickedTarget{Kind: TargetActor, ActorID: 42}}, nil, &sink)
+	adapter.Update(TouchFrame{At: testTime(0), Points: []TouchPoint{{ID: 1, X: 10, Y: 20}}})
+	adapter.Update(TouchFrame{At: testTime(10), Points: []TouchPoint{{ID: 1, X: 10, Y: 20}, {ID: 2, X: 30, Y: 20}}})
+	adapter.Update(TouchFrame{At: testTime(100)})
+	commands := sink.Commands()
+	if len(commands) != 1 || commands[0].Kind != CommandInspectActor || commands[0].ActorID != 42 {
+		t.Fatalf("two-finger tap commands = %#v", commands)
+	}
+}
+
+func TestMobileDragInspectsActorWithoutAttacking(t *testing.T) {
+	var sink CommandBuffer
+	adapter := NewMobileInputAdapterWithControls(DefaultMobileControls(), testPicker{target: PickedTarget{Kind: TargetActor, ActorID: 42}}, nil, &sink)
+	adapter.Update(TouchFrame{At: testTime(0), Points: []TouchPoint{{ID: 1, X: 10, Y: 20}}})
+	adapter.Update(TouchFrame{At: testTime(20), Points: []TouchPoint{{ID: 1, X: 30, Y: 20}}})
+	commands := sink.Commands()
+	if len(commands) != 1 || commands[0].Kind != CommandInspectActor || commands[0].ActorID != 42 {
+		t.Fatalf("drag hover commands = %#v", commands)
+	}
+}
+
 func TestMobileAdapterMapsTargets(t *testing.T) {
 	cases := []struct {
 		name   string

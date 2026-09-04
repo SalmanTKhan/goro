@@ -39,6 +39,14 @@ func ProjectOfflineProfile(profile session.OfflineProfile, available, editable b
 	return model
 }
 
+// The hair styles and palettes the client ships. The appearance controls wrap
+// within these bounds rather than running off the end of the sprite set.
+const (
+	profileMinHairStyle = 2
+	profileMaxHairStyle = 23
+	profileHairColors   = 10
+)
+
 func profileSexLabel(sex uint8) string {
 	// The RO resource contract uses sex 0 for the female sprite set and
 	// non-zero for the male sprite set. Keep the mobile label derived from the

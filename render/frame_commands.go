@@ -5,10 +5,12 @@ import "image/color"
 var quadIndices012213 = []uint16{0, 1, 2, 2, 1, 3}
 
 type DrawCommand struct {
-	Vertices []Vertex
-	Indices  []uint16
-	Texture  *Image
-	Options  DrawTrianglesOptions
+	Vertices                     []Vertex
+	Indices                      []uint16
+	Texture                      *Image
+	Options                      DrawTrianglesOptions
+	ScreenScaleX, ScreenScaleY   float32
+	ScreenOffsetX, ScreenOffsetY float32
 }
 
 type WorldCommand struct {

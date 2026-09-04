@@ -44,7 +44,7 @@ func (c *PvPCounter) Update(ctx Context) {
 	if c.widget == nil {
 		c.widget = newPvPCounterWidget()
 	}
-	width, height := ctx.ScreenSize()
+	width, height := ctx.UIScreenSize()
 	x, y := pvpCounterBounds(width, height)
 	positionChanged := c.root == nil || c.x != x || c.y != y
 	valueChanged := c.rank != ctx.World.Player.PvPRank || c.total != ctx.World.Player.PvPTotal

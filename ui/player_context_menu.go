@@ -57,7 +57,7 @@ func (m *PlayerContextMenu) Open(ctx Context, x, y int, actorID uint32, name str
 	m.actorID = actorID
 	m.name = name
 	m.options = options
-	screenW, screenH := ctx.ScreenSize()
+	screenW, screenH := ctx.UIScreenSize()
 	height := m.height()
 	m.SetSize(playerContextMenuWidth, height)
 	x = clampWindowInt(x, windowScreenMargin, maxInt(windowScreenMargin, screenW-playerContextMenuWidth-windowScreenMargin))

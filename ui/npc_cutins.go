@@ -73,7 +73,7 @@ func (c *NPCCutinOverlay) Update(ctx Context) bool {
 		return false
 	}
 	if !c.window.IsOpen() {
-		screenWidth, screenHeight := ctx.ScreenSize()
+		screenWidth, screenHeight := ctx.UIScreenSize()
 		bounds, ok := npcCutinBounds(image.Rect(0, 0, screenWidth, screenHeight), c.position, c.texture)
 		if !ok {
 			return false

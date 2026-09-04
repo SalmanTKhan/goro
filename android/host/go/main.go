@@ -28,6 +28,7 @@ import (
 	"unsafe"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/ui/event"
 	"github.com/gogpu/wgpu"
 	_ "github.com/gogpu/wgpu/hal/allbackends"
 	"github.com/kivutar/goro/app"
@@ -375,12 +376,15 @@ func (h *host) renderLoop() {
 	var mobileConfig config.Config
 	var mobile *mobilePresentation
 	var mobileInput *input.MobileInputAdapter
+	var desktop *desktopPresentation
 	var width, height int
+	var safeLeft, safeTop, safeRight, safeBottom int
 	var surfaceStartedAt, mapReadyAt, firstMapFrameAt time.Time
 	var renderedFrames int
 	var cpuFrameTotal time.Duration
 	var peakRSS int64
 	var runtimeMetricsPath string
+	var surfaceVSync = true
 	var pendingOverlays []assetOverlayRequest
 	var pendingRelease *struct {
 		name  string
@@ -452,7 +456,7 @@ func (h *host) renderLoop() {
 		}
 		log.Printf("stage=device acquired")
 		androidLog("stage=device acquired")
-		if err := configureSurface(surface, adapter, device, width, height); err != nil {
+		if err := configureSurface(surface, adapter, device, width, height, surfaceVSync); err != nil {
 			return err
 		}
 		androidLog("stage=goro-renderer begin")
@@ -486,13 +490,14 @@ func (h *host) renderLoop() {
 				return fmt.Errorf("mobile config: %w", configErr)
 			} else {
 				mobileSettings = input.MobileSettings{
+					UI:       cfg.UI,
 					Controls: cfg.Mobile,
 					Audio: input.MobileAudioSettings{
 						BGMEnabled: cfg.Audio.BGM,
 						BGMVolume:  cfg.Audio.BGMVolume,
 						SFXVolume:  cfg.Audio.SFXVolume,
 					},
-					Display: input.MobileDisplaySettings{ShowMinimap: cfg.MobileDisplay.ShowMinimap},
+					Display: input.MobileDisplaySettings{ShowMinimap: cfg.MobileDisplay.ShowMinimap, Presentation: cfg.MobileDisplay.Presentation},
 					Gameplay: input.MobileGameplaySettings{
 						NoShift: cfg.Gameplay.NoShift, NoCtrl: cfg.Gameplay.NoCtrl,
 						LessEffects: cfg.Gameplay.LessEffects, SnapTargets: cfg.Gameplay.SnapTargets,
@@ -503,11 +508,15 @@ func (h *host) renderLoop() {
 			cfg.DataDir = currentResourceRoot()
 			cfg.Window = config.WindowConfig{Width: width, Height: height, Title: "Goro"}
 			cfg.Render.GraphicsAPI = "vulkan"
-			cfg.Render.VSync = true
-			cfg.Render.NoUI = true
+			cfg.Render.NoUI = mobileSettings.Display.Presentation != input.MobilePresentationDesktop
+			surfaceVSync = cfg.Render.VSync
+			if err := configureSurface(surface, adapter, device, width, height, surfaceVSync); err != nil {
+				return err
+			}
 			cfg.Render.Stats = false
 			cfg.Mobile = mobileSettings.Controls
 			cfg.MobileDisplay = mobileSettings.Display
+			cfg.UI = mobileSettings.UI
 			cfg.Audio.BGM = mobileSettings.Audio.BGMEnabled
 			cfg.Audio.BGMVolume = mobileSettings.Audio.BGMVolume
 			cfg.Audio.SFXVolume = mobileSettings.Audio.SFXVolume
@@ -518,8 +527,11 @@ func (h *host) renderLoop() {
 			cfg.Gameplay.SnapItems = mobileSettings.Gameplay.SnapItems
 			androidLog(fmt.Sprintf("stage=mobile-config loaded mode=%s server=%s:%d auth=%d profile=%d autologin=%t username=%q", cfg.MobileSession.Mode, cfg.MobileSession.Server.Host, cfg.MobileSession.Server.CharPort, cfg.MobileSession.Server.AuthPort, cfg.MobileSession.Server.Profile, cfg.Login.AutoLogin, cfg.Login.Username))
 			mobileConfig = cfg
+			desktopMode := mobileSettings.Display.Presentation == input.MobilePresentationDesktop
 			if cfg.MobileSession.Mode == config.SessionModeOnline {
 				offlineGame, err = app.New(cfg)
+			} else if desktopMode {
+				offlineGame, err = app.NewOfflineAtLogin(cfg, startMap)
 			} else {
 				offlineGame, err = app.NewOfflineAtMap(cfg, startMap)
 			}
@@ -548,70 +560,86 @@ func (h *host) renderLoop() {
 			offlineGame.Offline().Resume()
 			offlineGame.Resize(width, height)
 		}
-		if mobile == nil {
-			mobile = newMobilePresentation(offlineGame, width, height)
-			mobile.SetSettings(mobileSettings)
-			mobileInput = input.NewMobileInputAdapterWithControls(mobileSettings.Controls, mobileWorldPicker{presentation: mobile}, mobile, mobileCommandSink{game: offlineGame, presentation: mobile})
-			mobile.SetModeChanged(func(online bool) bool {
-				if offlineGame == nil || (online == offlineGame.Online()) {
-					return true
-				}
-				if offlineGame.Offline() != nil {
-					savePath := filepath.Join(currentResourceRoot(), "offline-save.json")
-					if saveErr := offlineGame.SaveOfflineState(savePath); saveErr != nil {
-						androidLog(fmt.Sprintf("stage=mobile-mode save-error=%v", saveErr))
+		if mobile == nil && desktop == nil {
+			if mobileSettings.Display.Presentation == input.MobilePresentationDesktop {
+				desktop = newDesktopPresentation(offlineGame, width, height)
+				desktop.SetSafeInsets(safeLeft, safeTop, safeRight, safeBottom)
+				mobileInput = input.NewMobileInputAdapterWithControls(mobileSettings.Controls, gameWorldPicker{game: offlineGame}, desktop, mobileCommandSink{game: offlineGame})
+				offlineGame.SetMobileSettingsChanged(func(settings input.MobileSettings) {
+					mobileSettings = settings
+					_, _ = config.SaveMobileSettings(settings)
+				})
+			} else {
+				mobile = newMobilePresentation(offlineGame, width, height)
+				mobile.SetSafeInsets(safeLeft, safeTop, safeRight, safeBottom)
+				mobile.SetSettings(mobileSettings)
+				mobileInput = input.NewMobileInputAdapterWithControls(mobileSettings.Controls, mobileWorldPicker{presentation: mobile}, mobile, mobileCommandSink{game: offlineGame, presentation: mobile})
+				mobile.SetModeChanged(func(online bool) bool {
+					if offlineGame == nil || (online == offlineGame.Online()) {
+						return true
 					}
-				} else if offlineGame.Online() {
-					offlineGame.Disconnect()
-				}
-				cfg := mobileConfig
-				if online {
-					cfg.MobileSession.Mode = config.SessionModeOnline
-					// The Online button is an explicit mobile login request. Mobile
-					// has no desktop credential form, so use the configured
-					// credentials immediately after the mode handoff.
-					cfg.Login.AutoLogin = true
-				} else {
-					cfg.MobileSession.Mode = config.SessionModeOffline
-				}
-				var next *app.Game
-				var modeErr error
-				if online {
-					next, modeErr = app.New(cfg)
-				} else {
-					next, modeErr = app.NewOfflineAtMap(cfg, startMap)
-				}
-				if modeErr != nil {
-					androidLog(fmt.Sprintf("stage=mobile-mode target=%s error=%v", cfg.MobileSession.Mode, modeErr))
-					return false
-				}
-				if next.Offline() != nil {
-					savePath := filepath.Join(currentResourceRoot(), "offline-save.json")
-					if loadErr := next.LoadOfflineState(savePath); loadErr != nil && !os.IsNotExist(loadErr) {
-						androidLog(fmt.Sprintf("stage=mobile-mode load-error=%v", loadErr))
+					if offlineGame.Offline() != nil {
+						savePath := filepath.Join(currentResourceRoot(), "offline-save.json")
+						if saveErr := offlineGame.SaveOfflineState(savePath); saveErr != nil {
+							androidLog(fmt.Sprintf("stage=mobile-mode save-error=%v", saveErr))
+						}
+					} else if offlineGame.Online() {
+						offlineGame.Disconnect()
 					}
-				}
-				mobileConfig = cfg
-				offlineGame = next
-				mobile.SetGame(next)
-				androidLog(fmt.Sprintf("stage=mobile-mode active=%s server=%s:%d", cfg.MobileSession.Mode, cfg.MobileSession.Server.Host, cfg.MobileSession.Server.ZonePort))
-				return true
-			})
-			mobile.SetSettingsChanged(func(settings input.MobileSettings) bool {
-				mobileSettings = settings
-				if mobileInput != nil {
-					mobileInput.SetControls(settings.Controls)
-				}
-				path, saveErr := config.SaveMobileSettings(settings)
-				if saveErr != nil {
-					androidLog(fmt.Sprintf("stage=mobile-settings save-error=%v", saveErr))
+					cfg := mobileConfig
+					if online {
+						cfg.MobileSession.Mode = config.SessionModeOnline
+						// The Online button is an explicit mobile login request. Mobile
+						// has no desktop credential form, so use the configured
+						// credentials immediately after the mode handoff.
+						cfg.Login.AutoLogin = true
+					} else {
+						cfg.MobileSession.Mode = config.SessionModeOffline
+					}
+					var next *app.Game
+					var modeErr error
+					if online {
+						next, modeErr = app.New(cfg)
+					} else {
+						next, modeErr = app.NewOfflineAtMap(cfg, startMap)
+					}
+					if modeErr != nil {
+						androidLog(fmt.Sprintf("stage=mobile-mode target=%s error=%v", cfg.MobileSession.Mode, modeErr))
+						return false
+					}
+					if next.Offline() != nil {
+						savePath := filepath.Join(currentResourceRoot(), "offline-save.json")
+						if loadErr := next.LoadOfflineState(savePath); loadErr != nil && !os.IsNotExist(loadErr) {
+							androidLog(fmt.Sprintf("stage=mobile-mode load-error=%v", loadErr))
+						}
+					}
+					mobileConfig = cfg
+					offlineGame = next
+					mobile.SetGame(next)
+					androidLog(fmt.Sprintf("stage=mobile-mode active=%s server=%s:%d", cfg.MobileSession.Mode, cfg.MobileSession.Server.Host, cfg.MobileSession.Server.ZonePort))
 					return true
-				}
-				androidLog(fmt.Sprintf("stage=mobile-settings applied path=%s movement=%s camera=%.2f zoom=%.2f invert_y=%t long_press_ms=%d names=%t bgm=%t bgm_volume=%.2f sfx_volume=%.2f minimap=%t", path, settings.Controls.MovementMode.String(), settings.Controls.CameraSensitivity, settings.Controls.ZoomSensitivity, settings.Controls.InvertCameraY, settings.Controls.LongPressMS, settings.Controls.ShowTargetNames, settings.Audio.BGMEnabled, settings.Audio.BGMVolume, settings.Audio.SFXVolume, settings.Display.ShowMinimap))
-				return true
-			})
+				})
+				mobile.SetSettingsChanged(func(settings input.MobileSettings) bool {
+					mobileSettings = settings
+					if mobileInput != nil {
+						mobileInput.SetControls(settings.Controls)
+					}
+					path, saveErr := config.SaveMobileSettings(settings)
+					if saveErr != nil {
+						androidLog(fmt.Sprintf("stage=mobile-settings save-error=%v", saveErr))
+						return true
+					}
+					androidLog(fmt.Sprintf("stage=mobile-settings applied path=%s movement=%s camera=%.2f zoom=%.2f invert_y=%t long_press_ms=%d names=%t bgm=%t bgm_volume=%.2f sfx_volume=%.2f minimap=%t", path, settings.Controls.MovementMode.String(), settings.Controls.CameraSensitivity, settings.Controls.ZoomSensitivity, settings.Controls.InvertCameraY, settings.Controls.LongPressMS, settings.Controls.ShowTargetNames, settings.Audio.BGMEnabled, settings.Audio.BGMVolume, settings.Audio.SFXVolume, settings.Display.ShowMinimap))
+					return true
+				})
+			}
 		} else {
-			mobile.Resize(width, height)
+			if mobile != nil {
+				mobile.Resize(width, height)
+			}
+			if desktop != nil {
+				desktop.Resize(width, height)
+			}
 		}
 		monsterCount := 0
 		monsterNames := make([]string, 0, 4)
@@ -651,17 +679,24 @@ func (h *host) renderLoop() {
 			case commandSurfaceChanged:
 				width, height = cmd.width, cmd.height
 				if surface != nil && device != nil && adapter != nil {
-					err = configureSurface(surface, adapter, device, width, height)
+					err = configureSurface(surface, adapter, device, width, height, surfaceVSync)
 					if offlineGame != nil {
 						offlineGame.Resize(width, height)
 					}
 					if mobile != nil {
 						mobile.Resize(width, height)
 					}
+					if desktop != nil {
+						desktop.Resize(width, height)
+					}
 				}
 			case commandSurfaceInsetsChanged:
+				safeLeft, safeTop, safeRight, safeBottom = cmd.safeLeft, cmd.safeTop, cmd.safeRight, cmd.safeBottom
 				if mobile != nil {
 					mobile.SetSafeInsets(cmd.safeLeft, cmd.safeTop, cmd.safeRight, cmd.safeBottom)
+				}
+				if desktop != nil {
+					desktop.SetSafeInsets(cmd.safeLeft, cmd.safeTop, cmd.safeRight, cmd.safeBottom)
 				}
 			case commandSurfaceDestroyed:
 				if offlineGame != nil && offlineGame.Offline() != nil {
@@ -670,7 +705,8 @@ func (h *host) renderLoop() {
 				}
 				releaseSurface()
 			case commandTouch:
-				if mobile != nil {
+				uiConsumed := desktop != nil && desktop.Touch(cmd.action, cmd.x, cmd.y, cmd.pressed)
+				if !uiConsumed && mobile != nil {
 					if cmd.action == 0 || cmd.action == 5 {
 						mobile.BeginTouch(cmd.touchID, cmd.x, cmd.y)
 					}
@@ -685,9 +721,11 @@ func (h *host) renderLoop() {
 						}
 					}
 				}
-				state.SetTouch(cmd.touchID, cmd.x, cmd.y, cmd.pressed)
+				if !uiConsumed {
+					state.SetTouch(cmd.touchID, cmd.x, cmd.y, cmd.pressed)
+				}
 				state.EndFrame()
-				if mobileInput != nil {
+				if !uiConsumed && mobileInput != nil {
 					mobileInput.Update(input.TouchFrame{Points: state.TouchPoints, At: time.Now()})
 				}
 				log.Printf("touch-state active=%d pinch=%.2f", len(state.TouchPoints), state.PinchDelta)
@@ -696,8 +734,13 @@ func (h *host) renderLoop() {
 				if mobile != nil {
 					mobile.SetTextInput(cmd.textInputMode, cmd.text)
 				}
+				if desktop != nil {
+					desktop.SetText(cmd.text)
+				}
 			case commandBack:
-				if mobile != nil {
+				if desktop != nil {
+					desktop.ui.HandleEvent(event.NewKeyEvent(event.KeyPress, event.KeyEscape, 0, 0))
+				} else if mobile != nil {
 					mobile.Back()
 				}
 			case commandPause:
@@ -770,9 +813,26 @@ func (h *host) renderLoop() {
 				}
 				if offlineGame != nil {
 					frameStarted := time.Now()
+					// The desktop UI polls client.Context.Input once per update for
+					// window dragging, item grids, drag and drop and the shortcut
+					// bar. That is the game's own input state, not the host's
+					// touch state, so feed this frame's touches into it directly.
+					// Game.Update ends the frame itself, so just-pressed edges
+					// already last exactly one update.
+					if desktop != nil {
+						desktop.SyncInput(offlineGame.InputState())
+					}
 					if mobile == nil || mobile.WorldActive() {
 						if err := offlineGame.Update(); err != nil {
 							androidLog(fmt.Sprintf("stage=offline-update error=%v", err))
+						}
+					}
+					if desktop != nil {
+						desktop.Frame()
+						if desktop.TextInputActive() {
+							atomic.StoreUint32(&androidTextInputActive, 1)
+						} else {
+							atomic.StoreUint32(&androidTextInputActive, 0)
 						}
 					}
 					if offlineGame.Online() && (renderedFrames < 2 || renderedFrames%60 == 0) {
@@ -787,11 +847,16 @@ func (h *host) renderLoop() {
 							offlineGame.DrawMobileTileCursor(target.Position, frame)
 						}
 					}
-					offlineGame.DrawOverlay(frame)
-					offlineGame.DrawUIOverlay(frame)
 					if mobile != nil {
+						offlineGame.DrawOverlay(frame)
+						offlineGame.DrawUIOverlay(frame)
 						mobile.Refresh()
 						mobile.Draw(frame)
+					}
+					if desktop != nil {
+						desktop.Draw(frame)
+						offlineGame.DrawUIOverlay(frame)
+						offlineGame.DrawOverlay(frame)
 					}
 					offlineGame.FrameSubmitted()
 					renderFrame(surface, device, goroRenderer, frame, width, height, configuredFormat(surface, adapter))
@@ -835,7 +900,7 @@ func configuredFormat(surface *wgpu.Surface, adapter *wgpu.Adapter) gputypes.Tex
 	return gputypes.TextureFormatRGBA8Unorm
 }
 
-func configureSurface(surface *wgpu.Surface, adapter *wgpu.Adapter, device *wgpu.Device, width, height int) error {
+func configureSurface(surface *wgpu.Surface, adapter *wgpu.Adapter, device *wgpu.Device, width, height int, vsync bool) error {
 	caps := adapter.GetSurfaceCapabilities(surface)
 	format := gputypes.TextureFormatBGRA8Unorm
 	alphaMode := gputypes.CompositeAlphaModeAuto
@@ -854,12 +919,18 @@ func configureSurface(surface *wgpu.Surface, adapter *wgpu.Adapter, device *wgpu
 		}
 	}
 	androidLog(fmt.Sprintf("stage=surface-capabilities formats=%v alpha-modes=%v selected-alpha=%s", capsFormats(caps), capsAlphaModes(caps), alphaMode))
-	if err := surface.Configure(device, &wgpu.SurfaceConfiguration{Format: format, Usage: gputypes.TextureUsageRenderAttachment, Width: uint32(width), Height: uint32(height), PresentMode: gputypes.PresentModeFifo, AlphaMode: alphaMode}); err != nil {
+	presentMode := gputypes.PresentModeImmediate
+	presentName := "immediate"
+	if vsync {
+		presentMode = gputypes.PresentModeFifo
+		presentName = "fifo"
+	}
+	if err := surface.Configure(device, &wgpu.SurfaceConfiguration{Format: format, Usage: gputypes.TextureUsageRenderAttachment, Width: uint32(width), Height: uint32(height), PresentMode: presentMode, AlphaMode: alphaMode}); err != nil {
 		androidLog(fmt.Sprintf("stage=surface configure error=%v", err))
 		return fmt.Errorf("configure: %w", err)
 	}
-	log.Printf("stage=surface configured format=%s size=%dx%d present=fifo alpha=%s", format, width, height, alphaMode)
-	androidLog(fmt.Sprintf("stage=surface configured format=%s size=%dx%d present=fifo alpha=%s", format, width, height, alphaMode))
+	log.Printf("stage=surface configured format=%s size=%dx%d present=%s alpha=%s", format, width, height, presentName, alphaMode)
+	androidLog(fmt.Sprintf("stage=surface configured format=%s size=%dx%d present=%s alpha=%s", format, width, height, presentName, alphaMode))
 	return nil
 }
 

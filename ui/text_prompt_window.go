@@ -96,10 +96,10 @@ func (w *TextPromptWindow) widgetTree(ctx Context) widget.Widget {
 		),
 		Footer(
 			primitives.Expanded(primitives.Box()),
-				rotheme.Button("OK", func() {
-					w.submit(ctx)
-				}),
-				rotheme.Button("Cancel", w.Close),
+			rotheme.Button("OK", func() {
+				w.submit(ctx)
+			}),
+			rotheme.Button("Cancel", w.Close),
 		),
 	)
 }
