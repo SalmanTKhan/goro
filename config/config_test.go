@@ -5,13 +5,16 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kivutar/goro/input"
 )
 
 func isolateUserConfig(t *testing.T) {
 	t.Helper()
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	configRoot := t.TempDir()
+	t.Setenv("APPDATA", configRoot)
+	t.Setenv("XDG_CONFIG_HOME", configRoot)
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -25,6 +28,28 @@ func isolateUserConfig(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+}
+
+func TestNextCapturePathUsesFormatAndCollisionSuffix(t *testing.T) {
+	isolateUserConfig(t)
+	now := time.Date(2026, time.September, 3, 14, 5, 6, 0, time.UTC)
+	first, err := NextCapturePath(now, ".webm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Ext(first) != ".webm" || !strings.HasSuffix(first, "goro-20260903-140506.webm") {
+		t.Fatalf("first capture path = %q", first)
+	}
+	if err := os.WriteFile(first, []byte("placeholder"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	second, err := NextCapturePath(now, "webm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(second, "goro-20260903-140506-02.webm") {
+		t.Fatalf("collision capture path = %q", second)
+	}
 }
 
 func TestLoadConfigReadsINIAndCLIOverrides(t *testing.T) {
@@ -61,6 +86,9 @@ fps = true
 no_ui = true
 async_ui = false
 profile_ui = false
+
+[capture]
+ffmpeg_path = ./ffmpeg-from-ini.exe
 
 [network]
 trace = true
@@ -108,6 +136,7 @@ file = ./ignored.log
 		"--no-ui=false",
 		"--async-ui=true",
 		"--profile-ui=true",
+		"--ffmpeg-path", filepath.Join(root, "ffmpeg.exe"),
 		"--char-slot", "3",
 		"--no-shift=false",
 		"--no-ctrl=true",
@@ -139,6 +168,9 @@ file = ./ignored.log
 	}
 	if cfg.Render.GraphicsAPI != "vulkan" || cfg.Render.VSync || !cfg.Render.FPS || cfg.Render.NoUI || !cfg.Render.AsyncUI || !cfg.Render.UIProfile {
 		t.Fatalf("unexpected render config: %#v", cfg.Render)
+	}
+	if cfg.Capture.FFmpegPath != filepath.Join(root, "ffmpeg.exe") {
+		t.Fatalf("ffmpeg path = %q, want CLI override", cfg.Capture.FFmpegPath)
 	}
 	if !cfg.Network.Trace {
 		t.Fatalf("network trace = false, want true")

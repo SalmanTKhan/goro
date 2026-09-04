@@ -13,6 +13,7 @@ import (
 	"github.com/gogpu/ui/primitives"
 	"github.com/gogpu/ui/state"
 	"github.com/gogpu/ui/widget"
+	"github.com/kivutar/goro/capture"
 	"github.com/kivutar/goro/client"
 	"github.com/kivutar/goro/db"
 	"github.com/kivutar/goro/input"
@@ -353,7 +354,10 @@ func (c *ChatConsole) SubmitCommand(ctx client.Context, text string) bool {
 		c.submitTaekwonRanking(ctx)
 		return true
 	case "/screenshot":
-		c.submitScreenshot(ctx)
+		c.submitScreenshot(ctx, text)
+		return true
+	case "/record":
+		c.submitRecording(ctx, text)
 		return true
 	case "/organize":
 		c.submitOrganizeParty(ctx, text)
@@ -410,14 +414,30 @@ func (c *ChatConsole) SubmitCommand(ctx client.Context, text string) bool {
 	}
 }
 
-func (c *ChatConsole) submitScreenshot(ctx client.Context) {
-	if ctx.RequestScreenshot == nil {
-		c.AddErrorMessage("screenshot failed: unavailable")
+func (c *ChatConsole) submitScreenshot(ctx client.Context, text string) {
+	args := strings.Fields(strings.ToLower(text))
+	if len(args) > 3 || (len(args) == 3 && args[2] != "lossless") || (len(args) == 2 && args[1] != "webp" && args[1] != "png") {
+		c.AddErrorMessage("usage: /screenshot [webp [lossless]]")
 		c.setInput("")
 		c.setActive(false)
 		return
 	}
-	path, err := ctx.RequestScreenshot()
+	format := capture.StillPNG
+	lossless := false
+	if len(args) >= 2 {
+		format = capture.StillFormat(args[1])
+		lossless = len(args) == 3
+	}
+	options := capture.ScreenshotOptions{Format: format, Quality: 90, Lossless: lossless}
+	var path string
+	var err error
+	if ctx.RequestScreenshotOptions != nil {
+		path, err = ctx.RequestScreenshotOptions(options)
+	} else if format == capture.StillPNG && ctx.RequestScreenshot != nil {
+		path, err = ctx.RequestScreenshot()
+	} else {
+		err = fmt.Errorf("unavailable")
+	}
 	if err != nil {
 		c.AddErrorMessage("screenshot failed: %s", err)
 		c.setInput("")
@@ -425,6 +445,92 @@ func (c *ChatConsole) submitScreenshot(ctx client.Context) {
 		return
 	}
 	c.AddSystemMessage("Screenshot: %s", path)
+	c.setInput("")
+	c.setActive(false)
+}
+
+func (c *ChatConsole) submitRecording(ctx client.Context, text string) {
+	args := strings.Fields(strings.ToLower(text))
+	if len(args) < 2 {
+		c.AddErrorMessage("usage: /record start [30|60] [webm] or /record stop")
+		c.setInput("")
+		c.setActive(false)
+		return
+	}
+	switch args[1] {
+	case "stop":
+		if len(args) != 2 || ctx.StopRecording == nil {
+			c.AddErrorMessage("record stop failed: unavailable")
+		} else if err := ctx.StopRecording(); err != nil {
+			c.AddErrorMessage("record stop failed: %s", err)
+		} else {
+			c.AddSystemMessage("Recording stop requested")
+		}
+		c.setInput("")
+		c.setActive(false)
+		return
+	case "start":
+		// continue below
+	default:
+		c.AddErrorMessage("usage: /record start [30|60] [webm] or /record stop")
+		c.setInput("")
+		c.setActive(false)
+		return
+	}
+	if len(args) > 4 || ctx.StartRecording == nil {
+		c.AddErrorMessage("record start failed: usage or unavailable")
+		c.setInput("")
+		c.setActive(false)
+		return
+	}
+	fps := 30
+	container := capture.RecordingMP4
+	codec := capture.RecordingH264
+	fpsSet := false
+	containerSet := false
+	for _, arg := range args[2:] {
+		switch arg {
+		case "30", "60":
+			if fpsSet {
+				c.AddErrorMessage("record start failed: usage or unavailable")
+				c.setInput("")
+				c.setActive(false)
+				return
+			}
+			value, _ := strconv.Atoi(arg)
+			fps = value
+			fpsSet = true
+		case "mp4":
+			if containerSet {
+				c.AddErrorMessage("record start failed: usage or unavailable")
+				c.setInput("")
+				c.setActive(false)
+				return
+			}
+			container, codec = capture.RecordingMP4, capture.RecordingH264
+			containerSet = true
+		case "webm":
+			if containerSet {
+				c.AddErrorMessage("record start failed: usage or unavailable")
+				c.setInput("")
+				c.setActive(false)
+				return
+			}
+			container, codec = capture.RecordingWebM, capture.RecordingVP9
+			containerSet = true
+		default:
+			c.AddErrorMessage("record start failed: usage or unavailable")
+			c.setInput("")
+			c.setActive(false)
+			return
+		}
+	}
+	path, err := ctx.StartRecording(capture.RecordingOptions{FPS: fps, Container: container, Codec: codec})
+	if err != nil {
+		c.AddErrorMessage("record start failed: %s", err)
+	} else {
+		c.AddSystemMessage("Recording: %s", path)
+	}
 	c.setInput("")
 	c.setActive(false)
 }

@@ -28,7 +28,7 @@ func main() {
 		glog.Fatalf("%v", err)
 	}
 
-	if err := render.Run(game, cfg.Window, cfg.Render); err != nil {
+	if err := render.Run(game, cfg.Window, cfg.Render, cfg.Capture); err != nil {
 		glog.Fatalf("%v", err)
 	}
 }

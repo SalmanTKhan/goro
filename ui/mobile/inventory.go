@@ -230,10 +230,6 @@ func categoryLabel(category mobileui.InventoryCategory) string {
 	}
 }
 
-// itemTitle names the detail sub-window. The item's own name is rendered inside
-// the body, so the title stays constant the way the desktop item window does.
-func itemTitle() string { return "Item Info" }
-
 func itemMeta(item mobileui.InventoryItemModel) string {
 	meta := ""
 	if item.Refine > 0 {

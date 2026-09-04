@@ -977,7 +977,7 @@ func renderFrame(surface *wgpu.Surface, device *wgpu.Device, renderer *render.GP
 		return
 	}
 	androidLog("stage=render-pass begin")
-	_, err = renderer.DrawTarget(render.FrameTarget{View: view, Width: width, Height: height, Format: format}, frame)
+	_, err = renderer.DrawTarget(render.FrameTarget{View: view, Texture: texture.AsTexture(), Width: width, Height: height, Format: format}, frame)
 	if err != nil {
 		view.Release()
 		surface.DiscardTexture()

@@ -519,13 +519,25 @@ func (r *gpuRenderer) Draw(ctx *gogpu.Context, screen *Frame) (bool, error) {
 	if width <= 0 || height <= 0 {
 		return false, nil
 	}
-	return r.DrawTarget(FrameTarget{View: surface, Width: width, Height: height, Format: r.format}, screen)
+	return r.DrawTarget(FrameTarget{View: surface, Texture: surface.Texture(), Width: width, Height: height, Format: r.format}, screen)
 }
 
 // DrawTarget encodes the production renderer into a host-supplied color view.
 // The host remains responsible for surface acquisition, submission policy, and
 // presentation. This is the Android/raw-WGPU entry point.
 func (r *gpuRenderer) DrawTarget(target FrameTarget, screen *Frame) (bool, error) {
+	return r.drawTarget(target, screen, nil, nil)
+}
+
+// DrawTargetWithCapture appends a copy of the completed production target to
+// the same command buffer before it is submitted. The copy callback must not
+// submit or finish the encoder. afterSubmit is called only after the production
+// command buffer has been submitted and is used to begin non-blocking mapping.
+func (r *gpuRenderer) DrawTargetWithCapture(target FrameTarget, screen *Frame, captureCopy func(*wgpu.CommandEncoder) error, afterSubmit func()) (bool, error) {
+	return r.drawTarget(target, screen, captureCopy, afterSubmit)
+}
+
+func (r *gpuRenderer) drawTarget(target FrameTarget, screen *Frame, captureCopy func(*wgpu.CommandEncoder) error, afterSubmit func()) (bool, error) {
 	if screen == nil || !target.Valid() {
 		return false, nil
 	}
@@ -686,11 +698,19 @@ func (r *gpuRenderer) DrawTarget(target FrameTarget, screen *Frame) (bool, error
 	if err := pass.End(); err != nil {
 		return false, err
 	}
+	if captureCopy != nil {
+		if err := captureCopy(enc); err != nil {
+			return false, err
+		}
+	}
 	cmd, err := enc.Finish()
 	if err != nil {
 		return false, err
 	}
 	_, err = r.queue.Submit(cmd)
+	if err == nil && afterSubmit != nil {
+		afterSubmit()
+	}
 	return err == nil, err
 }
 

@@ -6,12 +6,38 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/kivutar/goro/capture"
 	"github.com/kivutar/goro/config"
 	"github.com/kivutar/goro/db"
 	"github.com/kivutar/goro/input"
 	"github.com/kivutar/goro/res"
 	"github.com/kivutar/goro/session"
 )
+
+func TestRecordingLifecycleRejectsConcurrentStart(t *testing.T) {
+	configRoot := t.TempDir()
+	t.Setenv("APPDATA", configRoot)
+	t.Setenv("XDG_CONFIG_HOME", configRoot)
+
+	g := &Game{}
+	path, err := g.StartRecording(capture.RecordingOptions{FPS: 60})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Ext(path) != ".mp4" {
+		t.Fatalf("recording path = %q, want MP4", path)
+	}
+	if _, err := g.StartRecording(capture.RecordingOptions{FPS: 30}); err == nil {
+		t.Fatal("concurrent recording start unexpectedly succeeded")
+	}
+	if _, pending := g.ConsumeRecordingStart(); !pending {
+		t.Fatal("recording start was not queued")
+	}
+	g.CompleteRecording(path, nil)
+	if g.recordingActive {
+		t.Fatal("recording remained active after completion")
+	}
+}
 
 func TestNewForceUserAIEnablesCompanionCustomAI(t *testing.T) {
 	g, err := New(config.Config{

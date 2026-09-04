@@ -21,6 +21,7 @@ type Config struct {
 	Login         LoginConfig
 	Audio         AudioConfig
 	Render        RenderConfig
+	Capture       CaptureConfig
 	Network       NetworkConfig
 	MobileSession MobileSessionConfig
 	Fog           FogConfig
@@ -70,6 +71,10 @@ type RenderConfig struct {
 	CPUProfile         string
 	Stats              bool
 	WorldDebugStats    bool
+}
+
+type CaptureConfig struct {
+	FFmpegPath string
 }
 
 type NetworkConfig struct {
@@ -197,15 +202,31 @@ func LoadUserMobileSettings() (input.MobileSettings, error) {
 }
 
 func NextScreenshotPath(now time.Time) (string, error) {
+	return NextScreenshotPathFor(now, "png")
+}
+
+func NextScreenshotPathFor(now time.Time, extension string) (string, error) {
+	return nextTimestampedPath(now, "screenshots", extension)
+}
+
+func NextCapturePath(now time.Time, extension string) (string, error) {
+	return nextTimestampedPath(now, "captures", extension)
+}
+
+func nextTimestampedPath(now time.Time, directory, extension string) (string, error) {
+	extension = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(extension)), ".")
+	if extension == "" || strings.ContainsAny(extension, `/\\`) {
+		return "", fmt.Errorf("invalid capture extension %q", extension)
+	}
 	dir, err := UserDataDir()
 	if err != nil {
 		return "", err
 	}
-	dir = filepath.Join(dir, "screenshots")
+	dir = filepath.Join(dir, directory)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-	name := fmt.Sprintf("goro-%s.png", now.Format("20060102-150405"))
+	name := fmt.Sprintf("goro-%s.%s", now.Format("20060102-150405"), extension)
 	path := filepath.Join(dir, name)
 	for i := 2; ; i++ {
 		if _, err := os.Stat(path); os.IsNotExist(err) {
@@ -213,7 +234,7 @@ func NextScreenshotPath(now time.Time) (string, error) {
 		} else if err != nil {
 			return "", err
 		}
-		name = fmt.Sprintf("goro-%s-%02d.png", now.Format("20060102-150405"), i)
+		name = fmt.Sprintf("goro-%s-%02d.%s", now.Format("20060102-150405"), i, extension)
 		path = filepath.Join(dir, name)
 	}
 }
@@ -395,6 +416,7 @@ func defaultConfig() Config {
 			VSync:              true,
 			BenchWarmupSeconds: 0,
 		},
+		Capture: CaptureConfig{},
 		Fog: FogConfig{
 			Enabled: true,
 		},
@@ -476,6 +498,7 @@ func applyCLI(cfg *Config, args []string) error {
 	fs.StringVar(&cfg.Render.CPUProfile, "cpu-profile", cfg.Render.CPUProfile, "write CPU profile to this path during benchmark")
 	fs.BoolVar(&cfg.Render.Stats, "render-stats", cfg.Render.Stats, "show render stats")
 	fs.BoolVar(&cfg.Render.WorldDebugStats, "world-debug-stats", cfg.Render.WorldDebugStats, "show world renderer debug stats")
+	fs.StringVar(&cfg.Capture.FFmpegPath, "ffmpeg-path", cfg.Capture.FFmpegPath, "FFmpeg executable used for WebM/VP9 recording")
 	fs.BoolVar(&cfg.Network.Trace, "net-trace", cfg.Network.Trace, "log network reads and writes")
 	fs.StringVar((*string)(&cfg.MobileSession.Mode), "mobile-mode", string(cfg.MobileSession.Mode), "mobile session mode: online or offline")
 	fs.StringVar(&cfg.MobileSession.Server.Host, "server-host", cfg.MobileSession.Server.Host, "online server host")
@@ -585,6 +608,8 @@ func applyConfigValue(cfg *Config, section, key, value string) error {
 		return setBool(value, &cfg.Render.Stats)
 	case "render.worlddebugstats":
 		return setBool(value, &cfg.Render.WorldDebugStats)
+	case "capture.ffmpegpath":
+		cfg.Capture.FFmpegPath = value
 	case "ui.scale":
 		var scale float64
 		if err := setFloat(value, &scale); err != nil {
@@ -696,7 +721,7 @@ func validateConfig(cfg *Config) error {
 }
 
 func upsertINIValues(src string, values map[string]map[string]string) string {
-	sectionOrder := []string{"window", "render", "ui", "audio", "gameplay", "mobile"}
+	sectionOrder := []string{"window", "render", "capture", "ui", "audio", "gameplay", "mobile"}
 	seenSections := make(map[string]bool)
 	written := make(map[string]map[string]bool)
 	for section := range values {
@@ -767,7 +792,7 @@ func upsertINIValues(src string, values map[string]map[string]string) string {
 }
 
 func sortedINIKeys(values map[string]string) []string {
-	preferred := []string{"fullscreen", "vsync", "fps", "scale", "bgm", "bgm_volume", "sfx_volume", "no_shift", "no_ctrl", "less_effects", "snap", "itemsnap", "movement", "camera_sensitivity", "zoom_sensitivity", "invert_camera_y", "long_press_ms", "show_target_names", "show_minimap", "presentation"}
+	preferred := []string{"fullscreen", "vsync", "fps", "ffmpeg_path", "scale", "bgm", "bgm_volume", "sfx_volume", "no_shift", "no_ctrl", "less_effects", "snap", "itemsnap", "movement", "camera_sensitivity", "zoom_sensitivity", "invert_camera_y", "long_press_ms", "show_target_names", "show_minimap", "presentation"}
 	keys := make([]string, 0, len(values))
 	seen := make(map[string]bool, len(values))
 	for _, key := range preferred {

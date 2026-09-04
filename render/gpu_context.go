@@ -43,9 +43,12 @@ func (c *RawGPUContext) Queue() *wgpu.Queue                    { return c.queue 
 func (c *RawGPUContext) SurfaceFormat() gputypes.TextureFormat { return c.surfaceFormat }
 
 // FrameTarget is the transient color target supplied by a host for one frame.
-// The renderer never owns or releases the view.
+// The renderer never owns or releases the view or texture. Texture is the
+// copy-source boundary used by capture; hosts that cannot expose it simply
+// leave it nil and capture remains disabled for that raw host.
 type FrameTarget struct {
 	View          *wgpu.TextureView
+	Texture       *wgpu.Texture
 	Width, Height int
 	Format        gputypes.TextureFormat
 }

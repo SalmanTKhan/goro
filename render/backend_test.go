@@ -4,6 +4,7 @@ import (
 	"math"
 	"os"
 	"testing"
+	"time"
 
 	uiapp "github.com/gogpu/ui/app"
 	"github.com/gogpu/ui/geometry"
@@ -15,6 +16,26 @@ import (
 
 type emptyUITestRoot struct {
 	*primitives.BoxWidget
+}
+
+func TestRecordingFrameScheduleUsesFixedFPS(t *testing.T) {
+	runtime := &captureRuntime{recordFPS: 30}
+	interval := time.Second / 30
+	for _, test := range []struct {
+		elapsed time.Duration
+		want    bool
+		pts     time.Duration
+	}{
+		{elapsed: 0, want: true, pts: 0},
+		{elapsed: interval / 2, want: false},
+		{elapsed: interval, want: true, pts: interval},
+		{elapsed: interval * 2, want: true, pts: interval * 2},
+	} {
+		got, pts := runtime.nextRecordingFrame(test.elapsed)
+		if got != test.want || (got && pts != test.pts) {
+			t.Fatalf("elapsed=%s: got frame=%t pts=%s, want frame=%t pts=%s", test.elapsed, got, pts, test.want, test.pts)
+		}
+	}
 }
 
 func (r *emptyUITestRoot) IsUIRootEmpty() bool { return true }

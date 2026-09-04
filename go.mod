@@ -4,6 +4,7 @@ go 1.26.4
 
 require (
 	github.com/charmbracelet/log v1.0.0
+	github.com/deepteams/webp v1.2.7
 	github.com/ebitengine/oto/v3 v3.5.0-alpha.8
 	github.com/go-fonts/dejavu v0.3.4
 	github.com/klauspost/compress v1.19.2

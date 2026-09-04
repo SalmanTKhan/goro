@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/gogpu/ui/event"
+	"github.com/kivutar/goro/capture"
 	"github.com/kivutar/goro/client"
 	"github.com/kivutar/goro/input"
 	"github.com/kivutar/goro/session"
@@ -179,6 +180,54 @@ func TestConsoleScreenshotCommandRequestsCapture(t *testing.T) {
 	}
 	if len(console.messages) != 1 || console.messages[0].Text != "Screenshot: /tmp/goro-test.png" {
 		t.Fatalf("console messages = %+v", console.messages)
+	}
+}
+
+func TestConsoleWebPScreenshotCommandRequestsOptions(t *testing.T) {
+	console := &ChatConsole{input: "/screenshot webp lossless", active: true}
+	var got capture.ScreenshotOptions
+	ctx := client.Context{
+		RequestScreenshotOptions: func(options capture.ScreenshotOptions) (string, error) {
+			got = options
+			return "C:/captures/goro.webp", nil
+		},
+	}
+
+	if !console.SubmitCommand(ctx, "/screenshot webp lossless") {
+		t.Fatal("screenshot command was not handled")
+	}
+	if got.Format != capture.StillWebP || got.Quality != 90 || !got.Lossless {
+		t.Fatalf("screenshot options = %#v", got)
+	}
+	if len(console.messages) != 1 || console.messages[0].Text != "Screenshot: C:/captures/goro.webp" {
+		t.Fatalf("console messages = %+v", console.messages)
+	}
+}
+
+func TestConsoleRecordingCommandsRequestOptions(t *testing.T) {
+	console := &ChatConsole{input: "/record start 60 webm", active: true}
+	var got capture.RecordingOptions
+	ctx := client.Context{
+		StartRecording: func(options capture.RecordingOptions) (string, error) {
+			got = options
+			return "C:/captures/goro.webm", nil
+		},
+	}
+
+	if !console.SubmitCommand(ctx, "/record start 60 webm") {
+		t.Fatal("record start command was not handled")
+	}
+	if got.FPS != 60 || got.Container != capture.RecordingWebM || got.Codec != capture.RecordingVP9 {
+		t.Fatalf("recording options = %#v", got)
+	}
+
+	stopped := false
+	console = &ChatConsole{input: "/record stop", active: true}
+	if !console.SubmitCommand(client.Context{StopRecording: func() error { stopped = true; return nil }}, "/record stop") {
+		t.Fatal("record stop command was not handled")
+	}
+	if !stopped {
+		t.Fatal("recording stop was not requested")
 	}
 }
 

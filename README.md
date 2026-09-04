@@ -66,6 +66,9 @@ vsync = true
 
 [network]
 trace = false
+
+[capture]
+ffmpeg_path = C:\Tools\ffmpeg\bin\ffmpeg.exe
 ```
 
 Command-line options override the ini file:
@@ -88,6 +91,9 @@ Useful options:
 --vsync=false # unlock fps
 --username <username> # prefill the username in login window
 --password <password> # same for password
+--ffmpeg-path <path> # optional FFmpeg executable for WebM/VP9 capture
+
+See [capture support](docs/capture.md) for screenshot and video commands.
 --autologin=true # perform server connection and login on startup
 --force-user-ai=true # start homunculus and mercenary in USER_AI custom mode
 --script <path> # run an optional Lua character-control script in game

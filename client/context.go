@@ -5,6 +5,7 @@ import (
 
 	"github.com/gogpu/ui/widget"
 	"github.com/kivutar/goro/audio"
+	"github.com/kivutar/goro/capture"
 	"github.com/kivutar/goro/config"
 	"github.com/kivutar/goro/input"
 	"github.com/kivutar/goro/network"
@@ -14,27 +15,30 @@ import (
 )
 
 type Context struct {
-	Config             config.Config
-	Input              *input.State
-	Resources          *res.Manager
-	Assets             AssetAvailability
-	Session            *session.Session
-	World              *world.World
-	Network            *network.Client
-	Offline            *session.OfflineSession
-	Audio              *audio.BGM
-	Started            time.Time
-	ScreenW            int
-	ScreenH            int
-	UIWidth            int
-	UIHeight           int
-	Runtime            RuntimeSettings
-	RequestQuit        func()
-	RequestScreenshot  func() (string, error)
-	UIApp              UIApp
-	UIManager          UIManager
-	MobileSettingsHost MobileSettingsHost
-	UISettingsHost     UISettingsHost
+	Config                   config.Config
+	Input                    *input.State
+	Resources                *res.Manager
+	Assets                   AssetAvailability
+	Session                  *session.Session
+	World                    *world.World
+	Network                  *network.Client
+	Offline                  *session.OfflineSession
+	Audio                    *audio.BGM
+	Started                  time.Time
+	ScreenW                  int
+	ScreenH                  int
+	UIWidth                  int
+	UIHeight                 int
+	Runtime                  RuntimeSettings
+	RequestQuit              func()
+	RequestScreenshot        func() (string, error)
+	RequestScreenshotOptions func(capture.ScreenshotOptions) (string, error)
+	StartRecording           func(capture.RecordingOptions) (string, error)
+	StopRecording            func() error
+	UIApp                    UIApp
+	UIManager                UIManager
+	MobileSettingsHost       MobileSettingsHost
+	UISettingsHost           UISettingsHost
 }
 
 type PackState string

@@ -87,14 +87,6 @@ func (k Kit) RightAligned(content string, role TextRole) *textWidget {
 	return k.newText(content, role, 1).Align(widget.TextAlignRight)
 }
 
-// aligned is the internal form used where the alignment is decided by a flag.
-func (k Kit) aligned(content string, role TextRole, center bool) *textWidget {
-	if center {
-		return k.Centered(content, role)
-	}
-	return k.Text(content, role)
-}
-
 // Workspace is the full-screen ground a mobile screen sits on.
 func (k Kit) Workspace() *primitives.BoxWidget {
 	return primitives.Box().Background(k.Theme.Colors.PanelBody)

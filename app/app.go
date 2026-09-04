@@ -8,6 +8,7 @@ import (
 	"time"
 
 	gameaudio "github.com/kivutar/goro/audio"
+	"github.com/kivutar/goro/capture"
 	"github.com/kivutar/goro/client"
 	"github.com/kivutar/goro/config"
 	"github.com/kivutar/goro/db"
@@ -46,6 +47,11 @@ type Game struct {
 	quit                  func()
 	quitting              bool
 	pendingScreenshot     string
+	pendingScreenshotOpts capture.ScreenshotOptions
+	pendingRecording      capture.RecordingOptions
+	hasPendingRecording   bool
+	recordingActive       bool
+	pendingRecordingStop  bool
 	mobileTarget          mobileui.TargetHUDModel
 	mobileSettingsChanged func(input.MobileSettings)
 }
@@ -770,11 +776,23 @@ func (g *Game) RequestQuit() {
 }
 
 func (g *Game) RequestScreenshot() (string, error) {
-	path, err := config.NextScreenshotPath(time.Now())
+	return g.RequestScreenshotOptions(capture.ScreenshotOptions{Format: capture.StillPNG})
+}
+
+func (g *Game) RequestScreenshotOptions(options capture.ScreenshotOptions) (string, error) {
+	if g.pendingScreenshot != "" {
+		return "", fmt.Errorf("screenshot is already pending")
+	}
+	options, err := options.Normalized()
+	if err != nil {
+		return "", err
+	}
+	path, err := config.NextScreenshotPathFor(time.Now(), string(options.Format))
 	if err != nil {
 		return "", err
 	}
 	g.pendingScreenshot = path
+	g.pendingScreenshotOpts = options
 	return path, nil
 }
 
@@ -787,12 +805,83 @@ func (g *Game) ConsumeScreenshotRequest() (string, bool) {
 	return path, true
 }
 
+func (g *Game) ConsumeCaptureRequest() (capture.ScreenshotOptions, string, bool) {
+	if g.pendingScreenshot == "" {
+		return capture.ScreenshotOptions{}, "", false
+	}
+	path := g.pendingScreenshot
+	options := g.pendingScreenshotOpts
+	g.pendingScreenshot = ""
+	g.pendingScreenshotOpts = capture.ScreenshotOptions{}
+	return options, path, true
+}
+
 func (g *Game) CompleteScreenshot(path string, err error) {
 	if err != nil {
 		glog.Errorf("screenshot failed path=%s error=%v", path, err)
 		return
 	}
 	glog.Infof("screenshot saved path=%s", path)
+}
+
+func (g *Game) StartRecording(options capture.RecordingOptions) (string, error) {
+	options, err := options.Normalized()
+	if err != nil {
+		return "", err
+	}
+	if g.hasPendingRecording || g.recordingActive {
+		return "", fmt.Errorf("recording is already active")
+	}
+	path, err := config.NextCapturePath(time.Now(), string(options.Container))
+	if err != nil {
+		return "", err
+	}
+	options.Path = path
+	g.pendingRecording = options
+	g.hasPendingRecording = true
+	g.recordingActive = true
+	g.pendingRecordingStop = false
+	return path, nil
+}
+
+func (g *Game) ConsumeRecordingStart() (capture.RecordingOptions, bool) {
+	if !g.hasPendingRecording {
+		return capture.RecordingOptions{}, false
+	}
+	options := g.pendingRecording
+	g.pendingRecording = capture.RecordingOptions{}
+	g.hasPendingRecording = false
+	return options, true
+}
+
+func (g *Game) StopRecording() error {
+	if !g.hasPendingRecording && !g.recordingActive {
+		return fmt.Errorf("no recording is active")
+	}
+	g.pendingRecordingStop = true
+	return nil
+}
+
+func (g *Game) ConsumeRecordingStop() bool {
+	if !g.pendingRecordingStop {
+		return false
+	}
+	g.pendingRecordingStop = false
+	return true
+}
+
+func (g *Game) CompleteRecording(path string, err error) {
+	g.recordingActive = false
+	if err != nil {
+		glog.Errorf("recording failed path=%s error=%v", path, err)
+		return
+	}
+	glog.Infof("recording saved path=%s", path)
+}
+
+func (g *Game) RecordingResize(path string) {
+	g.recordingActive = false
+	glog.Infof("recording stopped after framebuffer resize path=%s; start a new recording", path)
 }
 
 func (g *Game) RuntimeFullscreen() bool {
@@ -829,26 +918,29 @@ func loadClientUIFont(resource *res.Manager) {
 
 func (g *Game) modeContext() client.Context {
 	return client.Context{
-		Config:             g.cfg,
-		Input:              g.input,
-		Resources:          g.resource,
-		Assets:             g.assets,
-		Session:            g.session,
-		World:              g.world,
-		Network:            g.network,
-		Offline:            g.offline,
-		Audio:              g.audio,
-		Started:            g.started,
-		ScreenW:            g.screenW,
-		ScreenH:            g.screenH,
-		UIWidth:            g.uiW,
-		UIHeight:           g.uiH,
-		Runtime:            g.runtime,
-		RequestQuit:        g.RequestQuit,
-		RequestScreenshot:  g.RequestScreenshot,
-		UIApp:              g.uiApp,
-		UIManager:          g.ui,
-		MobileSettingsHost: g,
-		UISettingsHost:     g,
+		Config:                   g.cfg,
+		Input:                    g.input,
+		Resources:                g.resource,
+		Assets:                   g.assets,
+		Session:                  g.session,
+		World:                    g.world,
+		Network:                  g.network,
+		Offline:                  g.offline,
+		Audio:                    g.audio,
+		Started:                  g.started,
+		ScreenW:                  g.screenW,
+		ScreenH:                  g.screenH,
+		UIWidth:                  g.uiW,
+		UIHeight:                 g.uiH,
+		Runtime:                  g.runtime,
+		RequestQuit:              g.RequestQuit,
+		RequestScreenshot:        g.RequestScreenshot,
+		RequestScreenshotOptions: g.RequestScreenshotOptions,
+		StartRecording:           g.StartRecording,
+		StopRecording:            g.StopRecording,
+		UIApp:                    g.uiApp,
+		UIManager:                g.ui,
+		MobileSettingsHost:       g,
+		UISettingsHost:           g,
 	}
 }

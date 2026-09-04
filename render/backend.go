@@ -5,7 +5,6 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
-	"image/png"
 	"math"
 	"os"
 	"runtime/pprof"
@@ -21,6 +20,8 @@ import (
 	"github.com/gogpu/ui/geometry"
 	uirender "github.com/gogpu/ui/render"
 	"github.com/gogpu/ui/widget"
+	"github.com/gogpu/wgpu"
+	"github.com/kivutar/goro/capture"
 	"github.com/kivutar/goro/client"
 	"github.com/kivutar/goro/config"
 	"github.com/kivutar/goro/glog"
@@ -211,6 +212,17 @@ type screenshotRequester interface {
 	CompleteScreenshot(path string, err error)
 }
 
+type captureOptionsRequester interface {
+	ConsumeCaptureRequest() (capture.ScreenshotOptions, string, bool)
+}
+
+type recordingRequester interface {
+	ConsumeRecordingStart() (capture.RecordingOptions, bool)
+	ConsumeRecordingStop() bool
+	CompleteRecording(path string, err error)
+	RecordingResize(path string)
+}
+
 type cachedOverlayImage struct {
 	image  *Image
 	width  int
@@ -323,9 +335,11 @@ type runner struct {
 	lastUIDirtyUnion    geometry.Rect
 	lastUIDrawStats     widget.DrawStats
 	uiProfile           uiProfileStats
+	captureCfg          config.CaptureConfig
+	capture             *captureRuntime
 }
 
-func Run(game Game, cfg config.WindowConfig, renderCfg config.RenderConfig) error {
+func Run(game Game, cfg config.WindowConfig, renderCfg config.RenderConfig, captureCfg ...config.CaptureConfig) error {
 	configureGogpuVSync(renderCfg)
 	appConfig := gogpu.DefaultConfig()
 	api, err := graphicsAPI(renderCfg.GraphicsAPI)
@@ -368,6 +382,10 @@ func Run(game Game, cfg config.WindowConfig, renderCfg config.RenderConfig) erro
 		uiapp.WithRenderMode(uiapp.RenderModeFrameworkManaged),
 	)
 
+	var captureConfig config.CaptureConfig
+	if len(captureCfg) > 0 {
+		captureConfig = captureCfg[0]
+	}
 	r := &runner{
 		app:        gg,
 		ui:         ui,
@@ -381,6 +399,7 @@ func Run(game Game, cfg config.WindowConfig, renderCfg config.RenderConfig) erro
 		fullscreen: cfg.Fullscreen,
 		vsync:      renderCfg.VSync,
 		fps:        renderCfg.FPS,
+		captureCfg: captureConfig,
 	}
 	if receiver, ok := game.(quitReceiver); ok {
 		receiver.SetQuitFunc(gg.Quit)
@@ -394,6 +413,9 @@ func Run(game Game, cfg config.WindowConfig, renderCfg config.RenderConfig) erro
 	gg.OnResize(func(width, height int) {
 		if width <= 0 || height <= 0 {
 			return
+		}
+		if r.capture != nil {
+			r.capture.requestStop(true)
 		}
 		r.width, r.height = width, height
 		uiWidth, uiHeight = width, height
@@ -413,6 +435,7 @@ func Run(game Game, cfg config.WindowConfig, renderCfg config.RenderConfig) erro
 		}
 	})
 	gg.OnClose(func() {
+		r.closeCapture()
 		if r.cpuProfile != nil {
 			pprof.StopCPUProfile()
 			_ = r.cpuProfile.Close()
@@ -765,6 +788,7 @@ func (r *runner) draw(ctx *gogpu.Context) error {
 		r.gpu = gpu
 		glog.Infof("render backend=%s surface_format=%s", ctx.Backend(), r.gpu.format)
 	}
+	r.prepareCapture()
 	r.screen.BeginFrame()
 	r.screen.SetScreenScale(scaleX, scaleY)
 	r.resetUIDrawMeasurement()
@@ -787,12 +811,35 @@ func (r *runner) draw(ctx *gogpu.Context) error {
 	if err := r.drawFPSMeter(r.screen, deviceScale); err != nil {
 		return err
 	}
-	if err := r.savePendingScreenshot(ctx); err != nil {
-		return err
-	}
 	// Goro redraws the 3D scene every frame; UI canvas damage only scopes UI texture updates.
 	ctx.SetDamageRects(nil)
-	submitted, err := r.gpu.Draw(ctx, r.screen)
+	surface := ctx.SurfaceView()
+	if surface == nil {
+		return nil
+	}
+	framebufferW, framebufferH = ctx.FramebufferSize()
+	if framebufferW <= 0 || framebufferH <= 0 {
+		framebufferW, framebufferH = width, height
+	}
+	pts := time.Duration(0)
+	if r.capture != nil && !r.capture.recordStarted.IsZero() {
+		pts = time.Since(r.capture.recordStarted)
+	}
+	submitted, err := r.gpu.DrawTargetWithCapture(
+		FrameTarget{View: surface, Texture: surface.Texture(), Width: framebufferW, Height: framebufferH, Format: r.gpu.format},
+		r.screen,
+		func(encoder *wgpu.CommandEncoder) error {
+			if r.capture != nil {
+				r.capture.encode(encoder, surface.Texture(), framebufferW, framebufferH, r.gpu.format, pts)
+			}
+			return nil
+		},
+		func() {
+			if r.capture != nil {
+				r.capture.afterSubmit()
+			}
+		},
+	)
 	if err != nil {
 		return err
 	}
@@ -832,57 +879,7 @@ func (r *runner) draw(ctx *gogpu.Context) error {
 		r.measuredFrames++
 	}
 	r.updateFPSCounter(time.Now())
-	return nil
-}
-
-func (r *runner) savePendingScreenshot(ctx *gogpu.Context) error {
-	requester, ok := r.game.(screenshotRequester)
-	if !ok {
-		return nil
-	}
-	path, ok := requester.ConsumeScreenshotRequest()
-	if !ok {
-		return nil
-	}
-	err := r.saveScreenshot(ctx, path)
-	requester.CompleteScreenshot(path, err)
-	return nil
-}
-
-func (r *runner) saveScreenshot(ctx *gogpu.Context, path string) error {
-	if r.gpu == nil || r.screen == nil {
-		return fmt.Errorf("renderer is not ready")
-	}
-	width, height := ctx.FramebufferSize()
-	if width <= 0 || height <= 0 {
-		bounds := r.screen.Bounds()
-		width, height = bounds.Dx(), bounds.Dy()
-	}
-	if width <= 0 || height <= 0 {
-		return fmt.Errorf("invalid screenshot size %dx%d", width, height)
-	}
-	var renderErr error
-	img, err := ctx.Renderer().RenderToImage(width, height, func(target *gogpu.Context) {
-		_, renderErr = r.gpu.Draw(target, r.screen)
-	})
-	if err != nil {
-		return err
-	}
-	if renderErr != nil {
-		return renderErr
-	}
-	file, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := file.Close(); err != nil {
-			glog.Warnf("screenshot close failed path=%s error=%v", path, err)
-		}
-	}()
-	if err := png.Encode(file, img); err != nil {
-		return err
-	}
+	r.finishCapture()
 	return nil
 }
 
