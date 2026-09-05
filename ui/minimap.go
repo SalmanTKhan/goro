@@ -13,6 +13,7 @@ import (
 	"github.com/gogpu/ui/event"
 	"github.com/gogpu/ui/geometry"
 	"github.com/gogpu/ui/widget"
+	"github.com/kivutar/goro/input"
 	"github.com/kivutar/goro/res"
 	"github.com/kivutar/goro/ui/rotheme"
 	worldstate "github.com/kivutar/goro/world"
@@ -36,33 +37,34 @@ var (
 )
 
 type Minimap struct {
-	mapName          string
-	img              image.Image
-	mapImageTried    bool
-	scaled           image.Image
-	scaledKey        string
-	arrow            image.Image
-	arrowLoadTried   bool
-	arrowVariants    [8]image.Image
-	window           Window
-	widget           *minimapWidget
-	hidden           bool
-	markerMap        string
-	markerX          int
-	markerY          int
-	markerDir        int
-	hasPosition      bool
-	visualKey        string
-	compass          map[uint8]minimapCompassMarker
-	compassRevision  uint64
-	compassDrawnRev  uint64
-	guild            map[uint32]minimapGuildMarker
-	guildRevision    uint64
-	guildDrawnRev    uint64
-	guildSnapshotRev uint64
-	guildSnapshotBuf []minimapGuildMarker
-	pendingMarker    bool
-	pendingMarkerOld minimapPlayerMarkerState
+	mapName               string
+	img                   image.Image
+	mapImageTried         bool
+	scaled                image.Image
+	scaledKey             string
+	arrow                 image.Image
+	arrowLoadTried        bool
+	arrowVariants         [8]image.Image
+	window                Window
+	widget                *minimapWidget
+	hidden                bool
+	controllerInteractive bool
+	markerMap             string
+	markerX               int
+	markerY               int
+	markerDir             int
+	hasPosition           bool
+	visualKey             string
+	compass               map[uint8]minimapCompassMarker
+	compassRevision       uint64
+	compassDrawnRev       uint64
+	guild                 map[uint32]minimapGuildMarker
+	guildRevision         uint64
+	guildDrawnRev         uint64
+	guildSnapshotRev      uint64
+	guildSnapshotBuf      []minimapGuildMarker
+	pendingMarker         bool
+	pendingMarkerOld      minimapPlayerMarkerState
 }
 
 type minimapRect struct {
@@ -101,7 +103,12 @@ func (m *Minimap) Update(ctx Context) bool {
 	width, height := ctx.UIScreenSize()
 	x, y, w, h := minimapBounds(width, height)
 	m.ensureWindow(w, h)
+	m.window.SetControllerNavigationPassthrough(!m.controllerInteractive)
 	if ctx.World == nil || m.hidden {
+		if ctx.World == nil {
+			m.controllerInteractive = false
+			m.window.SetControllerNavigationPassthrough(true)
+		}
 		m.window.Close()
 		m.window.Unpublish(ctx)
 		m.hasPosition = false
@@ -138,7 +145,7 @@ func (m *Minimap) Update(ctx Context) bool {
 	drawPendingMarker := m.pendingMarker && !markerChanged
 	needsRedraw := fullRedraw || drawPendingMarker
 	if !m.window.IsOpen() {
-		m.window.OpenAt(x, y, m.widgetTree())
+		m.window.OpenAtContext(ctx, x, y, m.widgetTree())
 		needsPublish = true
 	} else {
 		if m.window.SetAutoPosition(x, y) {
@@ -177,10 +184,18 @@ func (m *Minimap) Update(ctx Context) bool {
 func (m *Minimap) Toggle(ctx Context) {
 	m.hidden = !m.hidden
 	if m.hidden {
+		m.controllerInteractive = false
+		m.window.SetControllerNavigationPassthrough(true)
 		m.window.Close()
 		m.window.Unpublish(ctx)
 		return
 	}
+	// The normal world minimap is passive HUD. An explicit map toggle is the
+	// controller's open action, so the next controller press can close it and
+	// the same scope can own navigation without stealing the movement stick in
+	// every world frame.
+	m.controllerInteractive = true
+	m.window.SetControllerNavigationPassthrough(false)
 	m.Update(ctx)
 }
 
@@ -191,6 +206,16 @@ func (m *Minimap) ensureWindow(width, height int) {
 	m.window = NewWindow(width, height)
 	m.window.SetBackground(widget.Color{})
 	m.window.CloseOnEsc = false
+	m.window.SetControllerNavigationPassthrough(true)
+	m.window.SetControllerActionHandler(func(action input.UIAction) bool {
+		if action != input.UIActionCancel {
+			return false
+		}
+		if !m.hidden {
+			m.Toggle(m.window.ctx)
+		}
+		return true
+	})
 }
 
 func (m *Minimap) widgetTree() widget.Widget {

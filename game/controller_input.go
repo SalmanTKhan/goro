@@ -83,7 +83,7 @@ func (m *WorldMode) applyControllerActions(ctx client.Context, actions input.Act
 	// The triggers double as shortcut modifiers, so zoom is suppressed on any
 	// frame a shortcut fires: shortcuts are face-button edges, zoom is the
 	// continuous analog reading.
-	if actions.ZoomDelta != 0 && !actions.ShortcutPressed() && !m.mapPointerBlocked(ctx) {
+	if actions.ZoomDelta != 0 && !actions.ShortcutPressed() && !ctx.Input.ControllerZoomConsumed() && !m.mapPointerBlocked(ctx) {
 		now := time.Now()
 		if m.controllerZoomAt.IsZero() || now.Sub(m.controllerZoomAt) >= controllerZoomInterval {
 			m.controllerZoomAt = now
@@ -126,7 +126,8 @@ func (m *WorldMode) applyControllerActions(ctx client.Context, actions input.Act
 		m.ApplyPlayerCommand(ctx, input.PlayerCommand{Kind: input.CommandResetCamera})
 	}
 	for slot := 0; slot < 8; slot++ {
-		if pressed.Has(input.ActionShortcut1 + input.Action(slot)) {
+		action := input.ActionShortcut1 + input.Action(slot)
+		if pressed.Has(action) && !ctx.Input.ControllerActionConsumed(action) {
 			m.ApplyPlayerCommand(ctx, input.PlayerCommand{
 				Kind: input.CommandUseShortcut,
 				Slot: uint16(slot),

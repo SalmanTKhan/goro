@@ -12,6 +12,7 @@ import (
 	"github.com/gogpu/ui/primitives"
 	"github.com/gogpu/ui/widget"
 	"github.com/kivutar/goro/db"
+	"github.com/kivutar/goro/input"
 	"github.com/kivutar/goro/render"
 	"github.com/kivutar/goro/res"
 	"github.com/kivutar/goro/session"
@@ -96,6 +97,7 @@ var (
 
 func (w *EquipmentWindow) Toggle(ctx Context) {
 	w.EnsureWindow(equipmentWindowWidth, equipmentWindowHeight)
+	w.configureControllerNavigation()
 	if w.IsOpen() {
 		w.hideTooltip()
 		w.Window.Close()
@@ -112,6 +114,7 @@ func (w *EquipmentWindow) Toggle(ctx Context) {
 
 func (w *EquipmentWindow) Update(ctx Context, itemInfo *ItemInfoWindow, cart *CartWindow, assets AssetProvider) bool {
 	w.EnsureWindow(equipmentWindowWidth, equipmentWindowHeight)
+	w.configureControllerNavigation()
 	if !w.IsOpen() {
 		w.hideTooltip()
 		return false
@@ -262,6 +265,10 @@ func (w *EquipmentWindow) slotWidget(ctx Context, itemInfo *ItemInfoWindow, slot
 			w.hideTooltip()
 			w.activateItem(ctx, item)
 		},
+		onControllerClick: func(item session.InventoryItem) {
+			w.hideTooltip()
+			w.takeoffItem(ctx, item)
+		},
 		onHover: func(item session.InventoryItem) { w.showTooltip(ctx, item) },
 		onLeave: func() { w.hideTooltip() },
 		onRightClick: func(item session.InventoryItem) {
@@ -274,6 +281,17 @@ func (w *EquipmentWindow) slotWidget(ctx Context, itemInfo *ItemInfoWindow, slot
 				itemInfo.openItem(ctx, item, x, y)
 			}
 		},
+	})
+}
+
+func (w *EquipmentWindow) configureControllerNavigation() {
+	w.SetControllerActionHandler(func(action input.UIAction) bool {
+		if action != input.UIActionCancel || w == nil || !w.IsOpen() {
+			return false
+		}
+		w.hideTooltip()
+		w.Close()
+		return true
 	})
 }
 
@@ -394,6 +412,18 @@ func (w *EquipmentWindow) activateItem(ctx Context, item session.InventoryItem) 
 	}
 }
 
+// takeoffItem is the direct controller activation path. Mouse interaction
+// retains its historical double-click behavior, while a focused equipment slot
+// has an unambiguous single-press action on a gamepad.
+func (w *EquipmentWindow) takeoffItem(ctx Context, item session.InventoryItem) {
+	if ctx.Network == nil {
+		return
+	}
+	if err := ctx.Network.SendTakeoffEquip(item.Index); err != nil {
+		return
+	}
+}
+
 func (w *EquipmentWindow) removeOption(ctx Context) {
 	if ctx.Network == nil {
 		return
@@ -436,16 +466,17 @@ func equipmentSnapshot(s *session.Session) string {
 }
 
 type equipmentSlotWidgetConfig struct {
-	slot         equipmentSlotDef
-	item         session.InventoryItem
-	icon         image.Image
-	hasItem      bool
-	width        int
-	res          *res.Manager
-	onClick      func(session.InventoryItem)
-	onHover      func(session.InventoryItem)
-	onLeave      func()
-	onRightClick func(session.InventoryItem)
+	slot              equipmentSlotDef
+	item              session.InventoryItem
+	icon              image.Image
+	hasItem           bool
+	width             int
+	res               *res.Manager
+	onClick           func(session.InventoryItem)
+	onControllerClick func(session.InventoryItem)
+	onHover           func(session.InventoryItem)
+	onLeave           func()
+	onRightClick      func(session.InventoryItem)
 }
 
 type equipmentSlotWidget struct {
@@ -537,7 +568,9 @@ func (w *equipmentSlotWidget) Event(ctx widget.Context, e event.Event) bool {
 	}
 	if key, ok := e.(*event.KeyEvent); ok {
 		if key.KeyType != event.KeyRelease && w.IsFocused() && w.IsFocusable() && (key.Key == event.KeyEnter || key.Key == event.KeySpace) {
-			if w.cfg.onClick != nil {
+			if w.cfg.onControllerClick != nil {
+				w.cfg.onControllerClick(w.cfg.item)
+			} else if w.cfg.onClick != nil {
 				w.cfg.onClick(w.cfg.item)
 			}
 			return true

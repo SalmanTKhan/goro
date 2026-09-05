@@ -63,19 +63,21 @@ var inventoryBagTabs = []struct {
 
 type InventoryBagWindow struct {
 	Window
-	tab           int
-	scrollY       state.Signal[float32]
-	snapshot      string
-	itemInfo      *ItemInfoWindow
-	lastClickItem uint16
-	lastClickAt   time.Time
-	dragItem      session.InventoryItem
-	dragActive    bool
-	dragFrom      time.Time
-	pendingCard   uint16
-	tooltip       tooltipState
-	icons         map[inventoryBagIconKey]image.Image
-	iconMiss      map[inventoryBagIconKey]struct{}
+	tab            int
+	scrollY        state.Signal[float32]
+	snapshot       string
+	itemInfo       *ItemInfoWindow
+	lastClickItem  uint16
+	lastClickAt    time.Time
+	dragItem       session.InventoryItem
+	dragActive     bool
+	dragFrom       time.Time
+	pendingCard    uint16
+	tooltip        tooltipState
+	icons          map[inventoryBagIconKey]image.Image
+	iconMiss       map[inventoryBagIconKey]struct{}
+	controllerGrid *inventoryGridWidget
+	controllerTabs []*tabWidget
 }
 
 type inventoryBagIconKey struct {
@@ -85,6 +87,8 @@ type inventoryBagIconKey struct {
 
 func (w *InventoryBagWindow) Toggle(ctx Context) {
 	w.EnsureWindow(inventoryBagWidth, inventoryBagHeight)
+	w.ctx = ctx
+	w.configureControllerNavigation()
 	if w.IsOpen() {
 		w.hideTooltip()
 		w.Window.Close()
@@ -95,12 +99,13 @@ func (w *InventoryBagWindow) Toggle(ctx Context) {
 	w.ClampScroll(ctx.Session)
 	w.snapshot = w.inventorySnapshot(ctx.Session)
 	x, y := inventoryBagDefaultPosition(ctx)
-	w.OpenAt(x, y, w.widgetTree(ctx, nil))
+	w.OpenAtContext(ctx, x, y, w.widgetTree(ctx, nil))
 	w.Publish(ctx)
 }
 
 func (w *InventoryBagWindow) Update(ctx Context, shortcuts *ShortcutBar, storage *StorageWindow, cart *CartWindow, trade *TradeWindow, equipment *EquipmentWindow, itemInfo *ItemInfoWindow) bool {
 	w.EnsureWindow(inventoryBagWidth, inventoryBagHeight)
+	w.configureControllerNavigation()
 	if !w.IsOpen() || ctx.Input == nil {
 		w.hideTooltip()
 		return false
@@ -202,8 +207,13 @@ func (w *InventoryBagWindow) widgetTree(ctx Context, itemInfo *ItemInfoWindow) w
 		amounts:   inventoryGridAmountLabels(items),
 		viewWidth: inventoryBagViewW,
 		onPress:   func(item session.InventoryItem) { w.startItemDragOrActivate(ctx, item) },
-		onHover:   func(item session.InventoryItem) { w.showTooltip(ctx, item) },
-		onLeave:   func() { w.hideTooltip() },
+		onControllerPress: func(item session.InventoryItem) {
+			w.activateItem(ctx, item)
+			w.lastClickItem = 0
+			w.refresh(ctx, w.itemInfo)
+		},
+		onHover: func(item session.InventoryItem) { w.showTooltip(ctx, item) },
+		onLeave: func() { w.hideTooltip() },
 		onRightClick: func(item session.InventoryItem, mx, my int) {
 			w.hideTooltip()
 			w.dragActive = false
@@ -213,6 +223,7 @@ func (w *InventoryBagWindow) widgetTree(ctx Context, itemInfo *ItemInfoWindow) w
 			}
 		},
 	})
+	w.controllerGrid = grid
 	scroll := scrollview.New(
 		grid,
 		scrollview.DirectionOpt(scrollview.Vertical),
@@ -241,9 +252,10 @@ func (w *InventoryBagWindow) widgetTree(ctx Context, itemInfo *ItemInfoWindow) w
 
 func (w *InventoryBagWindow) tabColumn(ctx Context) widget.Widget {
 	tabs := make([]widget.Widget, 0, len(inventoryBagTabs))
+	w.controllerTabs = w.controllerTabs[:0]
 	for _, tab := range inventoryBagTabs {
 		tab := tab
-		tabs = append(tabs, newTabWidget(tabWidgetConfig{
+		tabButton := newTabWidget(tabWidgetConfig{
 			label:         tab.label,
 			labelRotation: rotheme.TextRotationCounterClockwise,
 			active:        tab.tab == w.tab,
@@ -256,12 +268,73 @@ func (w *InventoryBagWindow) tabColumn(ctx Context) widget.Widget {
 				w.lastClickItem = 0
 				w.refresh(ctx, w.itemInfo)
 			},
-		}))
+		})
+		tabs = append(tabs, tabButton)
+		w.controllerTabs = append(w.controllerTabs, tabButton)
 	}
 	return primitives.Box(tabs...).
 		Width(inventoryBagTabRail).
 		Height(inventoryBagViewH).
 		Gap(-inventoryBagTabOver)
+}
+
+func (w *InventoryBagWindow) configureControllerNavigation() {
+	w.SetControllerActionHandler(w.handleControllerAction)
+	w.SetControllerInitialFocus(func(_ widget.Widget) widget.Widget {
+		for _, tab := range w.controllerTabs {
+			if tab != nil && tab.cfg.active && tab.IsFocusable() {
+				return tab
+			}
+		}
+		if w.controllerGrid != nil && w.controllerGrid.IsFocusable() {
+			return w.controllerGrid
+		}
+		return nil
+	})
+}
+
+func (w *InventoryBagWindow) handleControllerAction(action input.UIAction) bool {
+	if w == nil || !w.IsOpen() {
+		return false
+	}
+	ctx := w.ctx
+	switch action {
+	case input.UIActionCancel:
+		w.Close()
+		return true
+	case input.UIActionContext:
+		if item, ok := w.controllerGrid.focusedItem(); ok && w.itemInfo != nil {
+			w.itemInfo.openItem(ctx, item, w.x+inventoryBagTabRail+w.controllerGrid.cellSize()/2, w.y+ROWindowTitleHeight+inventoryBagCell/2)
+		}
+		return true
+	case input.UIActionSecondary:
+		return true
+	case input.UIActionNextFocus, input.UIActionPreviousFocus:
+		if len(w.controllerTabs) < 2 {
+			return false
+		}
+		focused := w.tab
+		for i, tab := range w.controllerTabs {
+			if tab != nil && tab.cfg.active {
+				focused = i
+				break
+			}
+		}
+		step := 1
+		if action == input.UIActionPreviousFocus {
+			step = -1
+		}
+		next := (focused + step + len(w.controllerTabs)) % len(w.controllerTabs)
+		if callback := w.controllerTabs[next].cfg.onClick; callback != nil {
+			callback()
+		}
+		if app, ok := ctx.UIApp.(interface{ FocusControllerWidget(widget.Widget) bool }); ok && next < len(w.controllerTabs) {
+			app.FocusControllerWidget(w.controllerTabs[next])
+		}
+		return true
+	default:
+		return false
+	}
 }
 
 func (w *InventoryBagWindow) refresh(ctx Context, itemInfo *ItemInfoWindow) {
@@ -502,17 +575,18 @@ func inventoryGridAmountLabels(items []session.InventoryItem) []string {
 }
 
 type inventoryGridConfig struct {
-	items        []session.InventoryItem
-	icons        []image.Image
-	amounts      []string
-	cols         int
-	minRows      int
-	cellSize     int
-	viewWidth    int
-	onPress      func(session.InventoryItem)
-	onHover      func(session.InventoryItem)
-	onLeave      func()
-	onRightClick func(session.InventoryItem, int, int)
+	items             []session.InventoryItem
+	icons             []image.Image
+	amounts           []string
+	cols              int
+	minRows           int
+	cellSize          int
+	viewWidth         int
+	onPress           func(session.InventoryItem)
+	onControllerPress func(session.InventoryItem)
+	onHover           func(session.InventoryItem)
+	onLeave           func()
+	onRightClick      func(session.InventoryItem, int, int)
 }
 
 type inventoryGridWidget struct {
@@ -520,6 +594,20 @@ type inventoryGridWidget struct {
 	cfg     inventoryGridConfig
 	hovered int
 	focused int
+}
+
+func (w *inventoryGridWidget) focusedItem() (session.InventoryItem, bool) {
+	if w == nil {
+		return session.InventoryItem{}, false
+	}
+	focused := w.focused
+	if focused < 0 && w.IsFocused() {
+		focused = 0
+	}
+	if focused < 0 || focused >= len(w.cfg.items) {
+		return session.InventoryItem{}, false
+	}
+	return w.cfg.items[focused], true
 }
 
 func newInventoryGridWidget(cfg inventoryGridConfig) *inventoryGridWidget {
@@ -569,8 +657,12 @@ func (w *inventoryGridWidget) Draw(ctx widget.Context, canvas widget.Canvas) {
 			rotheme.DrawText(canvas, "E", geometry.NewRect(cell.Min.X+2, cell.Min.Y+2, 12, 12), rotheme.Default.Typography.TextSize, widget.RGBA8(54, 128, 76, 255), false, widget.TextAlignLeft)
 		}
 	}
-	if w.focused >= startIndex && w.focused < endIndex {
-		canvas.StrokeRect(w.cellBounds(w.focused).Inset(geometry.UniformInsets(-2)), rotheme.Default.Colors.InputFocus, 2)
+	focused := w.focused
+	if focused < 0 && w.IsFocused() {
+		focused = 0
+	}
+	if focused >= startIndex && focused < endIndex {
+		canvas.StrokeRect(w.cellBounds(focused).Inset(geometry.UniformInsets(-2)), rotheme.Default.Colors.InputFocus, 2)
 	}
 }
 
@@ -698,8 +790,12 @@ func (w *inventoryGridWidget) handleControllerKey(key event.Key) bool {
 	case event.KeyPageDown:
 		next += cols * maxInt(1, w.minRows())
 	case event.KeyEnter, event.KeyNumpadEnter, event.KeySpace:
-		if w.focused < len(w.cfg.items) && w.cfg.onPress != nil {
-			w.cfg.onPress(w.cfg.items[w.focused])
+		if item, ok := w.focusedItem(); ok {
+			if w.cfg.onControllerPress != nil {
+				w.cfg.onControllerPress(item)
+			} else if w.cfg.onPress != nil {
+				w.cfg.onPress(item)
+			}
 		}
 		return true
 	default:

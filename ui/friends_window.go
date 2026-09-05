@@ -8,6 +8,7 @@ import (
 	"github.com/gogpu/ui/geometry"
 	"github.com/gogpu/ui/primitives"
 	"github.com/gogpu/ui/widget"
+	"github.com/kivutar/goro/input"
 	"github.com/kivutar/goro/session"
 	"github.com/kivutar/goro/ui/rotheme"
 )
@@ -28,6 +29,9 @@ type FriendsWindow struct {
 	action           FriendsWindowAction
 	contextMenu      FriendContextMenu
 	partyContextMenu PartyContextMenu
+	controllerTabs   []*tabWidget
+	friendRows       []*friendRowWidget
+	partyRows        []*partyRowWidget
 }
 
 type friendsWindowTab int
@@ -74,6 +78,7 @@ func (w *FriendsWindow) Toggle(ctx Context) {
 
 func (w *FriendsWindow) OpenWindow(ctx Context) {
 	w.EnsureWindow(friendsWindowWidth, friendsWindowHeight)
+	w.configureControllerNavigation()
 	w.ctx = ctx
 	w.snapshot = friendsWindowSnapshot(ctx.Session)
 	w.tab = friendsWindowTabFriends
@@ -89,6 +94,7 @@ func (w *FriendsWindow) Close() {
 
 func (w *FriendsWindow) Update(ctx Context) bool {
 	w.EnsureWindow(friendsWindowWidth, friendsWindowHeight)
+	w.configureControllerNavigation()
 	w.ctx = ctx
 	if w.drainContextMenuAction() {
 		return true
@@ -180,29 +186,109 @@ func (w *FriendsWindow) widgetTree(ctx Context) widget.Widget {
 }
 
 func (w *FriendsWindow) friendsTabs() widget.Widget {
+	w.controllerTabs = w.controllerTabs[:0]
+	friendsTab := newTabWidget(tabWidgetConfig{
+		label:  "Friends",
+		active: w.tab == friendsWindowTabFriends,
+		width:  friendsTabWidth,
+		height: friendsTabHeight,
+		onClick: func() {
+			w.tab = friendsWindowTabFriends
+			w.refresh(w.ctx)
+		},
+	})
+	partyTab := newTabWidget(tabWidgetConfig{
+		label:  "Party",
+		active: w.tab == friendsWindowTabParty,
+		width:  friendsTabWidth,
+		height: friendsTabHeight,
+		onClick: func() {
+			w.tab = friendsWindowTabParty
+			w.refresh(w.ctx)
+		},
+	})
+	w.controllerTabs = append(w.controllerTabs, friendsTab, partyTab)
 	return primitives.HBox(
-		newTabWidget(tabWidgetConfig{
-			label:  "Friends",
-			active: w.tab == friendsWindowTabFriends,
-			width:  friendsTabWidth,
-			height: friendsTabHeight,
-			onClick: func() {
-				w.tab = friendsWindowTabFriends
-				w.refresh(w.ctx)
-			},
-		}),
-		newTabWidget(tabWidgetConfig{
-			label:  "Party",
-			active: w.tab == friendsWindowTabParty,
-			width:  friendsTabWidth,
-			height: friendsTabHeight,
-			onClick: func() {
-				w.tab = friendsWindowTabParty
-				w.refresh(w.ctx)
-			},
-		}),
+		friendsTab,
+		partyTab,
 		primitives.Expanded(primitives.Box()),
 	).Gap(-1)
+}
+
+func (w *FriendsWindow) configureControllerNavigation() {
+	w.SetControllerActionHandler(w.handleControllerAction)
+	w.SetControllerInitialFocus(func(_ widget.Widget) widget.Widget {
+		for _, tab := range w.controllerTabs {
+			if tab != nil && tab.cfg.active && tab.IsFocusable() {
+				return tab
+			}
+		}
+		for _, row := range w.friendRows {
+			if row != nil && row.IsFocusable() {
+				return row
+			}
+		}
+		for _, row := range w.partyRows {
+			if row != nil && row.IsFocusable() {
+				return row
+			}
+		}
+		return nil
+	})
+}
+
+func (w *FriendsWindow) handleControllerAction(action input.UIAction) bool {
+	if w == nil || !w.IsOpen() {
+		return false
+	}
+	switch action {
+	case input.UIActionCancel:
+		w.Close()
+		return true
+	case input.UIActionContext, input.UIActionSecondary:
+		for _, row := range w.friendRows {
+			if row != nil && row.IsFocused() {
+				if row.onMenu != nil {
+					row.onMenu(row.friend)
+				}
+				return true
+			}
+		}
+		for _, row := range w.partyRows {
+			if row != nil && row.IsFocused() {
+				if row.onMenu != nil {
+					row.onMenu(row.member)
+				}
+				return true
+			}
+		}
+		return true
+	case input.UIActionNextFocus, input.UIActionPreviousFocus:
+		if len(w.controllerTabs) < 2 {
+			return false
+		}
+		focused := int(w.tab)
+		for i, tab := range w.controllerTabs {
+			if tab != nil && tab.cfg.active {
+				focused = i
+				break
+			}
+		}
+		step := 1
+		if action == input.UIActionPreviousFocus {
+			step = -1
+		}
+		next := (focused + step + len(w.controllerTabs)) % len(w.controllerTabs)
+		if callback := w.controllerTabs[next].cfg.onClick; callback != nil {
+			callback()
+		}
+		if app, ok := w.ctx.UIApp.(interface{ FocusControllerWidget(widget.Widget) bool }); ok {
+			app.FocusControllerWidget(w.controllerTabs[next])
+		}
+		return true
+	default:
+		return false
+	}
 }
 
 func (w *FriendsWindow) refresh(ctx Context) {
@@ -249,12 +335,15 @@ func (w *FriendsWindow) friendsFooter() []widget.Widget {
 }
 
 func (w *FriendsWindow) friendsList(friends []session.Friend) widget.Widget {
+	w.friendRows = w.friendRows[:0]
 	rows := make([]widget.Widget, 0, maxInt(1, len(friends)))
 	if len(friends) == 0 {
 		rows = append(rows, emptyFriendsList("No friends"))
 	} else {
 		for i, friend := range friends {
-			rows = append(rows, w.friendRow(friend, i))
+			row := w.friendRow(friend, i)
+			rows = append(rows, row)
+			w.friendRows = append(w.friendRows, row)
 		}
 	}
 	return primitives.Box(rows...).
@@ -280,7 +369,7 @@ func friendsList(friends []session.Friend) widget.Widget {
 	return window.friendsList(friends)
 }
 
-func (w *FriendsWindow) friendRow(friend session.Friend, index int) widget.Widget {
+func (w *FriendsWindow) friendRow(friend session.Friend, index int) *friendRowWidget {
 	state := "Offline"
 	stateColor := rotheme.Default.Colors.MutedText
 	if friend.Online() {
@@ -319,14 +408,27 @@ func (w *FriendsWindow) friendRow(friend session.Friend, index int) widget.Widge
 
 type friendRowWidget struct {
 	widget.WidgetBase
-	friend     session.Friend
-	name       string
-	state      string
-	stateColor widget.Color
-	bg         widget.Color
-	hovered    bool
-	onWhisper  func(session.Friend)
-	onMenu     func(session.Friend)
+	friend         session.Friend
+	name           string
+	state          string
+	stateColor     widget.Color
+	bg             widget.Color
+	hovered        bool
+	onWhisper      func(session.Friend)
+	onMenu         func(session.Friend)
+	controllerMode bool
+}
+
+func (w *friendRowWidget) IsFocusable() bool {
+	return w != nil && w.IsVisible() && w.IsEnabled()
+}
+
+func (w *friendRowWidget) SetControllerMode(enabled bool) {
+	if w == nil {
+		return
+	}
+	w.controllerMode = enabled
+	w.SetNeedsRedraw(true)
 }
 
 func (w *friendRowWidget) Layout(_ widget.Context, constraints geometry.Constraints) geometry.Size {
@@ -345,9 +447,21 @@ func (w *friendRowWidget) Draw(_ widget.Context, canvas widget.Canvas) {
 	textY := bounds.Min.Y + (bounds.Height()-14)/2
 	rotheme.DrawText(canvas, trimRunes(w.name, 24), geometry.NewRect(bounds.Min.X+8, textY, bounds.Width()-88, 14), rotheme.Default.Typography.TextSize, rotheme.Default.Colors.Text, false, widget.TextAlignLeft)
 	rotheme.DrawText(canvas, w.state, geometry.NewRect(bounds.Max.X-72, textY, 64, 14), rotheme.Default.Typography.TextSize, w.stateColor, false, widget.TextAlignRight)
+	if w.controllerMode && w.IsFocused() {
+		canvas.StrokeRect(bounds.Expand(2), rotheme.Default.Colors.InputFocus, 2)
+	}
 }
 
 func (w *friendRowWidget) Event(ctx widget.Context, e event.Event) bool {
+	if key, ok := e.(*event.KeyEvent); ok {
+		if key.KeyType != event.KeyRelease && w.IsFocused() && w.IsFocusable() && (key.Key == event.KeyEnter || key.Key == event.KeyNumpadEnter || key.Key == event.KeySpace) {
+			if w.onWhisper != nil {
+				w.onWhisper(w.friend)
+			}
+			return true
+		}
+		return false
+	}
 	mouse, ok := e.(*event.MouseEvent)
 	if !ok {
 		return false
@@ -399,13 +513,16 @@ func partyList(party session.Party) widget.Widget {
 }
 
 func (w *FriendsWindow) partyList(ctx Context, party session.Party) widget.Widget {
+	w.partyRows = w.partyRows[:0]
 	members := party.Members
 	rows := make([]widget.Widget, 0, maxInt(1, len(members)))
 	if len(members) == 0 {
 		rows = append(rows, emptyFriendsList("No party"))
 	} else {
 		for i, member := range members {
-			rows = append(rows, w.partyRow(ctx, member, i))
+			row := w.partyRow(ctx, member, i)
+			rows = append(rows, row)
+			w.partyRows = append(w.partyRows, row)
 		}
 	}
 	return primitives.Box(rows...).
@@ -413,7 +530,7 @@ func (w *FriendsWindow) partyList(ctx Context, party session.Party) widget.Widge
 		CrossAlign(primitives.CrossAxisStretch)
 }
 
-func (w *FriendsWindow) partyRow(ctx Context, member session.PartyMember, index int) widget.Widget {
+func (w *FriendsWindow) partyRow(ctx Context, member session.PartyMember, index int) *partyRowWidget {
 	bg := rotheme.Default.Colors.WindowBody
 	if index%2 == 0 {
 		bg = Color(PanelAltColor)
@@ -459,17 +576,30 @@ func (w *FriendsWindow) partyRow(ctx Context, member session.PartyMember, index 
 
 type partyRowWidget struct {
 	widget.WidgetBase
-	member     session.PartyMember
-	name       string
-	state      string
-	stateColor widget.Color
-	bg         widget.Color
-	hp         int
-	maxHP      int
-	canManage  bool
-	isSelf     bool
-	hovered    bool
-	onMenu     func(session.PartyMember)
+	member         session.PartyMember
+	name           string
+	state          string
+	stateColor     widget.Color
+	bg             widget.Color
+	hp             int
+	maxHP          int
+	canManage      bool
+	isSelf         bool
+	hovered        bool
+	onMenu         func(session.PartyMember)
+	controllerMode bool
+}
+
+func (w *partyRowWidget) IsFocusable() bool {
+	return w != nil && w.IsVisible() && w.IsEnabled()
+}
+
+func (w *partyRowWidget) SetControllerMode(enabled bool) {
+	if w == nil {
+		return
+	}
+	w.controllerMode = enabled
+	w.SetNeedsRedraw(true)
 }
 
 func (w *partyRowWidget) Layout(_ widget.Context, constraints geometry.Constraints) geometry.Size {
@@ -501,9 +631,21 @@ func (w *partyRowWidget) Draw(_ widget.Context, canvas widget.Canvas) {
 		canvas.DrawRect(geometry.NewRect(bar.Min.X, bar.Min.Y, fillW, bar.Height()), Color(PlayerHPBarColor))
 	}
 	canvas.StrokeRect(bar, rotheme.Default.Colors.WindowBorder, 1)
+	if w.controllerMode && w.IsFocused() {
+		canvas.StrokeRect(bounds.Expand(2), rotheme.Default.Colors.InputFocus, 2)
+	}
 }
 
 func (w *partyRowWidget) Event(ctx widget.Context, e event.Event) bool {
+	if key, ok := e.(*event.KeyEvent); ok {
+		if key.KeyType != event.KeyRelease && w.IsFocused() && w.IsFocusable() && (key.Key == event.KeyEnter || key.Key == event.KeyNumpadEnter || key.Key == event.KeySpace) {
+			if w.onMenu != nil {
+				w.onMenu(w.member)
+			}
+			return true
+		}
+		return false
+	}
 	mouse, ok := e.(*event.MouseEvent)
 	if !ok {
 		return false

@@ -7,6 +7,7 @@ import (
 	"github.com/gogpu/ui/primitives"
 	"github.com/gogpu/ui/widget"
 	"github.com/kivutar/goro/client"
+	"github.com/kivutar/goro/input"
 )
 
 type Manager struct {
@@ -230,7 +231,17 @@ func (m *Manager) ControllerUIActive() bool {
 		if passive, ok := overlay.(interface{ ControllerNavigationPassthrough() bool }); ok && passive.ControllerNavigationPassthrough() {
 			continue
 		}
-		return controllerTreeHasFocusable(overlay)
+		if controllerTreeHasFocusable(overlay) {
+			return true
+		}
+		// Some overlays (for example the map) intentionally expose no
+		// focusable child but still own semantic controller actions such as
+		// Circle-to-close. Keep those overlays modal for the controller so the
+		// same press cannot fall through to gameplay.
+		_, semantic := overlay.(interface {
+			HandleControllerAction(input.UIAction) bool
+		})
+		return semantic
 	}
 	return false
 }

@@ -55,6 +55,8 @@ var basicMenuButtons = []basicMenuButton{
 
 func (m *BasicMenu) Update(ctx client.Context, callbacks BasicMenuCallbacks) bool {
 	m.callbacks = callbacks
+	m.SetControllerNavigationPassthrough(true)
+	m.SetControllerNavigationEntryPoint(true)
 	width, height := basicMenuSize()
 	if m.EnsureWindow(width, height) {
 		m.titleHeight = 0

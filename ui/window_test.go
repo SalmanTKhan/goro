@@ -3,6 +3,7 @@ package ui
 import (
 	"testing"
 
+	"github.com/gogpu/ui/core/button"
 	"github.com/gogpu/ui/event"
 	"github.com/gogpu/ui/geometry"
 	"github.com/gogpu/ui/primitives"
@@ -10,7 +11,65 @@ import (
 	"github.com/gogpu/ui/widget"
 	"github.com/kivutar/goro/client"
 	"github.com/kivutar/goro/input"
+	"github.com/kivutar/goro/session"
 )
+
+func TestWindowControllerInitialFocusPrefersBodyOverCloseButton(t *testing.T) {
+	body := button.New(button.TextOpt("Body"))
+	window := NewWindow(180, 100)
+	window.OpenAt(10, 20, Win(
+		Title("Window"),
+		CloseButton(true),
+		Content(primitives.Box(body)),
+	))
+
+	if got := window.ControllerInitialFocus(); got != body {
+		t.Fatalf("initial controller focus = %T, want body button %T", got, body)
+	}
+}
+
+func TestEquipmentSlotControllerActivationDoesNotRequireMouseDoubleClick(t *testing.T) {
+	item := session.InventoryItem{Index: 7, ItemID: 501}
+	mouseCalls := 0
+	controllerCalls := 0
+	slot := newEquipmentSlotWidget(equipmentSlotWidgetConfig{
+		slot:    equipmentSlotWeapon,
+		item:    item,
+		hasItem: true,
+		width:   equipmentLeftColW,
+		onClick: func(session.InventoryItem) { mouseCalls++ },
+		onControllerClick: func(session.InventoryItem) {
+			controllerCalls++
+		},
+	})
+	slot.SetFocused(true)
+
+	if !slot.Event(widget.NewContext(), event.NewKeyEvent(event.KeyPress, event.KeyEnter, 0, event.ModNone)) {
+		t.Fatal("controller activation was not consumed by the equipment slot")
+	}
+	if controllerCalls != 1 || mouseCalls != 0 {
+		t.Fatalf("controller calls=%d mouse calls=%d, want controller=1 mouse=0", controllerCalls, mouseCalls)
+	}
+}
+
+func TestInventoryGridControllerActivationUsesDirectCallback(t *testing.T) {
+	item := session.InventoryItem{Index: 3, ItemID: 501}
+	moused := false
+	controlled := false
+	grid := newInventoryGridWidget(inventoryGridConfig{
+		items:             []session.InventoryItem{item},
+		onPress:           func(session.InventoryItem) { moused = true },
+		onControllerPress: func(session.InventoryItem) { controlled = true },
+	})
+	grid.SetFocused(true)
+
+	if !grid.handleControllerKey(event.KeyEnter) {
+		t.Fatal("controller activation was not consumed by the inventory grid")
+	}
+	if !controlled || moused {
+		t.Fatalf("controller callback=%t mouse callback=%t, want controller=true mouse=false", controlled, moused)
+	}
+}
 
 func TestFooterStretchesContent(t *testing.T) {
 	button := primitives.Box().Width(30).Height(10)

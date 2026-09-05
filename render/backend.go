@@ -103,12 +103,21 @@ type uiAppReceiver interface {
 
 type uiAppBridge struct {
 	*uiapp.App
-	runner         *runner
-	uiManager      client.UIManager
-	controllerMode bool
+	runner                 *runner
+	uiManager              client.UIManager
+	controllerMode         bool
+	controllerScope        widget.Widget
+	controllerRestoreFocus widget.Focusable
+	controllerFocusStack   []controllerFocusFrame
+	controllerLastFocus    widget.Focusable
 }
 
-func (b uiAppBridge) SetUIRoot(root widget.Widget) {
+type controllerFocusFrame struct {
+	scope widget.Widget
+	focus widget.Focusable
+}
+
+func (b *uiAppBridge) SetUIRoot(root widget.Widget) {
 	if b.App != nil {
 		b.App.SetRoot(root)
 		if b.controllerMode {
@@ -211,6 +220,7 @@ func (b *uiAppBridge) focusControllerWidget(focus widget.Focusable) bool {
 	manager := b.App.Window().FocusManager()
 	previous := manager.Focused()
 	manager.Focus(focus)
+	b.controllerLastFocus = manager.Focused()
 	b.controllerFocusChanged(previous, manager.Focused())
 	return true
 }
@@ -255,6 +265,7 @@ func (b *uiAppBridge) HandleControllerAction(action input.UIAction) bool {
 	window := b.App.Window()
 	root := window.Root()
 	scope := controllerFocusScope(root)
+	b.syncControllerScope(scope)
 	focused := window.FocusManager().Focused()
 	if focused == nil || !widgetInTree(scope, focusedWidget(focused)) {
 		// Some windows establish their initial focus by setting the widget's
@@ -265,7 +276,7 @@ func (b *uiAppBridge) HandleControllerAction(action input.UIAction) bool {
 			b.focusControllerWidget(candidate)
 			focused = candidate
 		} else {
-			focused = nil
+			focused = b.focusInitialControllerScope(scope)
 		}
 	}
 	// Give packet-driven modal windows (NPC dialogs, trade prompts, and other
@@ -293,6 +304,12 @@ func (b *uiAppBridge) HandleControllerAction(action input.UIAction) bool {
 			}
 		}
 	}
+	if action == input.UIActionContext || action == input.UIActionSecondary {
+		// These face-button roles have no framework key equivalent. A concrete
+		// window may consume them through its semantic handler; otherwise the
+		// active overlay still owns the press and prevents gameplay fallthrough.
+		return scope != root
+	}
 	if action == input.UIActionNextFocus || action == input.UIActionPreviousFocus {
 		focusables := collectFocusable(scope)
 		if len(focusables) == 0 {
@@ -300,6 +317,7 @@ func (b *uiAppBridge) HandleControllerAction(action input.UIAction) bool {
 		}
 		previous := window.FocusManager().Focused()
 		cycleControllerFocus(window.FocusManager(), focusables, action == input.UIActionNextFocus)
+		b.controllerLastFocus = window.FocusManager().Focused()
 		b.controllerFocusChanged(previous, window.FocusManager().Focused())
 		return true
 	}
@@ -356,11 +374,70 @@ func (b *uiAppBridge) HandleControllerAction(action input.UIAction) bool {
 	return eventRoot != root
 }
 
+// syncControllerScope makes opening and closing windows deterministic for a
+// controller. A newly active scope gets its own initial target; returning to a
+// scope restores the focus that was active before the child window opened.
+func (b *uiAppBridge) syncControllerScope(scope widget.Widget) {
+	if b == nil || b.App == nil || b.App.Window() == nil || scope == b.controllerScope {
+		return
+	}
+	window := b.App.Window()
+	previousScope := b.controllerScope
+	previousFocus := window.FocusManager().Focused()
+	if previousFocus == nil {
+		previousFocus = b.controllerLastFocus
+	}
+	returning := false
+	if n := len(b.controllerFocusStack); n > 0 && b.controllerFocusStack[n-1].scope == scope {
+		b.controllerRestoreFocus = b.controllerFocusStack[n-1].focus
+		b.controllerFocusStack = b.controllerFocusStack[:n-1]
+		returning = true
+	}
+	if !returning && previousScope != nil && previousFocus != nil && widgetInTree(previousScope, focusedWidget(previousFocus)) {
+		b.controllerFocusStack = append(b.controllerFocusStack, controllerFocusFrame{scope: previousScope, focus: previousFocus})
+	}
+	b.controllerScope = scope
+	if scope == nil {
+		return
+	}
+	if b.controllerRestoreFocus != nil && widgetInTree(scope, focusedWidget(b.controllerRestoreFocus)) && b.controllerRestoreFocus.IsFocusable() {
+		b.focusControllerWidget(b.controllerRestoreFocus)
+		b.controllerRestoreFocus = nil
+		return
+	}
+	b.controllerRestoreFocus = nil
+	b.focusInitialControllerScope(scope)
+}
+
+func (b *uiAppBridge) focusInitialControllerScope(scope widget.Widget) widget.Focusable {
+	if b == nil || b.App == nil || b.App.Window() == nil || scope == nil {
+		return nil
+	}
+	if hint, ok := scope.(interface{ ControllerInitialFocus() widget.Widget }); ok {
+		if target := hint.ControllerInitialFocus(); target != nil {
+			if focus, ok := target.(widget.Focusable); ok && focus.IsFocusable() {
+				b.focusControllerWidget(focus)
+				return focus
+			}
+		}
+	}
+	if focus := controllerFocusedWidget(scope); focus != nil {
+		b.focusControllerWidget(focus)
+		return focus
+	}
+	if focusables := collectFocusable(scope); len(focusables) > 0 {
+		b.focusControllerWidget(focusables[0])
+		return focusables[0]
+	}
+	return nil
+}
+
 func controllerFocusScope(root widget.Widget) widget.Widget {
 	if root == nil {
 		return nil
 	}
 	children := root.Children()
+	var entryPoint widget.Widget
 	for i := len(children) - 1; i >= 0; i-- {
 		child := children[i]
 		if child == nil {
@@ -376,9 +453,15 @@ func controllerFocusScope(root widget.Widget) widget.Widget {
 		// not own controller focus. Resolve the modal/interactive overlay below
 		// it instead (for example an NPC dialog below the shortcut bar).
 		if passive, ok := child.(interface{ ControllerNavigationPassthrough() bool }); ok && passive.ControllerNavigationPassthrough() {
+			if entry, ok := child.(interface{ ControllerNavigationEntryPoint() bool }); ok && entry.ControllerNavigationEntryPoint() && entryPoint == nil {
+				entryPoint = child
+			}
 			continue
 		}
 		return child
+	}
+	if entryPoint != nil {
+		return entryPoint
 	}
 	return root
 }
@@ -792,34 +875,35 @@ type runner struct {
 	uiGeneration    uint64
 	uiDrag          uiDragLayer
 
-	lastUpdateDuration  time.Duration
-	lastGameUpdateDur   time.Duration
-	lastUIFrameDur      time.Duration
-	lastUIWork          bool
-	lastUIRedraw        bool
-	lastUIDrawDur       time.Duration
-	lastUICanvasDrawDur time.Duration
-	lastUIFlushDur      time.Duration
-	lastUIImageDur      time.Duration
-	lastUIDirtyRegions  int
-	lastUIFullRepaint   bool
-	lastUIDirtyUnion    geometry.Rect
-	lastUIDrawStats     widget.DrawStats
-	uiProfile           uiProfileStats
-	captureCfg          config.CaptureConfig
-	capture             *captureRuntime
-	controller          input.ControllerBackend
-	controllerSettings  input.ControllerSettings
-	uiBridge            *uiAppBridge
-	controllerNav       navRepeater
-	controllerRightNav  navRepeater
-	controllerPollError bool
-	events              *fanoutEventSource
-	cursor              input.VirtualCursor
-	controllerLastPoll  time.Time
-	injectingPointer    bool
-	cursorLeftDown      bool
-	controllerConnected bool
+	lastUpdateDuration   time.Duration
+	lastGameUpdateDur    time.Duration
+	lastUIFrameDur       time.Duration
+	lastUIWork           bool
+	lastUIRedraw         bool
+	lastUIDrawDur        time.Duration
+	lastUICanvasDrawDur  time.Duration
+	lastUIFlushDur       time.Duration
+	lastUIImageDur       time.Duration
+	lastUIDirtyRegions   int
+	lastUIFullRepaint    bool
+	lastUIDirtyUnion     geometry.Rect
+	lastUIDrawStats      widget.DrawStats
+	uiProfile            uiProfileStats
+	captureCfg           config.CaptureConfig
+	capture              *captureRuntime
+	controller           input.ControllerBackend
+	controllerSettings   input.ControllerSettings
+	uiBridge             *uiAppBridge
+	controllerNav        navRepeater
+	controllerRightNav   navRepeater
+	controllerTriggerNav navRepeater
+	controllerPollError  bool
+	events               *fanoutEventSource
+	cursor               input.VirtualCursor
+	controllerLastPoll   time.Time
+	injectingPointer     bool
+	cursorLeftDown       bool
+	controllerConnected  bool
 }
 
 // windowTitle appends the build identifier to the default window title so the
@@ -1299,6 +1383,9 @@ func (r *runner) pollController() {
 	if r.controllerKeyboardActive() {
 		r.dispatchControllerUI(state, actions, now)
 		state.ConsumeControllerMovement()
+		state.ConsumeControllerCamera()
+		state.ConsumeControllerZoom()
+		consumeControllerUIActions(state)
 		return
 	}
 	// A rebinding capture likewise consumes everything, so the button being
@@ -1306,9 +1393,9 @@ func (r *runner) pollController() {
 	// still published above, which keeps the diagnostics animating.
 	if r.controllerRebindActive() {
 		state.ConsumeControllerMovement()
-		for _, action := range input.BindableActions() {
-			state.ConsumeControllerAction(action)
-		}
+		state.ConsumeControllerCamera()
+		state.ConsumeControllerZoom()
+		consumeControllerUIActions(state)
 		return
 	}
 
@@ -1325,20 +1412,36 @@ func (r *runner) pollController() {
 		// Focus navigation owns the movement stick/D-pad while it is active;
 		// otherwise the world consumer could interpret the same input as a walk.
 		state.ConsumeControllerMovement()
+		state.ConsumeControllerCamera()
+		state.ConsumeControllerZoom()
+		// The active UI scope owns every controller edge for this frame. This
+		// closes the remaining leak paths (Map, camera reset, shortcut chords,
+		// and unhandled alternate buttons) into the world consumer.
+		consumeControllerUIActions(state)
 		return
 	}
 	r.dispatchControllerPointer(state, snapshot, settings, dt)
 }
 
+func consumeControllerUIActions(state *input.State) {
+	if state == nil {
+		return
+	}
+	for action := input.ActionConfirm; action <= input.ActionResetCamera; action++ {
+		state.ConsumeControllerAction(action)
+	}
+}
+
 // controllerCursorAxes reports the stick vector that should drive the pointer
 // this frame, and whether the left stick is therefore unavailable for walking.
-// In cursor move mode the left stick always aims. In character move mode it
-// aims only while the pointer is over the UI — otherwise it walks and the right
-// stick takes over aiming.
-func controllerCursorAxes(snapshot input.ControllerSnapshot, settings input.ControllerSettings, overUI bool) (x, y float32, blocksMovement bool) {
+// In cursor move mode the left stick always aims. In character move mode the
+// right stick always aims, including while the pointer crosses a UI window;
+// changing sticks at the window boundary made the virtual cursor feel broken
+// and exposed the same stick to gameplay camera handling.
+func controllerCursorAxes(snapshot input.ControllerSnapshot, settings input.ControllerSettings, _ bool) (x, y float32, blocksMovement bool) {
 	leftX, leftY := input.ApplyRadialDeadzone(snapshot.LeftX, snapshot.LeftY, settings.Deadzone, settings.OuterDeadzone)
 	rightX, rightY := input.ApplyRadialDeadzone(snapshot.RightX, snapshot.RightY, settings.Deadzone, settings.OuterDeadzone)
-	if settings.MoveMode == input.ControllerMoveCursor || overUI {
+	if settings.MoveMode == input.ControllerMoveCursor {
 		return leftX, leftY, true
 	}
 	return rightX, rightY, false
@@ -1437,6 +1540,7 @@ func (r *runner) releaseControllerPointer() {
 	}
 	r.controllerNav.reset()
 	r.controllerRightNav.reset()
+	r.controllerTriggerNav.reset()
 	if r.cursorLeftDown && r.events != nil {
 		x, y := r.cursor.Position()
 		r.cursorLeftDown = false
@@ -1514,6 +1618,7 @@ func (r *runner) dispatchControllerUI(state *input.State, actions input.ActionSt
 		}
 	}
 	r.dispatchControllerAnalogUI(state, actions, now, delay, rate)
+	r.dispatchControllerTriggerPaging(state, now, delay, rate)
 
 	buttonActions := []struct {
 		action input.Action
@@ -1521,6 +1626,8 @@ func (r *runner) dispatchControllerUI(state *input.State, actions input.ActionSt
 	}{
 		{input.ActionConfirm, input.UIActionConfirm},
 		{input.ActionCancel, input.UIActionCancel},
+		{input.ActionAttack, input.UIActionContext},
+		{input.ActionLoot, input.UIActionSecondary},
 		{input.ActionTargetPrevious, input.UIActionPreviousFocus},
 		{input.ActionTargetNext, input.UIActionNextFocus},
 		{input.ActionMenu, input.UIActionCancel},
@@ -1532,6 +1639,42 @@ func (r *runner) dispatchControllerUI(state *input.State, actions input.ActionSt
 		if r.uiBridge.HandleControllerAction(item.ui) {
 			state.ConsumeControllerAction(item.action)
 		}
+	}
+}
+
+// dispatchControllerTriggerPaging gives bare L2/R2 a page role in a focused
+// window while preserving their existing shortcut-modifier role when a face
+// button is held with them.
+func (r *runner) dispatchControllerTriggerPaging(state *input.State, now time.Time, delay, rate time.Duration) {
+	if r == nil || state == nil || r.uiBridge == nil {
+		return
+	}
+	snapshot := state.Controller()
+	bindings := r.controllerSettings.Bindings
+	faceHeld := snapshot.ButtonDown(input.ControllerButtonSouth) ||
+		snapshot.ButtonDown(input.ControllerButtonEast) ||
+		snapshot.ButtonDown(input.ControllerButtonWest) ||
+		snapshot.ButtonDown(input.ControllerButtonNorth)
+	if faceHeld {
+		r.controllerTriggerNav.reset()
+		return
+	}
+	page := input.UIAction(0)
+	active := false
+	if snapshot.ButtonDown(bindings.LeftModifier) {
+		page = input.UIActionPageUp
+		active = true
+	} else if snapshot.ButtonDown(bindings.RightModifier) {
+		page = input.UIActionPageDown
+		active = true
+	}
+	if !active {
+		r.controllerTriggerNav.reset()
+		return
+	}
+	if r.controllerTriggerNav.fire(page, now, delay, rate) && r.uiBridge.HandleControllerAction(page) {
+		state.ConsumeControllerAction(input.ActionLeftModifier)
+		state.ConsumeControllerAction(input.ActionRightModifier)
 	}
 }
 

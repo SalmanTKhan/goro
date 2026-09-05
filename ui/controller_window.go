@@ -38,8 +38,20 @@ func (w *ControllerWindow) Toggle(ctx client.Context) {
 		return
 	}
 	w.CloseOnEsc = true
+	w.configureControllerNavigation()
 	w.Window.Open(ctx, w.widgetTree(ctx))
 	w.Publish(ctx)
+}
+
+func (w *ControllerWindow) configureControllerNavigation() {
+	w.SetControllerActionHandler(func(action input.UIAction) bool {
+		if action != input.UIActionCancel || w == nil || !w.IsOpen() {
+			return false
+		}
+		w.cancelCapture()
+		w.Close()
+		return true
+	})
 }
 
 func (w *ControllerWindow) Update(ctx client.Context) bool {

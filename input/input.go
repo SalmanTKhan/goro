@@ -83,6 +83,7 @@ type State struct {
 	consumedActions          ActionSet
 	controllerMoveConsumed   bool
 	controllerCameraConsumed bool
+	controllerZoomConsumed   bool
 	pointerSource            InputSource
 	source                   InputSource
 
@@ -160,6 +161,7 @@ func (s *State) EndFrame() {
 	s.consumedActions = 0
 	s.controllerMoveConsumed = false
 	s.controllerCameraConsumed = false
+	s.controllerZoomConsumed = false
 	s.MouseDX = 0
 	s.MouseDY = 0
 	s.WheelX = 0
@@ -301,6 +303,19 @@ func (s *State) ConsumeControllerCamera() {
 
 func (s *State) ControllerCameraConsumed() bool {
 	return s != nil && s.controllerCameraConsumed
+}
+
+// ConsumeControllerZoom marks the trigger zoom channel as already spent this
+// frame. Modal controller UI uses it alongside camera consumption so L2/R2
+// paging or shortcut chords cannot also zoom the world behind the window.
+func (s *State) ConsumeControllerZoom() {
+	if s != nil {
+		s.controllerZoomConsumed = true
+	}
+}
+
+func (s *State) ControllerZoomConsumed() bool {
+	return s != nil && s.controllerZoomConsumed
 }
 
 func (s *State) ConsumeControllerMovement() {

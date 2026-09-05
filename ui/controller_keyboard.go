@@ -7,6 +7,7 @@ import (
 	"github.com/gogpu/ui/event"
 	"github.com/gogpu/ui/primitives"
 	"github.com/gogpu/ui/widget"
+	"github.com/kivutar/goro/input"
 	"github.com/kivutar/goro/ui/rotheme"
 )
 
@@ -36,6 +37,13 @@ type ControllerKeyboard struct {
 func newControllerKeyboard(owner *Manager, field *textfield.Widget) *ControllerKeyboard {
 	k := &ControllerKeyboard{owner: owner, field: field, target: field}
 	k.Window = NewWindow(controllerKeyboardWidth, controllerKeyboardHeight)
+	k.SetControllerActionHandler(func(action input.UIAction) bool {
+		if action != input.UIActionCancel {
+			return false
+		}
+		k.close()
+		return true
+	})
 	k.OpenAt(140, 72, k.widgetTree())
 	return k
 }
@@ -210,6 +218,27 @@ func firstControllerFocusable(root widget.Widget) widget.Widget {
 	}
 	for _, child := range controllerChildren(root) {
 		if focus := firstControllerFocusable(child); focus != nil {
+			return focus
+		}
+	}
+	return nil
+}
+
+// firstControllerContentFocusable prefers controls in the body/footer of a
+// window over the title-bar close button. The close button remains the
+// fallback for display-only windows and is still reachable through traversal.
+func firstControllerContentFocusable(root widget.Widget) widget.Widget {
+	if root == nil {
+		return nil
+	}
+	if _, titleBar := root.(*roTitleBarWidget); titleBar {
+		return nil
+	}
+	if focus, ok := root.(widget.Focusable); ok && focus.IsFocusable() {
+		return root
+	}
+	for _, child := range controllerChildren(root) {
+		if focus := firstControllerContentFocusable(child); focus != nil {
 			return focus
 		}
 	}

@@ -216,6 +216,9 @@ type Window struct {
 	CloseOnEsc              bool
 	ctx                     client.Context
 	controllerActionHandler func(input.UIAction) bool
+	controllerInitialFocus  func(widget.Widget) widget.Widget
+	controllerPassthrough   bool
+	controllerEntryPoint    bool
 	foreground              bool
 }
 
@@ -228,6 +231,61 @@ func (w *Window) SetControllerActionHandler(handler func(input.UIAction) bool) {
 		return
 	}
 	w.controllerActionHandler = handler
+}
+
+// SetControllerInitialFocus installs an optional focus hint for the first
+// controller interaction with this window. A nil hint uses the first
+// focusable widget in the window tree.
+func (w *Window) SetControllerInitialFocus(hint func(widget.Widget) widget.Widget) {
+	if w == nil {
+		return
+	}
+	w.controllerInitialFocus = hint
+}
+
+// ControllerInitialFocus returns the preferred first controller target for
+// this window. positionedOverlay forwards this capability to the renderer.
+func (w *Window) ControllerInitialFocus() widget.Widget {
+	if w == nil {
+		return nil
+	}
+	if w.controllerInitialFocus != nil {
+		if target := w.controllerInitialFocus(w.content); target != nil {
+			return target
+		}
+	}
+	if focus := firstControllerContentFocusable(w.content); focus != nil {
+		return focus
+	}
+	// Windows with no usable content controls still expose their close button
+	// as the first controller target.
+	return firstControllerFocusable(w.content)
+}
+
+// SetControllerNavigationPassthrough marks a visible HUD window as context
+// only. It remains drawable and available to the virtual pointer, but cannot
+// steal controller focus from an interactive window below it.
+func (w *Window) SetControllerNavigationPassthrough(enabled bool) {
+	if w == nil {
+		return
+	}
+	w.controllerPassthrough = enabled
+	if overlay := w.positionedOverlay(); overlay != nil {
+		overlay.controllerPassthrough = enabled
+	}
+}
+
+// SetControllerNavigationEntryPoint identifies persistent UI such as the
+// Basic Menu. Entry points are ignored by automatic modal-scope selection but
+// can still be selected by the virtual pointer or explicit focus navigation.
+func (w *Window) SetControllerNavigationEntryPoint(enabled bool) {
+	if w == nil {
+		return
+	}
+	w.controllerEntryPoint = enabled
+	if overlay := w.positionedOverlay(); overlay != nil {
+		overlay.controllerEntryPoint = enabled
+	}
 }
 
 func (w *Window) EnsureWindow(width, height int) bool {
@@ -271,6 +329,18 @@ func (w *Window) OpenAt(x, y int, content widget.Widget) {
 	w.y = y
 	w.positioned = true
 	w.SetContent(content)
+}
+
+// OpenAtContext is the context-aware form of OpenAt. Windows opened from a
+// controller callback can receive another controller action before their next
+// Update call, so retain the live client context immediately rather than
+// waiting for the normal per-frame update.
+func (w *Window) OpenAtContext(ctx client.Context, x, y int, content widget.Widget) {
+	if w == nil {
+		return
+	}
+	w.ctx = ctx
+	w.OpenAt(x, y, content)
 }
 
 func (w *Window) IsOpen() bool {
@@ -528,6 +598,8 @@ func (w *Window) Widget() widget.Widget {
 		if overlay := w.positionedOverlay(); overlay != nil {
 			overlay.raiseOnPress = true
 			overlay.owner = w
+			overlay.controllerPassthrough = w.controllerPassthrough
+			overlay.controllerEntryPoint = w.controllerEntryPoint
 		}
 	} else if overlay, ok := w.placed.(*positionedOverlay); ok {
 		overlay.setFrame(w.x, w.y, w.width, w.height)
@@ -750,6 +822,7 @@ type positionedOverlay struct {
 	raiseOnPress          bool
 	owner                 *Window
 	controllerPassthrough bool
+	controllerEntryPoint  bool
 }
 
 func (w *positionedOverlay) viewportChanged(oldWidth, oldHeight, width, height int) {
@@ -892,10 +965,32 @@ func (w *positionedOverlay) Event(ctx widget.Context, e event.Event) bool {
 // actions are semantic and do not need to be faked as physical key events for
 // packet-driven overlays.
 func (w *positionedOverlay) HandleControllerAction(action input.UIAction) bool {
-	if w == nil || w.owner == nil || w.owner.controllerActionHandler == nil {
+	if w == nil || w.owner == nil {
 		return false
 	}
-	return w.owner.controllerActionHandler(action)
+	if w.owner.controllerActionHandler != nil {
+		return w.owner.controllerActionHandler(action)
+	}
+	// Every ordinary window gets a safe modal back action even when it does
+	// not need a custom semantic handler. This is deliberately handled here,
+	// before the synthetic key bridge, so Circle cannot reach another window or
+	// gameplay after closing the active overlay.
+	if action == input.UIActionCancel && w.owner.CloseOnEsc {
+		w.owner.Close()
+		return true
+	}
+	return false
+}
+
+func (w *positionedOverlay) ControllerInitialFocus() widget.Widget {
+	if w == nil || w.owner == nil {
+		return nil
+	}
+	return w.owner.ControllerInitialFocus()
+}
+
+func (w *positionedOverlay) ControllerNavigationEntryPoint() bool {
+	return w != nil && w.controllerEntryPoint
 }
 
 func (w *positionedOverlay) Children() []widget.Widget {

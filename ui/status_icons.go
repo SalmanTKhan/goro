@@ -61,6 +61,9 @@ func (s *StatusIcons) Update(ctx Context, now time.Time) bool {
 	if root != s.root {
 		s.Unpublish(ctx)
 		s.root = root
+		if overlay, ok := root.(*positionedOverlay); ok {
+			overlay.controllerPassthrough = true
+		}
 		ctx.UIManager.AddOverlay(root)
 		s.visible = true
 		needsRedraw = true

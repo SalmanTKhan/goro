@@ -7,6 +7,7 @@ import (
 	"github.com/gogpu/ui/primitives"
 	"github.com/gogpu/ui/widget"
 	"github.com/kivutar/goro/glog"
+	"github.com/kivutar/goro/input"
 	"github.com/kivutar/goro/network"
 	"github.com/kivutar/goro/session"
 	"github.com/kivutar/goro/ui/rotheme"
@@ -47,6 +48,8 @@ type statRow struct {
 
 func (w *StatsWindow) Toggle(ctx Context) {
 	w.EnsureWindow(statsWindowWidth, statsWindowHeight)
+	w.ctx = ctx
+	w.configureControllerNavigation()
 	if w.IsOpen() {
 		w.Close()
 		w.Publish(ctx)
@@ -57,6 +60,7 @@ func (w *StatsWindow) Toggle(ctx Context) {
 
 func (w *StatsWindow) OpenWindow(ctx Context) {
 	w.EnsureWindow(statsWindowWidth, statsWindowHeight)
+	w.configureControllerNavigation()
 	if w.IsOpen() {
 		w.Publish(ctx)
 		w.Raise(ctx)
@@ -64,12 +68,13 @@ func (w *StatsWindow) OpenWindow(ctx Context) {
 	}
 	x, y := statsWindowPosition(ctx)
 	w.snapshot = statsWindowSnapshot(ctx.Session)
-	w.OpenAt(x, y, w.widgetTree(ctx))
+	w.OpenAtContext(ctx, x, y, w.widgetTree(ctx))
 	w.Publish(ctx)
 }
 
 func (w *StatsWindow) Update(ctx Context) bool {
 	w.EnsureWindow(statsWindowWidth, statsWindowHeight)
+	w.configureControllerNavigation()
 	if !w.IsOpen() {
 		return false
 	}
@@ -105,6 +110,16 @@ func (w *StatsWindow) close(ctx Context) {
 	w.EnsureWindow(statsWindowWidth, statsWindowHeight)
 	w.Close()
 	w.Publish(ctx)
+}
+
+func (w *StatsWindow) configureControllerNavigation() {
+	w.SetControllerActionHandler(func(action input.UIAction) bool {
+		if action != input.UIActionCancel || w == nil || !w.IsOpen() {
+			return false
+		}
+		w.close(w.ctx)
+		return true
+	})
 }
 
 func statsWindowPosition(ctx Context) (int, int) {

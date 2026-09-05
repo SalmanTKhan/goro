@@ -63,12 +63,15 @@ func (w *tabWidget) Draw(ctx widget.Context, canvas widget.Canvas) {
 		fill = rotheme.Default.Colors.WindowBody
 	} else if w.cfg.disabled {
 		textColor = rotheme.Default.Colors.MutedText
-	} else if w.hovered {
+	} else if w.hovered || w.IsFocused() {
 		fill = rotheme.Default.Colors.ButtonHover
 	}
 	canvas.DrawRect(bounds, fill)
 	canvas.StrokeRect(bounds, rotheme.Default.Colors.WindowBorder, 1)
 	rotheme.DrawRotatedText(canvas, w.cfg.label, bounds, rotheme.Default.Typography.TextSize, textColor, false, w.cfg.labelRotation)
+	if w.IsFocused() && !w.cfg.disabled {
+		canvas.StrokeRect(bounds.Expand(2), rotheme.Default.Colors.InputFocus, 2)
+	}
 }
 
 func (w *tabWidget) Event(ctx widget.Context, e event.Event) bool {

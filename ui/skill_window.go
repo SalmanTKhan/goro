@@ -57,34 +57,37 @@ var skillTabs = [...]struct {
 
 type SkillWindow struct {
 	Window
-	tab            int
-	scrollY        state.Signal[float32]
-	snapshot       string
-	skillViewKey   string
-	skillViewReady bool
-	allSkills      []session.Skill
-	skillsByTab    [skillTabCount][]session.Skill
-	visibleTabs    []int
-	lastClick      uint16
-	lastClickAt    time.Time
-	dragSkill      session.Skill
-	dragActive     bool
-	dragFrom       time.Time
-	hoveredSkill   session.Skill
-	hasHover       bool
-	hoverX         int
-	hoverY         int
-	tooltip        tooltipState
-	pending        map[uint16]int
-	pendingOrder   []uint16
-	dirty          bool
-	icons          map[uint16]image.Image
-	iconMiss       map[uint16]struct{}
-	lastIconAssets bool
-	assets         AssetProvider
-	actions        GameActions
-	table          *rotheme.TableViewWidget
-	selectedLevels map[uint16]int
+	tab                    int
+	scrollY                state.Signal[float32]
+	snapshot               string
+	skillViewKey           string
+	skillViewReady         bool
+	allSkills              []session.Skill
+	skillsByTab            [skillTabCount][]session.Skill
+	visibleTabs            []int
+	lastClick              uint16
+	lastClickAt            time.Time
+	dragSkill              session.Skill
+	dragActive             bool
+	dragFrom               time.Time
+	hoveredSkill           session.Skill
+	hasHover               bool
+	hoverX                 int
+	hoverY                 int
+	tooltip                tooltipState
+	pending                map[uint16]int
+	pendingOrder           []uint16
+	dirty                  bool
+	icons                  map[uint16]image.Image
+	iconMiss               map[uint16]struct{}
+	lastIconAssets         bool
+	assets                 AssetProvider
+	actions                GameActions
+	table                  *rotheme.TableViewWidget
+	selectedLevels         map[uint16]int
+	selectedRow            state.Signal[int]
+	controllerTabs         []*tabWidget
+	controllerSkillTooltip bool
 }
 
 func (w *SkillWindow) Toggle(ctx Context) {
@@ -98,6 +101,8 @@ func (w *SkillWindow) Toggle(ctx Context) {
 
 func (w *SkillWindow) OpenWindow(ctx Context) {
 	w.EnsureWindow(skillWindowWidth, skillWindowHeight)
+	w.ctx = ctx
+	w.configureControllerNavigation()
 	if w.IsOpen() {
 		w.Publish(ctx)
 		w.Raise(ctx)
@@ -108,6 +113,8 @@ func (w *SkillWindow) OpenWindow(ctx Context) {
 
 func (w *SkillWindow) Update(ctx Context, shortcuts *ShortcutBar, actions GameActions) bool {
 	w.EnsureWindow(skillWindowWidth, skillWindowHeight)
+	w.ctx = ctx
+	w.configureControllerNavigation()
 	if !w.IsOpen() {
 		return false
 	}
@@ -204,16 +211,18 @@ func (w *SkillWindow) Rebind(ctx Context, actions GameActions) {
 }
 
 func (w *SkillWindow) openAtDefault(ctx Context) {
+	w.ctx = ctx
 	x, y := skillDefaultPosition(ctx)
 	w.snapshot = w.skillSnapshot(ctx.Session)
 	w.ensureSkillViewForSnapshot(ctx, w.snapshot)
 	w.ensureScrollSignal().Set(0)
-	w.OpenAt(x, y, w.widgetTree(ctx, w.actions))
+	w.OpenAtContext(ctx, x, y, w.widgetTree(ctx, w.actions))
 	w.Publish(ctx)
 }
 
 func (w *SkillWindow) close(ctx Context) {
 	w.dragActive = false
+	w.controllerSkillTooltip = false
 	w.hasHover = false
 	w.hideTooltip()
 	w.Window.Close()
@@ -274,6 +283,13 @@ func (w *SkillWindow) skillTableWidget(ctx Context, assets AssetProvider, action
 		rotheme.TableViewHeaderHeight(skillHeaderH),
 		rotheme.TableViewEmptyText("No skills received from server yet."),
 		rotheme.TableViewScrollYSignal(w.ensureScrollSignal()),
+		rotheme.TableViewSelectedRow(w.ensureSelectedRowSignal()),
+		rotheme.TableViewOnRowSelected(func(row int) {
+			w.showControllerSkillTooltip(ctx, row)
+		}),
+		rotheme.TableViewOnRowClick(func(row int) {
+			w.activateControllerSkill(ctx, actions, skills, row)
+		}),
 		rotheme.TableViewDispatchHoverToCells(false),
 		rotheme.TableViewBuildSimpleCell(func(cell rotheme.TableViewCellContext) rotheme.TableViewSimpleCell {
 			if cell.Row < 0 || cell.Row >= len(skills) {
@@ -292,9 +308,10 @@ func (w *SkillWindow) skillTableWidget(ctx Context, assets AssetProvider, action
 func (w *SkillWindow) skillTabColumn(ctx Context, assets AssetProvider, actions GameActions) widget.Widget {
 	w.ensureSkillView(ctx)
 	tabs := make([]widget.Widget, 0, len(w.visibleTabs))
+	w.controllerTabs = w.controllerTabs[:0]
 	for _, tabID := range w.visibleTabs {
 		tab := skillTabs[tabID]
-		tabs = append(tabs, newTabWidget(tabWidgetConfig{
+		tabButton := newTabWidget(tabWidgetConfig{
 			label:         tab.label,
 			labelRotation: rotheme.TextRotationCounterClockwise,
 			active:        tab.tab == w.tab,
@@ -306,17 +323,160 @@ func (w *SkillWindow) skillTabColumn(ctx Context, assets AssetProvider, actions 
 				}
 				w.tab = tab.tab
 				w.ensureScrollSignal().Set(0)
+				w.controllerSkillTooltip = false
 				w.hasHover = false
 				w.hideTooltip()
 				w.SetContent(w.widgetTreeWithAssets(ctx, assets, actions))
 				w.Publish(ctx)
 			},
-		}))
+		})
+		tabs = append(tabs, tabButton)
+		w.controllerTabs = append(w.controllerTabs, tabButton)
 	}
 	return primitives.Box(tabs...).
 		Width(skillTabRailW).
 		Height(skillTableViewH).
 		Gap(-skillTabOver)
+}
+
+func (w *SkillWindow) configureControllerNavigation() {
+	w.SetControllerActionHandler(w.handleControllerAction)
+	w.SetControllerInitialFocus(func(_ widget.Widget) widget.Widget {
+		if w.table != nil && w.table.IsFocusable() {
+			// The level-up affordance is rendered inside the selected table row,
+			// rather than as an independent widget. Start on that row so Cross
+			// has a deterministic semantic target and the controller tooltip is
+			// visible before any directional input is pressed.
+			w.showControllerSkillTooltip(w.ctx, w.ensureSelectedRowSignal().Get())
+			return w.table
+		}
+		for _, tab := range w.controllerTabs {
+			if tab != nil && tab.cfg.active && tab.IsFocusable() {
+				return tab
+			}
+		}
+		return nil
+	})
+}
+
+func (w *SkillWindow) handleControllerAction(action input.UIAction) bool {
+	if w == nil || !w.IsOpen() {
+		return false
+	}
+	switch action {
+	case input.UIActionCancel:
+		w.close(w.ctx)
+		return true
+	case input.UIActionConfirm:
+		if w.table == nil || !w.table.IsFocused() {
+			return false
+		}
+		skills := w.activeSkills()
+		row := w.ensureSelectedRowSignal().Get()
+		if row < 0 || row >= len(skills) {
+			return true
+		}
+		w.showControllerSkillTooltip(w.ctx, row)
+		w.activateControllerSkill(w.ctx, w.actions, skills, row)
+		return true
+	case input.UIActionNextFocus, input.UIActionPreviousFocus:
+		if len(w.controllerTabs) < 2 {
+			return false
+		}
+		focused := 0
+		for i, tab := range w.controllerTabs {
+			if tab != nil && tab.cfg.active {
+				focused = i
+				break
+			}
+		}
+		step := 1
+		if action == input.UIActionPreviousFocus {
+			step = -1
+		}
+		next := (focused + step + len(w.controllerTabs)) % len(w.controllerTabs)
+		if callback := w.controllerTabs[next].cfg.onClick; callback != nil {
+			callback()
+		}
+		if app, ok := w.ctx.UIApp.(interface{ FocusControllerWidget(widget.Widget) bool }); ok {
+			app.FocusControllerWidget(w.controllerTabs[next])
+		}
+		return true
+	case input.UIActionContext, input.UIActionSecondary:
+		return w.adjustSelectedControllerSkill(action == input.UIActionSecondary)
+	default:
+		return false
+	}
+}
+
+func (w *SkillWindow) adjustSelectedControllerSkill(increase bool) bool {
+	if w.table == nil || !w.table.IsFocused() {
+		return true
+	}
+	skills := w.activeSkills()
+	row := w.ensureSelectedRowSignal().Get()
+	if row < 0 || row >= len(skills) {
+		return true
+	}
+	delta := -1
+	if increase {
+		delta = 1
+	}
+	widgetCtx := widget.Context(nil)
+	if provider, ok := w.ctx.UIApp.(interface{ WidgetContext() widget.Context }); ok {
+		widgetCtx = provider.WidgetContext()
+	}
+	if !w.adjustSelectedSkillLevel(widgetCtx, skills[row], row, delta) {
+		return true
+	}
+	return true
+}
+
+func (w *SkillWindow) activateControllerSkill(ctx Context, actions GameActions, skills []session.Skill, row int) {
+	if row < 0 || row >= len(skills) {
+		return
+	}
+	skill := skills[row]
+	if w.canStageSkill(ctx.Session, skill) {
+		w.stageSkill(skill.ID)
+		w.dirty = true
+		return
+	}
+	// A controller has no drag or double-click gesture. Activate a learned
+	// usable skill immediately while leaving the mouse path in pressSkill,
+	// where the existing drag-to-shortcut and double-click behavior remains.
+	if skill.Level <= 0 || !skillCanUseShortcut(skill) || actions == nil {
+		return
+	}
+	w.dragActive = false
+	w.dragSkill = session.Skill{}
+	w.lastClick = 0
+	w.lastClickAt = time.Time{}
+	skill.Level = w.selectedSkillLevel(skill)
+	if err := actions.UseShortcutSkill(ctx, skill); err != nil {
+		glog.Warnf("controller skill use failed id=%d: %v", skill.ID, err)
+	}
+}
+
+func (w *SkillWindow) showControllerSkillTooltip(ctx Context, row int) {
+	if w == nil {
+		return
+	}
+	skills := w.activeSkills()
+	if row < 0 || row >= len(skills) {
+		w.controllerSkillTooltip = false
+		w.hasHover = false
+		w.hideTooltip()
+		return
+	}
+	skill := skills[row]
+	x, y := w.skillTableBodyOrigin()
+	w.controllerSkillTooltip = true
+	w.hoveredSkill = skill
+	w.hasHover = true
+	w.hoverX = x + skillTableViewW/2
+	w.hoverY = y + row*skillRowH + skillRowH/2
+	w.showTooltip(ctx, skill, w.hoverX, w.hoverY)
 }
 
 func (w *SkillWindow) skillTableCell(ctx Context, assets AssetProvider, skill session.Skill, cell rotheme.TableViewCellContext) rotheme.TableViewSimpleCell {
@@ -390,6 +550,7 @@ func (w *SkillWindow) handleSkillTableRowEvent(widgetCtx widget.Context, ctx Con
 	if !ok || row < 0 || row >= len(skills) {
 		return false
 	}
+	w.controllerSkillTooltip = false
 	skill := skills[row]
 	switch mouse.MouseType {
 	case event.MouseEnter, event.MouseMove, event.MouseDrag:
@@ -491,6 +652,13 @@ func (w *SkillWindow) showTooltip(ctx Context, skill session.Skill, mx, my int) 
 }
 
 func (w *SkillWindow) updateTooltipHover(ctx Context) {
+	if w.controllerSkillTooltip {
+		if ctx.Input == nil || ctx.Input.InputSource() != input.InputSourceController {
+			w.controllerSkillTooltip = false
+		} else {
+			return
+		}
+	}
 	if !w.hasHover || ctx.Input == nil {
 		return
 	}
@@ -685,6 +853,13 @@ func (w *SkillWindow) ensureScrollSignal() state.Signal[float32] {
 		w.scrollY = state.NewSignal[float32](0)
 	}
 	return w.scrollY
+}
+
+func (w *SkillWindow) ensureSelectedRowSignal() state.Signal[int] {
+	if w.selectedRow == nil {
+		w.selectedRow = state.NewSignal[int](0)
+	}
+	return w.selectedRow
 }
 
 func (w *SkillWindow) skillSnapshot(s *session.Session) string {

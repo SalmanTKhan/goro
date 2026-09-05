@@ -52,6 +52,7 @@ func (m *EscapeMenu) Toggle(ctx client.Context) {
 		m.pendingAction = EscapeMenuActionNone
 	}
 	m.CloseOnEsc = true
+	m.configureControllerNavigation()
 	m.Window.Open(ctx, m.widgetTree(ctx))
 	m.Publish(ctx)
 }
@@ -66,12 +67,23 @@ func (m *EscapeMenu) OpenDeath(ctx client.Context) {
 	m.pending = false
 	m.pendingAction = EscapeMenuActionNone
 	m.CloseOnEsc = true
+	m.configureControllerNavigation()
 	if m.IsOpen() {
 		m.SetContent(m.widgetTree(ctx))
 	} else {
 		m.Window.Open(ctx, m.widgetTree(ctx))
 	}
 	m.Publish(ctx)
+}
+
+func (m *EscapeMenu) configureControllerNavigation() {
+	m.SetControllerActionHandler(func(action input.UIAction) bool {
+		if action != input.UIActionCancel || m == nil || !m.IsOpen() {
+			return false
+		}
+		m.Window.Close()
+		return true
+	})
 }
 
 // ResetDeath returns the escape menu to its regular mode after resurrection or

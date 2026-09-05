@@ -119,6 +119,9 @@ func (n *LevelUpNotifications) syncIcon(ctx Context, icon *levelUpNotificationIc
 		icon.x, icon.y = x, y
 		icon.width, icon.height = width, height
 		icon.root = positionedWidget(icon.widget, x, y, width, height)
+		if overlay, ok := icon.root.(*positionedOverlay); ok {
+			overlay.controllerPassthrough = true
+		}
 	}
 	if imageChanged {
 		icon.widget.SetNeedsRedraw(true)

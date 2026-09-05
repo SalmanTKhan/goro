@@ -27,6 +27,7 @@ type SettingsWindow struct {
 
 func (w *SettingsWindow) OpenWindow(ctx client.Context) {
 	w.EnsureWindow(settingsWindowW, settingsWindowH)
+	w.configureControllerNavigation()
 	w.ctx = ctx
 	w.Open(ctx, w.widgetTree(ctx))
 	w.Publish(ctx)
@@ -34,6 +35,7 @@ func (w *SettingsWindow) OpenWindow(ctx client.Context) {
 
 func (w *SettingsWindow) Update(ctx client.Context) bool {
 	w.EnsureWindow(settingsWindowW, settingsWindowH)
+	w.configureControllerNavigation()
 	w.ctx = ctx
 	if !w.IsOpen() {
 		return false
@@ -41,6 +43,16 @@ func (w *SettingsWindow) Update(ctx client.Context) bool {
 	consumed := w.Window.Update(ctx)
 	w.Publish(ctx)
 	return consumed
+}
+
+func (w *SettingsWindow) configureControllerNavigation() {
+	w.SetControllerActionHandler(func(action input.UIAction) bool {
+		if action != input.UIActionCancel || w == nil || !w.IsOpen() {
+			return false
+		}
+		w.Close()
+		return true
+	})
 }
 
 func (w *SettingsWindow) Rebind(ctx client.Context) {

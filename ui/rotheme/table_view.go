@@ -44,6 +44,7 @@ type tableViewConfig struct {
 	buildCell       func(TableViewCellContext) widget.Widget
 	buildSimpleCell func(TableViewCellContext) TableViewSimpleCell
 	onRowClick      func(int)
+	onRowSelected   func(int)
 	onRowEvent      func(int, event.Event) bool
 	onRowEventCtx   func(widget.Context, int, event.Event) bool
 
@@ -162,6 +163,13 @@ func TableViewOnRowClick(onClick func(int)) TableViewOption {
 	return func(c *tableViewConfig) { c.onRowClick = onClick }
 }
 
+// TableViewOnRowSelected observes keyboard/controller row selection. It is
+// intentionally separate from row activation so a focused row can update
+// contextual UI such as a tooltip without requiring a mouse event.
+func TableViewOnRowSelected(onSelected func(int)) TableViewOption {
+	return func(c *tableViewConfig) { c.onRowSelected = onSelected }
+}
+
 func TableViewOnRowEvent(onEvent func(int, event.Event) bool) TableViewOption {
 	return func(c *tableViewConfig) { c.onRowEvent = onEvent }
 }
@@ -231,6 +239,9 @@ func (w *TableViewWidget) Event(ctx widget.Context, e event.Event) bool {
 		return false
 	}
 	if key, ok := e.(*event.KeyEvent); ok && key.KeyType != event.KeyRelease && w.IsFocused() {
+		if w.cfg.selectedRow != nil && w.cfg.onRowSelected != nil {
+			w.cfg.onRowSelected(w.cfg.selectedRow.Get())
+		}
 		if w.handleControllerKey(ctx, key.Key) {
 			return true
 		}
@@ -1170,6 +1181,9 @@ func (w *TableViewWidget) setSelectedRow(ctx widget.Context, row int) {
 	}
 	w.observedSelectedRow = row
 	w.cfg.selectedRow.Set(row)
+	if w.cfg.onRowSelected != nil {
+		w.cfg.onRowSelected(row)
+	}
 	w.invalidateRow(ctx, previous)
 	w.invalidateRow(ctx, row)
 }

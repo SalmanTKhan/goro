@@ -397,6 +397,11 @@ const (
 	UIActionPreviousFocus
 	UIActionPageUp
 	UIActionPageDown
+	// UIActionContext and UIActionSecondary preserve the controller face
+	// button roles inside a focused window. They intentionally come after the
+	// original values so persisted/test action values remain stable.
+	UIActionContext
+	UIActionSecondary
 )
 
 type ControllerBindings struct {

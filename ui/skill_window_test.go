@@ -1678,6 +1678,72 @@ func TestSkillWindowTablePlusStagesSkill(t *testing.T) {
 	}
 }
 
+func TestSkillWindowControllerConfirmStagesSelectedSkill(t *testing.T) {
+	skill := session.Skill{ID: db.SkillSMBash, Name: "Basic Skill", Level: 0, MaxLevel: 10, Upgradable: true}
+	s := &session.Session{Skills: session.Skills{Points: 1}}
+	window := &SkillWindow{
+		tab:         skillTabFirst,
+		skillsByTab: [skillTabCount][]session.Skill{skillTabFirst: {skill}},
+	}
+	window.ctx = Context{Session: s}
+	window.Window.open = true
+	window.table = rotheme.TableView(
+		rotheme.TableViewRowCount(1),
+		rotheme.TableViewSelectedRow(window.ensureSelectedRowSignal()),
+	)
+	window.table.SetFocused(true)
+
+	if !window.handleControllerAction(input.UIActionConfirm) {
+		t.Fatal("controller confirm was not consumed")
+	}
+	if got := window.pendingFor(skill.ID); got != 1 {
+		t.Fatalf("pending skill levels = %d, want 1", got)
+	}
+	if !window.dirty {
+		t.Fatal("controller confirm should mark the skill window dirty")
+	}
+}
+
+func TestSkillWindowControllerSelectionShowsTooltip(t *testing.T) {
+	skill := session.Skill{ID: db.SkillSMBash, Name: "Basic Skill", Level: 0, MaxLevel: 10, Upgradable: true}
+	window := &SkillWindow{
+		tab:         skillTabFirst,
+		skillsByTab: [skillTabCount][]session.Skill{skillTabFirst: {skill}},
+	}
+
+	window.showControllerSkillTooltip(Context{}, 0)
+	if !window.controllerSkillTooltip {
+		t.Fatal("controller skill selection should own the tooltip")
+	}
+	if !window.tooltip.Open() {
+		t.Fatal("controller skill selection should show the tooltip")
+	}
+	if !strings.Contains(window.tooltip.Text(), "Basic Skill") {
+		t.Fatalf("tooltip text = %q", window.tooltip.Text())
+	}
+}
+
+func TestSkillWindowControllerInitialFocusUsesSkillTable(t *testing.T) {
+	skill := session.Skill{ID: db.SkillSMBash, Name: "Basic Skill", Level: 0, MaxLevel: 10, Upgradable: true}
+	window := &SkillWindow{
+		Window:      NewWindow(skillWindowWidth, skillWindowHeight),
+		tab:         skillTabFirst,
+		skillsByTab: [skillTabCount][]session.Skill{skillTabFirst: {skill}},
+	}
+	window.table = rotheme.TableView(
+		rotheme.TableViewRowCount(1),
+		rotheme.TableViewSelectedRow(window.ensureSelectedRowSignal()),
+	)
+	window.configureControllerNavigation()
+
+	if got := window.ControllerInitialFocus(); got != window.table {
+		t.Fatalf("initial controller focus = %T, want skill table", got)
+	}
+	if !window.tooltip.Open() {
+		t.Fatal("initial skill-row focus should show the controller tooltip")
+	}
+}
+
 func TestSkillWindowTableLevelArrowSelectsWithoutStartingDrag(t *testing.T) {
 	skill := session.Skill{ID: db.SkillMGSoulstrike, Type: 1, Level: 10}
 	window := &SkillWindow{}

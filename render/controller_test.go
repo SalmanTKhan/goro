@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/gogpu/gpucontext"
+	uiapp "github.com/gogpu/ui/app"
+	"github.com/gogpu/ui/core/button"
 	"github.com/gogpu/ui/event"
 	"github.com/gogpu/ui/geometry"
 	"github.com/gogpu/ui/widget"
@@ -47,6 +49,87 @@ func (o *controllerScopeTestOverlay) Draw(widget.Context, widget.Canvas) {}
 func (o *controllerScopeTestOverlay) Event(widget.Context, event.Event) bool { return false }
 
 func (o *controllerScopeTestOverlay) ControllerNavigationPassthrough() bool { return o.passive }
+
+type controllerFocusScopeGroup struct {
+	widget.WidgetBase
+	children []widget.Widget
+}
+
+func (g *controllerFocusScopeGroup) Children() []widget.Widget { return g.children }
+
+func (g *controllerFocusScopeGroup) Layout(_ widget.Context, constraints geometry.Constraints) geometry.Size {
+	size := constraints.BiggestFinite(140, 40)
+	g.SetBounds(geometry.FromPointSize(g.Position(), size))
+	for i, child := range g.children {
+		if child == nil {
+			continue
+		}
+		if bounder, ok := child.(interface{ SetBounds(geometry.Rect) }); ok {
+			bounder.SetBounds(geometry.NewRect(float32(i*70), 0, 60, 30))
+		}
+		if setter, ok := child.(interface{ SetParent(widget.Widget) }); ok {
+			setter.SetParent(g)
+		}
+	}
+	return size
+}
+
+func (g *controllerFocusScopeGroup) Draw(widget.Context, widget.Canvas) {}
+
+func (g *controllerFocusScopeGroup) Event(widget.Context, event.Event) bool { return false }
+
+func TestControllerFocusRestoresAfterNestedScopeRebuild(t *testing.T) {
+	app := uiapp.New(uiapp.WithRenderMode(uiapp.RenderModeFrameworkManaged))
+	bridge := &uiAppBridge{App: app}
+	first := button.New(button.TextOpt("first"))
+	second := button.New(button.TextOpt("second"))
+	base := &controllerFocusScopeGroup{children: []widget.Widget{first, second}}
+	base.SetVisible(true)
+	base.SetEnabled(true)
+	root := &controllerScopeTestRoot{children: []widget.Widget{base}}
+	root.SetVisible(true)
+	root.SetEnabled(true)
+	app.SetRoot(root)
+	app.Frame()
+
+	if !bridge.HandleControllerAction(input.UIActionConfirm) {
+		t.Fatal("initial controller action was not consumed")
+	}
+	if focused := app.Window().FocusManager().Focused(); focused != first {
+		t.Fatalf("initial focus = %T, want first button", focused)
+	}
+	if !bridge.HandleControllerAction(input.UIActionNextFocus) {
+		t.Fatal("next-focus controller action was not consumed")
+	}
+	if focused := app.Window().FocusManager().Focused(); focused != second {
+		t.Fatalf("focused control = %T, want second button", focused)
+	}
+
+	child := button.New(button.TextOpt("child"))
+	childScope := &controllerFocusScopeGroup{children: []widget.Widget{child}}
+	childScope.SetVisible(true)
+	childScope.SetEnabled(true)
+	childRoot := &controllerScopeTestRoot{children: []widget.Widget{childScope}}
+	childRoot.SetVisible(true)
+	childRoot.SetEnabled(true)
+	app.SetRoot(childRoot)
+	app.Frame()
+	if !bridge.HandleControllerAction(input.UIActionConfirm) {
+		t.Fatal("child controller action was not consumed")
+	}
+	if focused := app.Window().FocusManager().Focused(); focused != child {
+		t.Fatalf("child focus = %T, want child button", focused)
+	}
+
+	app.SetRoot(root)
+	app.Frame()
+	if !bridge.HandleControllerAction(input.UIActionConfirm) {
+		t.Fatal("restored controller action was not consumed")
+	}
+	if focused := app.Window().FocusManager().Focused(); focused != second {
+		t.Fatalf("restored focus = %T, want second button", focused)
+	}
+}
 
 func TestControllerFocusScopeSkipsPassiveOverlay(t *testing.T) {
 	lower := &controllerScopeTestOverlay{}
@@ -125,10 +208,11 @@ func TestControllerCursorAxesRespectMoveMode(t *testing.T) {
 		t.Fatalf("character mode over world = %v,%v blocks=%v", x, y, blocks)
 	}
 
-	// Character move mode over the UI: the left stick aims at buttons instead
-	// of walking the player into them.
+	// Character move mode keeps the right stick on the virtual cursor even over
+	// the UI. Crossing a window boundary must not remap the cursor to the left
+	// stick or expose the right stick to camera handling.
 	x, y, blocks = controllerCursorAxes(snapshot, settings, true)
-	if x == 0 || y != 0 || !blocks {
+	if x != 0 || y == 0 || blocks {
 		t.Fatalf("character mode over UI = %v,%v blocks=%v", x, y, blocks)
 	}
 }

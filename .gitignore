@@ -9,8 +9,6 @@
 run.sh
 /profiles/
 /offline/content.json
-/.artifacts-mobile-gallery*
-/.artifacts-next-slice
 /.codex-remote-attachments
 /android/host/go/.emulator-goffi
 /android/host/go/.emulator-wgpu
@@ -19,3 +17,14 @@ android/host/go/goffi-android-amd64.overlay.json
 /docs/mobile/gallery
 /.toolchain-probe
 /cmd
+/goro.exe~
+/.idea
+/.artifacts*
+
+# Intermediate for packaging/windows/generate.go; the resulting
+# goro_windows_*.syso files at the repo root ARE committed.
+/packaging/windows/versioninfo.json
+
+# Mobile UI preview output (generated, may embed RO-derived art)
+_preview/
+/.preview-repro

@@ -196,6 +196,10 @@ func (c *ChatConsole) ensureWindow(ctx client.Context) {
 		c.window.titleHeight = 0
 		c.window.SetFullRedraw(true)
 	}
+	// The chat panel is context-only until its input field is explicitly
+	// activated, so it cannot steal controller focus from gameplay or another
+	// window.
+	c.window.SetControllerNavigationPassthrough(!c.active)
 	c.window.SetAutoPosition(x, y)
 	c.window.SetSize(width, height)
 	if !c.window.IsOpen() {
