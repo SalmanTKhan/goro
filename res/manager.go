@@ -46,6 +46,8 @@ type Manager struct {
 	skillDisplayNames        map[int]string
 	skillDescriptions        map[int][]string
 	skillMetadataLoaded      bool
+	skillTreePositions       map[int]map[int]int
+	skillTreePositionsLoaded bool
 	songTalks                map[SongTalkKind][]string
 	songTalksLoaded          map[SongTalkKind]bool
 	petTalks                 map[string]map[string]map[string][]string
@@ -223,6 +225,9 @@ func (m *Manager) ReadFileExact(name string) ([]byte, error) {
 // HasResourceExact checks the active layered view without reading resource
 // bytes. It intentionally does not use legacy suffix lookup.
 func (m *Manager) HasResourceExact(name string) bool {
+	if m == nil {
+		return false
+	}
 	if _, found, masked, err := m.readOverlay(name, true); err == nil {
 		if found {
 			return true
@@ -240,7 +245,24 @@ func (m *Manager) HasResourceExact(name string) bool {
 		}
 	}
 	for _, archive := range m.Archives {
-		if archive.Has(name) {
+		if archive != nil && archive.Has(name) {
+			return true
+		}
+	}
+	return false
+}
+
+// HasFileExact reports whether a resource exists at exactly name. Unlike
+// ReadFile, it does not use the legacy suffix fallback for archive entries.
+func (m *Manager) HasFileExact(name string) bool {
+	if m == nil {
+		return false
+	}
+	if _, ok := m.Find(name); ok {
+		return true
+	}
+	for _, archive := range m.Archives {
+		if archive != nil && archive.Has(name) {
 			return true
 		}
 	}

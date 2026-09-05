@@ -22,8 +22,8 @@ Status meaning:
 - Effective unique map opcodes: `603`
 - Overwritten historical/remap declarations: `283`
 - Client-to-map packets accepted by rAthena: `177`
-- Effective map opcodes referenced by Goro: `216`
-- Client-to-map accepted packets referenced by Goro: `98` / `177`
+- Effective map opcodes referenced by Goro: `232`
+- Client-to-map accepted packets referenced by Goro: `104` / `177`
 - Unresolved packet aliases in this generated pass: `0`
 
 ## Homunculus Compatibility Notes
@@ -59,6 +59,14 @@ companion UI, AI, skill, and visual coverage.
 | `0x0BA4` | S->C | compatibility parser | later homunculus property layout with 64-bit EXP | companion_packets.go, packet.go |
 | `0x0BA5` | S->C | compatibility parser | later 64-bit homunculus param change | companion_packets.go, packet.go |
 
+## Server-Driven Display Notes
+
+Goro handles the 2008 ShowDigit clock (`0x01B1`), Convex Mirror boss report
+(`0x0293`), and NPC progress lifecycle (`0x02F0`-`0x02F2`). It also handles
+the fixed Gospel/Full Strip skill notice (`0x0215`); rAthena sends that packet
+to 2008 clients even though it is not declared in the effective map parser
+table used to generate the full table below.
+
 ## High Priority Gaps
 
 | Opcode | Direction | rAthena symbol | Length | Handler | Priority |
@@ -69,7 +77,6 @@ companion UI, AI, skill, and visual coverage.
 | `0x017E` | C->S | `0x017e` | `-1` | `clif_parse_GuildMessage` | P2 |
 | `0x0180` | C->S | `0x0180` | `6` | `clif_parse_GuildOpposition` | P2 |
 | `0x0183` | C->S | `0x0183` | `10` | `clif_parse_GuildDelAlliance` | P2 |
-| `0x023B` | C->S | `0x023b` | `36` | `clif_parse_StoragePassword` | P0/P1 |
 | `0x02CF` | C->S | `0x02cf` | `6` | `clif_parse_MemorialDungeonCommand` | P2 |
 | `0x02DB` | C->S | `0x02db` | `-1` | `clif_parse_BattleChat` | P2 |
 | `0x0802` | C->S | `0x0802` | `18` | `clif_parse_PartyBookingRegisterReq` | P2 |
@@ -354,7 +361,7 @@ email check.
 | `0x01AE` | C->S | implemented | `HEADER_CZ_REQ_MAKINGARROW` | `sizeof( PACKET_CZ_REQ_MAKINGARROW )` | `clif_parse_SelectArrow` | item_packets.go |
 | `0x01AF` | C->S | referenced | `0x01af` | `4` | `clif_parse_ChangeCart` | skill_packets.go |
 | `0x01B0` | S->C | untracked | `0x01b0` | `11` | `-` | - |
-| `0x01B1` | S->C | untracked | `0x01b1` | `7` | `-` | - |
+| `0x01B1` | S->C | implemented | `0x01b1` | `7` | `-` | packet.go, server_info_packets.go |
 | `0x01B2` | C->S | referenced | `0x01b2` | `-1` | `clif_parse_OpenVending` | vending_packets.go |
 | `0x01B5` | S->C | referenced | `0x01b5` | `18` | `-` | packet.go |
 | `0x01B6` | S->C | referenced | `0x01b6` | `114` | `-` | guild_packets.go, packet.go |
@@ -396,7 +403,7 @@ email check.
 | `0x01E4` | S->C | untracked | `0x01e4` | `2` | `-` | - |
 | `0x01E5` | S->C | untracked | `0x01e5` | `6` | `-` | - |
 | `0x01E6` | S->C | untracked | `0x01e6` | `26` | `-` | - |
-| `0x01E7` | C->S | missing | `0x01e7` | `2` | `clif_parse_NoviceDoriDori` | - |
+| `0x01E7` | C->S | implemented | `0x01e7` | `2` | `clif_parse_NoviceDoriDori` | novice_packets.go |
 | `0x01E8` | C->S | implemented | `HEADER_CZ_MAKE_GROUP2` | `sizeof( PACKET_CZ_MAKE_GROUP2 )` | `clif_parse_CreateParty2` | party_packets.go |
 | `0x01EC` | S->C | untracked | `0x01ec` | `26` | `-` | - |
 | `0x01ED` | C->S | missing | `0x01ed` | `2` | `clif_parse_NoviceExplosionSpirits` | - |
@@ -429,8 +436,12 @@ email check.
 | `0x0213` | C->S | missing | `0x0213` | `26` | `clif_parse_Check` | - |
 | `0x0214` | S->C | referenced | `0x0214` | `42` | `-` | packet.go |
 | `0x0216` | S->C | implemented | `0x0216` | `6` | `-` | adoption_packets.go, packet.go |
-| `0x0217` | C->S | missing | `HEADER_CZ_BLACKSMITH_RANK` | `sizeof( PACKET_CZ_BLACKSMITH_RANK )` | `clif_parse_ranklist_blacksmith` | - |
-| `0x0218` | C->S | missing | `HEADER_CZ_ALCHEMIST_RANK` | `sizeof( PACKET_CZ_ALCHEMIST_RANK )` | `clif_parse_ranklist_alchemist` | - |
+| `0x0217` | C->S | implemented | `HEADER_CZ_BLACKSMITH_RANK` | `sizeof( PACKET_CZ_BLACKSMITH_RANK )` | `clif_parse_ranklist_blacksmith` | ranking_packets.go |
+| `0x0218` | C->S | implemented | `HEADER_CZ_ALCHEMIST_RANK` | `sizeof( PACKET_CZ_ALCHEMIST_RANK )` | `clif_parse_ranklist_alchemist` | ranking_packets.go |
+| `0x0219` | S->C | implemented | `HEADER_ZC_BLACKSMITH_RANK` | `282` | `-` | ranking_packets.go, packet.go |
+| `0x021A` | S->C | implemented | `HEADER_ZC_ALCHEMIST_RANK` | `282` | `-` | ranking_packets.go, packet.go |
+| `0x021B` | S->C | implemented | `HEADER_ZC_BLACKSMITH_POINT` | `10` | `-` | ranking_packets.go, packet.go |
+| `0x021C` | S->C | implemented | `HEADER_ZC_ALCHEMIST_POINT` | `10` | `-` | ranking_packets.go, packet.go |
 | `0x021D` | C->S | implemented | `HEADER_CZ_LESSEFFECT` | `sizeof( PACKET_CZ_LESSEFFECT )` | `clif_parse_LessEffect` | effect_packets.go |
 | `0x021E` | S->C | implemented | `0x021e` | `6` | `-` | effect_packets.go, packet.go |
 | `0x021F` | S->C | untracked | `0x021f` | `66` | `-` | - |
@@ -438,9 +449,9 @@ email check.
 | `0x0221` | S->C | implemented | `HEADER_ZC_NOTIFY_WEAPONITEMLIST` | `-1` | `-` | item_packets.go, packet.go |
 | `0x0222` | C->S | implemented | `0x0222` | `6` | `clif_parse_WeaponRefine` | item_packets.go |
 | `0x0223` | S->C | implemented | `HEADER_ZC_ACK_WEAPONREFINE` | `8` | `-` | item_packets.go, packet.go |
-| `0x0224` | S->C | implemented | `0x0224` | `10` | `-` | taekwon_packets.go, packet.go |
-| `0x0225` | C->S | implemented | `HEADER_CZ_TAEKWON_RANK` | `sizeof( PACKET_CZ_TAEKWON_RANK )` | `clif_parse_ranklist_taekwon` | taekwon_packets.go |
-| `0x0226` | S->C | implemented | `0x0226` | `282` | `-` | taekwon_packets.go, packet.go |
+| `0x0224` | S->C | implemented | `0x0224` | `10` | `-` | ranking_packets.go, packet.go |
+| `0x0225` | C->S | implemented | `HEADER_CZ_TAEKWON_RANK` | `sizeof( PACKET_CZ_TAEKWON_RANK )` | `clif_parse_ranklist_taekwon` | ranking_packets.go |
+| `0x0226` | S->C | implemented | `0x0226` | `282` | `-` | ranking_packets.go, packet.go |
 | `0x0227` | S->C | untracked | `0x0227` | `18` | `-` | - |
 | `0x0228` | S->C | untracked | `0x0228` | `18` | `-` | - |
 | `0x0229` | S->C | referenced | `0x0229` | `15` | `-` | actor_packets.go, packet.go |
@@ -458,9 +469,9 @@ email check.
 | `0x0235` | S->C | implemented | `0x0235` | `-1` | `-` | companion_packets.go, packet.go |
 | `0x0237` | C->S | missing | `HEADER_CZ_KILLER_RANK` | `sizeof( PACKET_CZ_KILLER_RANK )` | `clif_parse_ranklist_killer` | - |
 | `0x0239` | S->C | implemented | `0x0239` | `11` | `-` | companion_packets.go, packet.go |
-| `0x023A` | S->C | untracked | `0x023a` | `4` | `-` | - |
-| `0x023B` | C->S | missing | `0x023b` | `36` | `clif_parse_StoragePassword` | - |
-| `0x023C` | S->C | untracked | `0x023c` | `6` | `-` | - |
+| `0x023A` | S->C | implemented | `0x023a` | `4` | `-` | storage_password_packets.go, packet.go |
+| `0x023B` | C->S | implemented | `0x023b` | `36` | `clif_parse_StoragePassword` | storage_password_packets.go |
+| `0x023C` | S->C | implemented | `0x023c` | `6` | `-` | storage_password_packets.go, packet.go |
 | `0x023D` | S->C | untracked | `0x023d` | `-1` | `-` | - |
 | `0x023E` | S->C | untracked | `0x023e` | `8` | `-` | - |
 | `0x023F` | C->S | missing | `0x023f` | `2` | `clif_parse_Mail_refreshinbox` | - |
@@ -541,8 +552,8 @@ email check.
 | `0x028E` | S->C | untracked | `0x028e` | `4` | `-` | - |
 | `0x028F` | S->C | untracked | `0x028f` | `6` | `-` | - |
 | `0x0290` | S->C | untracked | `0x0290` | `4` | `-` | - |
-| `0x0292` | C->S | missing | `0x0292` | `2` | `clif_parse_AutoRevive` | - |
-| `0x0293` | S->C | untracked | `0x0293` | `70` | `-` | - |
+| `0x0292` | C->S | implemented | `0x0292` | `2` | `clif_parse_AutoRevive` | revive_packets.go |
+| `0x0293` | S->C | implemented | `0x0293` | `70` | `-` | packet.go, server_info_packets.go |
 | `0x0294` | S->C | untracked | `0x0294` | `10` | `-` | - |
 | `0x029B` | S->C | implemented | `0x029b` | `80` | `-` | companion_packets.go, packet.go |
 | `0x029C` | S->C | implemented | `0x029c` | `66` | `-` | companion_packets.go, packet.go |
@@ -616,9 +627,9 @@ email check.
 | `0x02ED` | S->C | referenced | `0x02ed` | `59` | `-` | actor_packets.go, packet.go |
 | `0x02EE` | S->C | referenced | `0x02ee` | `60` | `-` | actor_packets.go, packet.go |
 | `0x02EF` | S->C | referenced | `0x02ef` | `8` | `-` | packet.go |
-| `0x02F0` | S->C | untracked | `0x02f0` | `10` | `-` | - |
-| `0x02F1` | C->S | missing | `0x02f1` | `2` | `clif_parse_progressbar` | - |
-| `0x02F2` | S->C | untracked | `0x02f2` | `2` | `-` | - |
+| `0x02F0` | S->C | implemented | `0x02f0` | `10` | `-` | packet.go, server_info_packets.go |
+| `0x02F1` | C->S | implemented | `0x02f1` | `2` | `clif_parse_progressbar` | server_info_packets.go |
+| `0x02F2` | S->C | implemented | `0x02f2` | `2` | `-` | packet.go, server_info_packets.go |
 | `0x02F3` | S->C | untracked | `0x02f3` | `-1` | `-` | - |
 | `0x02F4` | S->C | untracked | `0x02f4` | `-1` | `-` | - |
 | `0x02F5` | S->C | untracked | `0x02f5` | `-1` | `-` | - |

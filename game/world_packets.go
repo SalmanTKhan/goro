@@ -74,6 +74,36 @@ func (m *WorldMode) handleNetworkPacket(ctx client.Context, pkt network.Packet, 
 		m.ui.shortcutBar.SyncFromSession(ctx)
 		return nil, false
 	}
+	if show, ok, err := network.ParseShowDigit(pkt); err != nil {
+		glog.Errorf("parse show digit 0x%04X: %v", pkt.ID, err)
+	} else if ok {
+		m.showDigit = newShowDigitState(show, now)
+		return nil, false
+	}
+	if message, ok, err := network.ParseSkillMessage(pkt); err != nil {
+		glog.Errorf("parse skill message 0x%04X: %v", pkt.ID, err)
+	} else if ok {
+		m.applySkillMessage(message, now)
+		return nil, false
+	}
+	if info, ok, err := network.ParseBossInfo(pkt); err != nil {
+		glog.Errorf("parse boss information 0x%04X: %v", pkt.ID, err)
+	} else if ok {
+		m.applyBossInfo(info)
+		return nil, false
+	}
+	if progress, ok, err := network.ParseProgressBar(pkt); err != nil {
+		glog.Errorf("parse progress bar 0x%04X: %v", pkt.ID, err)
+	} else if ok {
+		m.startServerProgress(ctx, progress, now)
+		return nil, false
+	}
+	if ok, err := network.ParseProgressBarCancel(pkt); err != nil {
+		glog.Errorf("parse progress bar cancellation 0x%04X: %v", pkt.ID, err)
+	} else if ok {
+		m.finishServerProgress(ctx, "server cancel")
+		return nil, false
+	}
 	if chat, ok, err := network.ParseChatMessage(pkt); err != nil {
 		glog.Errorf("parse chat message 0x%04X: %v", pkt.ID, err)
 	} else if ok {
@@ -92,16 +122,16 @@ func (m *WorldMode) handleNetworkPacket(ctx client.Context, pkt network.Packet, 
 		m.applyTaekwonMission(ctx, mission)
 		return nil, false
 	}
-	if point, ok, err := network.ParseTaekwonPoint(pkt); err != nil {
-		glog.Errorf("parse taekwon point 0x%04X: %v", pkt.ID, err)
+	if point, ok, err := network.ParseFamePointUpdate(pkt); err != nil {
+		glog.Errorf("parse fame point update 0x%04X: %v", pkt.ID, err)
 	} else if ok {
-		glog.Debugf("taekwon points current=%d total=%d", point.Point, point.TotalPoint)
+		m.applyFamePointUpdate(ctx, point)
 		return nil, false
 	}
-	if ranking, ok, err := network.ParseTaekwonRanking(pkt); err != nil {
-		glog.Errorf("parse taekwon ranking 0x%04X: %v", pkt.ID, err)
+	if ranking, ok, err := network.ParseFameRanking(pkt); err != nil {
+		glog.Errorf("parse fame ranking 0x%04X: %v", pkt.ID, err)
 	} else if ok {
-		m.applyTaekwonRanking(ctx, ranking)
+		m.applyFameRanking(ctx, ranking)
 		return nil, false
 	}
 	if place, ok, err := network.ParseStarPlace(pkt); err != nil {
@@ -487,11 +517,25 @@ func (m *WorldMode) handleNetworkPacket(ctx client.Context, pkt network.Packet, 
 		m.ui.inventoryBag.ClampScroll(ctx.Session)
 		return nil, false
 	}
+	if prompt, ok, err := network.ParseStoragePasswordPrompt(pkt); err != nil {
+		glog.Errorf("parse storage password prompt 0x%04X: %v", pkt.ID, err)
+	} else if ok {
+		m.handleStoragePasswordPrompt(ctx, prompt)
+		return nil, false
+	}
+	if result, ok, err := network.ParseStoragePasswordResult(pkt); err != nil {
+		glog.Errorf("parse storage password result 0x%04X: %v", pkt.ID, err)
+	} else if ok {
+		m.handleStoragePasswordResult(ctx, result)
+		return nil, false
+	}
 	if storageItems, ok, err := network.ParseStorageItemList(pkt); err != nil {
 		glog.Errorf("parse storage item list 0x%04X: %v", pkt.ID, err)
 	} else if ok {
 		applyStorageItemList(ctx, storageItems)
-		m.ui.storageWindow.OpenWindow(ctx)
+		if ctx.Session != nil && ctx.Session.Storage.Open {
+			m.ui.storageWindow.OpenWindow(ctx)
+		}
 		return nil, false
 	}
 	if cartItems, ok, err := network.ParseCartItemList(pkt); err != nil {
@@ -507,7 +551,9 @@ func (m *WorldMode) handleNetworkPacket(ctx client.Context, pkt network.Packet, 
 		glog.Errorf("parse storage amount 0x%04X: %v", pkt.ID, err)
 	} else if ok {
 		applyStorageAmount(ctx, storageAmount)
-		m.ui.storageWindow.OpenWindow(ctx)
+		if ctx.Session != nil && ctx.Session.Storage.Open {
+			m.ui.storageWindow.OpenWindow(ctx)
+		}
 		return nil, false
 	}
 	if cartAmount, ok, err := network.ParseCartAmount(pkt); err != nil {
@@ -898,7 +944,9 @@ func (m *WorldMode) handleNetworkPacket(ctx client.Context, pkt network.Packet, 
 		glog.Errorf("parse storage item added 0x%04X: %v", pkt.ID, err)
 	} else if ok {
 		applyStorageItemAdded(ctx, storageItem)
-		m.ui.storageWindow.OpenWindow(ctx)
+		if ctx.Session != nil && ctx.Session.Storage.Open {
+			m.ui.storageWindow.OpenWindow(ctx)
+		}
 		m.ui.storageWindow.ClampScroll(ctx.Session)
 		m.ui.inventoryBag.ClampScroll(ctx.Session)
 		return nil, false
@@ -991,6 +1039,7 @@ func (m *WorldMode) handleNetworkPacket(ctx client.Context, pkt network.Packet, 
 	if network.ParseStorageClosed(pkt) {
 		applyStorageClosed(ctx)
 		m.ui.storageWindow.SetOpen(false)
+		m.ui.storagePassword.CloseFromServer(ctx)
 		return nil, false
 	}
 	if network.ParseCartClosed(pkt) {
@@ -1184,6 +1233,12 @@ func (m *WorldMode) handleNetworkPacket(ctx client.Context, pkt network.Packet, 
 		glog.Errorf("parse auto-run skill 0x%04X: %v", pkt.ID, err)
 	} else if ok {
 		m.skills().ApplyAutoRun(ctx, auto)
+		return nil, false
+	}
+	if info, ok, err := network.ParseMonsterInfo(pkt); err != nil {
+		glog.Errorf("parse monster info 0x%04X: %v", pkt.ID, err)
+	} else if ok {
+		m.applyMonsterInfo(ctx, info, now)
 		return nil, false
 	}
 	if list, ok, err := network.ParseAutoSpellList(pkt); err != nil {

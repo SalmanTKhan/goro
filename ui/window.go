@@ -15,16 +15,22 @@ import (
 type WindowOption func(*windowConfig)
 
 type windowConfig struct {
-	title       string
-	closeButton bool
-	content     widget.Widget
-	footer      widget.Widget
-	onClose     func()
-	width       float32
-	height      float32
-	titleBar    bool
-	radius      float32
-	background  *widget.Color
+	title        string
+	closeButton  bool
+	titleButtons []windowTitleButton
+	content      widget.Widget
+	footer       widget.Widget
+	onClose      func()
+	width        float32
+	height       float32
+	titleBar     bool
+	radius       float32
+	background   *widget.Color
+}
+
+type windowTitleButton struct {
+	kind    rotheme.IconButtonKind
+	onClick func()
 }
 
 const (
@@ -35,6 +41,7 @@ const (
 	windowScreenMargin    = 8
 	windowDirtyPadding    = 2
 	windowTitleButtonSize = 17
+	windowTitleButtonGap  = 2
 	windowTitleButtonPadR = 7
 )
 
@@ -54,7 +61,7 @@ func Win(options ...WindowOption) widget.Widget {
 		titleContent := primitives.HBox(
 			rotheme.Title(cfg.title),
 			primitives.Expanded(primitives.Box()),
-			windowCloseButton(cfg.closeButton, cfg.onClose),
+			windowTitleButtons(cfg.titleButtons, cfg.closeButton, cfg.onClose),
 		).
 			CrossAlign(primitives.CrossAxisCenter).
 			PaddingLeft(12).
@@ -123,6 +130,15 @@ func CloseButton(enabled bool) WindowOption {
 	}
 }
 
+func TitleButton(kind rotheme.IconButtonKind, onClick func()) WindowOption {
+	return func(cfg *windowConfig) {
+		cfg.titleButtons = append(cfg.titleButtons, windowTitleButton{
+			kind:    kind,
+			onClick: onClick,
+		})
+	}
+}
+
 func OnClose(onClose func()) WindowOption {
 	return func(cfg *windowConfig) {
 		cfg.onClose = onClose
@@ -180,16 +196,31 @@ func Background(color widget.Color) WindowOption {
 	}
 }
 
+func windowTitleButtons(buttons []windowTitleButton, closeButton bool, onClose func()) widget.Widget {
+	children := make([]widget.Widget, 0, len(buttons)+1)
+	for _, button := range buttons {
+		children = append(children, windowTitleIconButton(button.kind, button.onClick))
+	}
+	children = append(children, windowCloseButton(closeButton, onClose))
+	return primitives.HBox(children...).
+		Gap(windowTitleButtonGap).
+		CrossAlign(primitives.CrossAxisCenter)
+}
+
 func windowCloseButton(enabled bool, onClose func()) widget.Widget {
 	if !enabled {
-		return primitives.Box().Width(17).Height(ROWindowTitleHeight)
+		return primitives.Box().Width(windowTitleButtonSize).Height(ROWindowTitleHeight)
 	}
+	return windowTitleIconButton(rotheme.IconButtonClose, onClose)
+}
+
+func windowTitleIconButton(kind rotheme.IconButtonKind, onClick func()) widget.Widget {
 	return primitives.Box(
 		primitives.Expanded(primitives.Box()),
-		rotheme.IconButton(rotheme.IconButtonClose, onClose),
+		rotheme.IconButton(kind, onClick),
 		primitives.Expanded(primitives.Box()),
 	).
-		Width(17).
+		Width(windowTitleButtonSize).
 		Height(ROWindowTitleHeight)
 }
 
@@ -207,6 +238,7 @@ type Window struct {
 	dragDX                  int
 	dragDY                  int
 	dragBottom              int
+	titleButtons            int
 	content                 widget.Widget
 	placed                  widget.Widget
 	published               widget.Widget
@@ -308,12 +340,17 @@ func (w *Window) Close() {
 
 func NewWindow(width, height int) Window {
 	return Window{
-		width:       width,
-		height:      height,
-		titleHeight: ROWindowTitleHeight,
-		opacity:     1,
-		CloseOnEsc:  true,
+		width:        width,
+		height:       height,
+		titleHeight:  ROWindowTitleHeight,
+		titleButtons: 1,
+		opacity:      1,
+		CloseOnEsc:   true,
 	}
+}
+
+func (w *Window) setTitleButtonCount(count int) {
+	w.titleButtons = maxInt(0, count)
 }
 
 func (w *Window) Open(ctx client.Context, content widget.Widget) {
@@ -654,12 +691,13 @@ func (w *Window) positionedOverlay() *positionedOverlay {
 }
 
 func (w *Window) titleButtonHit(x, y int) bool {
-	if w.titleHeight <= 0 || w.width <= 0 {
+	if w.titleHeight <= 0 || w.width <= 0 || w.titleButtons == 0 {
 		return false
 	}
-	left := w.x + w.width - windowTitleButtonPadR - windowTitleButtonSize
+	controlsWidth := w.titleButtons*windowTitleButtonSize + (w.titleButtons-1)*windowTitleButtonGap
+	left := w.x + w.width - windowTitleButtonPadR - controlsWidth
 	top := w.y + (w.titleHeight-windowTitleButtonSize)/2
-	return pointInRect(x, y, left, top, windowTitleButtonSize, windowTitleButtonSize)
+	return pointInRect(x, y, left, top, controlsWidth, windowTitleButtonSize)
 }
 
 func (w *Window) beginDragLayer(ctx client.Context) {

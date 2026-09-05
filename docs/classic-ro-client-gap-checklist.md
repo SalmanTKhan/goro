@@ -57,37 +57,38 @@ This means the legacy mail system, not a newer RODEX-only implementation. See
 
 - [x] Implement the Sage Auto Spell choice list and send selection packet `0x01CE`.
 - [x] Turn the Star Gladiator place/Feel request into the original confirmation flow instead of only logging it, then send `0x0254`.
-- [ ] Implement the original `/doridori` client behavior and packet `0x01E7`.
+- [x] Implement the original `/doridori` client behavior and packet `0x01E7`.
 - [ ] Verify whether the 2008 Novice Explosion Spirits request (`0x01ED`) needs a distinct client action, then implement it if applicable.
-- [ ] Verify and implement the 2008 auto-revive response (`0x0292`) if it is used by supported gameplay.
+- [x] Implement Token of Siegfried self-revival through the 2008 auto-revive request (`0x0292`).
 - [ ] Add end-to-end tests ensuring these skills cannot silently stall while waiting for a client response.
 
 ### Server-driven progress and information
 
-- [ ] Parse and render NPC progress-bar start packet `0x02F0`.
-- [ ] Send progress-bar completion/cancel acknowledgement `0x02F1`.
-- [ ] Handle server cancellation (`0x02F2`, if applicable to the 2008 profile).
-- [ ] Ensure the progress display swallows input where the original client did.
-- [ ] Implement server `ShowDigit` countdown displays.
-- [ ] Implement boss information, map marker, death, and respawn-time updates.
-- [ ] Implement remaining skill-message feedback that currently has no dedicated presentation.
+- [x] Parse and render NPC progress-bar start packet `0x02F0`.
+- [x] Send progress-bar completion/cancel acknowledgement `0x02F1`.
+- [x] Handle server cancellation (`0x02F2`, if applicable to the 2008 profile).
+- [x] Ensure the progress display swallows input where the original client did.
+- [x] Implement server `ShowDigit` countdown displays.
+- [x] Implement boss information, map marker, death, and respawn-time updates.
+- [x] Implement remaining skill-message feedback that currently has no dedicated presentation.
 
 ### Storage password
 
-- [ ] Parse the storage-password prompt and result states.
-- [ ] Implement setting a new storage password.
-- [ ] Implement entering an existing storage password.
-- [ ] Handle confirmation mismatch, failure counts, and lockout/penalty state.
-- [ ] Ensure storage does not open before successful authentication when the server requires a password.
-- [ ] Implement the missing `0x023B` request flow and test it against rAthena.
+- [x] Parse the storage-password prompt and result states.
+- [x] Implement setting a new storage password.
+- [x] Implement entering an existing storage password.
+- [x] Handle confirmation mismatch, failure counts, and lockout/penalty state.
+- [x] Ensure storage does not open before successful authentication when the server requires a password.
+- [x] Implement the missing `0x023B` request flow and verify its 2008 wire layout against rAthena's packet database.
+- [ ] Run the flow end to end against a server implementation. Current rAthena accepts the packet layout but leaves `clif_parse_StoragePassword` as an upstream TODO.
 
 ### Rankings and fame feedback
 
-- [ ] Implement `/blacksmith` top-ten ranking request and response (`0x0217`).
-- [ ] Implement `/alchemist` top-ten ranking request and response (`0x0218`).
-- [ ] Format ranking entries consistently in the console.
-- [ ] Handle Blacksmith and Alchemist fame-point gain notifications.
-- [ ] Preserve the existing TaeKwon mission and ranking implementation.
+- [x] Implement `/blacksmith` top-ten ranking request and response (`0x0217`).
+- [x] Implement `/alchemist` top-ten ranking request and response (`0x0218`).
+- [x] Format ranking entries consistently in the console.
+- [x] Handle Blacksmith and Alchemist fame-point gain notifications.
+- [x] Preserve the existing TaeKwon mission and ranking implementation.
 - [ ] Investigate the `0x0237` killer ranking separately before treating it as a 2008 parity requirement.
 
 ## Client UI and quality-of-life
@@ -132,14 +133,12 @@ Goro.
 
 ### Inventory and item presentation
 
-- [ ] Show a quantity prompt when dropping a stackable item with an amount greater than one.
-- [ ] Default the prompt safely and clamp the result to the available amount and packet range.
-- [ ] Keep the direct one-item drop path for non-stackable items.
-- [ ] Implement the GRF-backed book reader for readable items.
-- [ ] Support page navigation, book titles, wrapping, and malformed/missing book data.
-- [ ] Add the original floor-item shadow beneath dropped item sprites.
-
-Current limitation: `inventoryDropAmount` always returns `1`.
+- [x] Show a quantity prompt when dropping a stackable item with an amount greater than one.
+- [x] Default the prompt safely and clamp the result to the available amount and packet range.
+- [x] Keep the direct one-item drop path for non-stackable items.
+- [x] Implement the GRF-backed book reader for readable items.
+- [x] Support page navigation, book titles, wrapping, and malformed/missing book data.
+- [x] Add the original floor-item shadow beneath dropped item sprites.
 
 ### Level-up availability notifications
 
@@ -151,11 +150,11 @@ Current limitation: `inventoryDropAmount` always returns `1`.
 
 ### Monster information / Sense
 
-- [ ] Parse the original Monster Info/Sense response (`0x018C`).
-- [ ] Implement a Monster Info window.
-- [ ] Display monster name/class, level, HP, DEF, MDEF, race, size, property, and elemental resistances.
-- [ ] Reuse the monster life information Goro already caches for Sense.
-- [ ] Do not turn this into permanent 2012-style monster HP bars.
+- [x] Parse the original Monster Info/Sense response (`0x018C`).
+- [x] Implement a Monster Info window.
+- [x] Display monster name/class, level, HP, DEF, MDEF, race, size, property, and elemental resistances.
+- [x] Reuse the monster life information Goro already caches for Sense.
+- [x] Do not turn this into permanent 2012-style monster HP bars.
 
 ### NPC cut-in illustrations
 
@@ -168,13 +167,14 @@ Current limitation: `inventoryDropAmount` always returns `1`.
 
 ### Minimap details
 
-- [ ] Show a party member's name when hovering their existing minimap marker.
-- [ ] Keep hover hit-testing cheap and avoid rebuilding the minimap widget tree every frame.
-- [ ] Ensure labels remain on-screen and do not conflict with the coordinate footer.
 - [ ] Add quest and guide-direction markers as part of the quest implementation.
 - [x] Party-member minimap markers already exist.
 - [x] Same-map guild-member markers already exist.
 - [x] Server compass markers already exist.
+
+Party-name hover belongs to the 2007 world-map feature, not to the small HUD
+minimap. The latter only needs the existing coloured party markers for 2008
+parity.
 
 ### Graphics options and small rendering details
 
@@ -205,7 +205,7 @@ work. First establish that the feature belongs to the 2008 client and that the
 OldRO data contains the required assets/tables.
 
 - [ ] Validate whether the world map UI and its map-position tables belong in the selected 2008 client profile.
-- [ ] If valid, implement the world map, current-map/player indicator, party markers, and per-map minimap inset.
+- [ ] If valid, implement the world map, current-map/player indicator, party markers with names on hover, and per-map minimap inset.
 - [ ] Validate skill/global cooldown packets for `20080910` before adding cooldown gating or shortcut overlays.
 - [ ] Validate whether the status-icon clock-wedge display is appropriate for 2008; Goro already has tooltips and a duration bar.
 - [ ] Validate party-booking packets `0x0802` and `0x0806`; they appear newer and should not be pulled into the 2008 backlog by default.
@@ -222,7 +222,7 @@ missing work.
 - [x] Same-map guild-member minimap markers.
 - [x] Server compass markers.
 - [x] Status-icon tooltips and remaining-duration presentation.
-- [x] Item information illustrations and card-slot/card composition support.
+- [x] Item information illustrations, full card illustrations, and card-slot/card composition support.
 - [x] Talkie Box and Graffiti text prompts and outbound talkbox skill packet.
 - [x] Positional actor, effect, and RSW audio.
 - [x] Party creation, invitation by name, settings, and member actions.

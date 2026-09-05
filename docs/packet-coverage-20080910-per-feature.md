@@ -6,6 +6,7 @@
   - [x] Quit game: 0x018A QuitGame
   - [x] Less effects toggle: 0x021D LessEffect
   - [x] Hotkey save: 0x02BA Hotkey
+  - [x] Server ShowDigit clock, boss reports/marker, and fixed skill notices: 0x01B1, 0x0215, 0x0293
 
   NPC Dialogs
 
@@ -54,7 +55,7 @@
   - [x] Item repair list/request/result: 0x01FC, 0x01FD, 0x01FE
   - [x] Weapon refine list/request/result: 0x0221, 0x0222, 0x0223
   - [ ] Cooking list/request: 0x025A, 0x025B
-  - [ ] Storage password: 0x023B
+  - [x] Storage password prompt, reply, and result: 0x023A, 0x023B, 0x023C
   - [ ] Cash shop NPC buy: 0x0288
 
   Rankings / PvP
@@ -62,8 +63,8 @@
   - [x] PvP map property and actor ranking: 0x0199, 0x019A
   - [x] PvP info: 0x020F, 0x0210
   - [x] Legacy WoE/GvG map semantics, targeting, announcements, guild minimap markers, siege emblems, and hidden combat damage: 0x009A, 0x0199, 0x01C3
-  - [ ] Blacksmith rank: 0x0217
-  - [ ] Alchemist rank: 0x0218
+  - [x] Blacksmith rank and fame feedback: 0x0217, 0x0219, 0x021B
+  - [x] Alchemist rank and fame feedback: 0x0218, 0x021A, 0x021C
   - [x] Taekwon mission and rank: 0x020E, 0x0224, 0x0225, 0x0226
   - [ ] Killer rank: 0x0237
 
@@ -104,15 +105,16 @@
 
   - [ ] Quest state ack: 0x02B6
   - [ ] Memorial dungeon command: 0x02CF
-  - [ ] Progress bar ack/cancel: 0x02F1 progressbar
+  - [x] Server-owned NPC progress bar start/completion/cancel: 0x02F0, 0x02F1, 0x02F2
 
   Class-Specific / Skill Dialog Choices
 
+  - [x] Wizard and mercenary Sense monster information: 0x018C
   - [x] Sage autospell choice list and selection: 0x01CD, 0x01CE
-  - [ ] Novice dori-dori: 0x01E7
+  - [x] Novice dori-dori command, head motion, and recovery bonus: 0x01E7
   - [ ] Novice explosion spirits: 0x01ED
   - [x] Star Gladiator feel save confirmation: 0x0253, 0x0254
-  - [ ] Auto-revive: 0x0292
+  - [x] Token of Siegfried self-revival: 0x0292
 
   GM / Admin
 

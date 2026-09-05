@@ -32,13 +32,26 @@ const (
 
 type ItemInfoWindow struct {
 	Window
-	item         session.InventoryItem
-	title        string
-	lines        []itemInfoTextLine
-	illustration image.Image
-	tooltip      tooltipState
-	slotIcons    map[string]image.Image
-	slotIconMiss map[string]struct{}
+	item            session.InventoryItem
+	title           string
+	lines           []itemInfoTextLine
+	illustration    image.Image
+	bookAvailable   bool
+	readBookRequest ItemInfoReadBookRequest
+	cardArtRequest  ItemInfoCardIllustrationRequest
+	tooltip         tooltipState
+	slotIcons       map[string]image.Image
+	slotIconMiss    map[string]struct{}
+}
+
+type ItemInfoReadBookRequest struct {
+	ItemID uint16
+	Title  string
+}
+
+type ItemInfoCardIllustrationRequest struct {
+	ItemID uint16
+	Title  string
 }
 
 func (w *ItemInfoWindow) openItem(ctx Context, item session.InventoryItem, mouseX, mouseY int) {
@@ -50,6 +63,9 @@ func (w *ItemInfoWindow) openItem(ctx Context, item session.InventoryItem, mouse
 	w.title = itemInfoTitle(ctx, item)
 	w.lines = itemInfoDescriptionLines(ctx, item)
 	w.illustration = nil
+	w.bookAvailable = itemInfoShowsReadBook(ctx, item)
+	w.readBookRequest = ItemInfoReadBookRequest{}
+	w.cardArtRequest = ItemInfoCardIllustrationRequest{}
 	w.tooltip.Hide()
 
 	height := w.windowHeight(ctx)
@@ -87,6 +103,7 @@ func (w *ItemInfoWindow) Rebind(ctx Context, assets AssetProvider) {
 	if !w.IsOpen() {
 		return
 	}
+	w.bookAvailable = itemInfoShowsReadBook(ctx, w.item)
 	w.SetSize(itemInfoWindowWidth, w.windowHeight(ctx))
 	if assets != nil {
 		w.illustration = assets.ItemInfoIllustrationImage(ctx.Resources, w.item, itemInfoIllustrationWidth, itemInfoIllustrationH)
@@ -114,9 +131,9 @@ func (w *ItemInfoWindow) widgetTree(ctx Context) widget.Widget {
 				Gap(12),
 		),
 	}
-	if itemInfoShowsCardSlots(ctx, w.item) {
+	if w.footerHeight(ctx) > 0 {
 		options = append(options,
-			Footer(w.cardSlotsFooter(ctx)...),
+			Footer(w.footerWidgets(ctx)...),
 		)
 	}
 	return Win(options...)
@@ -220,6 +237,38 @@ func (w *ItemInfoWindow) cardSlotsFooter(ctx Context) []widget.Widget {
 	return slots
 }
 
+func (w *ItemInfoWindow) footerWidgets(ctx Context) []widget.Widget {
+	children := make([]widget.Widget, 0, 6)
+	if itemInfoShowsCardIllustration(ctx, w.item) {
+		children = append(children, rotheme.Button("View", w.requestCardIllustration))
+	}
+	if w.bookAvailable {
+		children = append(children, rotheme.Button("Read", func() {
+			w.readBookRequest = ItemInfoReadBookRequest{ItemID: w.item.ItemID, Title: w.title}
+		}))
+	}
+	if itemInfoShowsCardSlots(ctx, w.item) {
+		children = append(children, w.cardSlotsFooter(ctx)...)
+	}
+	return children
+}
+
+func (w *ItemInfoWindow) requestCardIllustration() {
+	w.cardArtRequest = ItemInfoCardIllustrationRequest{ItemID: w.item.ItemID, Title: w.title}
+}
+
+func (w *ItemInfoWindow) PopReadBookRequest() ItemInfoReadBookRequest {
+	request := w.readBookRequest
+	w.readBookRequest = ItemInfoReadBookRequest{}
+	return request
+}
+
+func (w *ItemInfoWindow) PopCardIllustrationRequest() ItemInfoCardIllustrationRequest {
+	request := w.cardArtRequest
+	w.cardArtRequest = ItemInfoCardIllustrationRequest{}
+	return request
+}
+
 func (w *ItemInfoWindow) DrawTooltip(ctx Context, screen *render.Frame) {
 	w.tooltip.Draw(ctx, screen)
 }
@@ -321,10 +370,22 @@ func (w *ItemInfoWindow) bodyHeight(ctx Context) int {
 }
 
 func (w *ItemInfoWindow) footerHeight(ctx Context) int {
-	if itemInfoShowsCardSlots(ctx, w.item) {
+	if w.bookAvailable || itemInfoShowsCardIllustration(ctx, w.item) || itemInfoShowsCardSlots(ctx, w.item) {
 		return ROWindowFooterHeight
 	}
 	return 0
+}
+
+func itemInfoShowsCardIllustration(ctx Context, item session.InventoryItem) bool {
+	if ctx.Resources == nil || item.ItemID == 0 || item.Type != db.ItemTypeCard {
+		return false
+	}
+	_, ok := ctx.Resources.ItemCardIllustrationName(int(item.ItemID))
+	return ok
+}
+
+func itemInfoShowsReadBook(ctx Context, item session.InventoryItem) bool {
+	return ctx.Resources != nil && ctx.Resources.HasBook(item.ItemID)
 }
 
 func (w *ItemInfoWindow) descriptionHeight(ctx Context) int {
@@ -457,11 +518,26 @@ func wrapItemInfoTextLine(line itemInfoTextLine, maxRunes int) []itemInfoTextLin
 	if len(words) == 0 {
 		return []itemInfoTextLine{{}}
 	}
+	if maxRunes <= 0 {
+		return []itemInfoTextLine{line}
+	}
 	var out []itemInfoTextLine
 	current := itemInfoTextLine{}
 	currentLen := 0
 	for _, word := range words {
 		wordLen := runeLen(word.Text)
+		if wordLen > maxRunes {
+			if currentLen > 0 {
+				out = append(out, current)
+				current = itemInfoTextLine{}
+				currentLen = 0
+			}
+			chunks := splitItemInfoTextRun(word, maxRunes)
+			out = append(out, chunks[:len(chunks)-1]...)
+			current = chunks[len(chunks)-1]
+			currentLen = runeLen(itemInfoLinePlainText(current))
+			continue
+		}
 		if currentLen == 0 {
 			current.Runs = append(current.Runs, word)
 			currentLen = wordLen
@@ -481,6 +557,20 @@ func wrapItemInfoTextLine(line itemInfoTextLine, maxRunes int) []itemInfoTextLin
 		out = append(out, current)
 	}
 	return out
+}
+
+func splitItemInfoTextRun(run itemInfoTextRun, maxRunes int) []itemInfoTextLine {
+	runes := []rune(run.Text)
+	if maxRunes <= 0 || len(runes) <= maxRunes {
+		return []itemInfoTextLine{{Runs: []itemInfoTextRun{run}}}
+	}
+	lines := make([]itemInfoTextLine, 0, (len(runes)+maxRunes-1)/maxRunes)
+	for len(runes) > 0 {
+		count := minInt(maxRunes, len(runes))
+		lines = append(lines, itemInfoTextLine{Runs: []itemInfoTextRun{{Text: string(runes[:count]), Color: run.Color}}})
+		runes = runes[count:]
+	}
+	return lines
 }
 
 func itemInfoLineWords(line itemInfoTextLine) []itemInfoTextRun {
