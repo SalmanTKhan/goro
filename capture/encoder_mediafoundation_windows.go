@@ -40,7 +40,7 @@ func (e *MediaFoundationEncoder) Start(options RecordingOptions) error {
 		return err
 	}
 	if options.Container != RecordingMP4 || options.Codec != RecordingH264 {
-		return fmt.Errorf("Media Foundation encoder only supports MP4/H.264")
+		return fmt.Errorf("media foundation encoder only supports MP4/H.264")
 	}
 	if strings.TrimSpace(options.Path) == "" {
 		return fmt.Errorf("recording path is required")

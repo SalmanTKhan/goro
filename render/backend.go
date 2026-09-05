@@ -515,11 +515,8 @@ func focusablesForRoot(root widget.Widget, out []focusableWidget) []focusableWid
 		return out
 	}
 	if focus, ok := root.(widget.Focusable); ok && focus.IsFocusable() {
-		if child, ok := root.(widget.Widget); ok {
-			bounds, hasBounds := controllerWidgetBounds(child)
-			if hasBounds {
-				out = append(out, focusableWidget{focus: focus, widget: child, center: bounds.Center()})
-			}
+		if bounds, hasBounds := controllerWidgetBounds(root); hasBounds {
+			out = append(out, focusableWidget{focus: focus, widget: root, center: bounds.Center()})
 		}
 	}
 	for _, child := range controllerChildren(root) {

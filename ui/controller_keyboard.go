@@ -212,9 +212,7 @@ func firstControllerFocusable(root widget.Widget) widget.Widget {
 		return nil
 	}
 	if focus, ok := root.(widget.Focusable); ok && focus.IsFocusable() {
-		if child, ok := root.(widget.Widget); ok {
-			return child
-		}
+		return root
 	}
 	for _, child := range controllerChildren(root) {
 		if focus := firstControllerFocusable(child); focus != nil {
