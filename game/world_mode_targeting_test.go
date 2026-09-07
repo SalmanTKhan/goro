@@ -447,7 +447,6 @@ func TestGroundClickCancelsPendingAttackChase(t *testing.T) {
 	defer netClient.Close()
 	now := time.Now()
 	mode := &WorldMode{
-		tickCooldown: 2,
 		pendingAttack: attackIntent{
 			targetID:    300,
 			expires:     now.Add(time.Second),
@@ -504,7 +503,6 @@ func TestNPCClickIgnoresWalkCooldown(t *testing.T) {
 	inputState := input.NewState()
 	mode := &WorldMode{
 		walkCooldownUntil: time.Now().Add(time.Hour),
-		tickCooldown:      2,
 	}
 	ctx := client.Context{
 		Input:   inputState,
@@ -534,7 +532,7 @@ func TestGroundClickRespectsWalkCooldown(t *testing.T) {
 	networkClient := network.NewClient(20080910, false)
 	defer networkClient.Close()
 	blockedUntil := time.Now().Add(time.Hour)
-	mode := &WorldMode{walkCooldownUntil: blockedUntil, tickCooldown: 2}
+	mode := &WorldMode{walkCooldownUntil: blockedUntil}
 	ctx := client.Context{
 		Input:   inputState,
 		Network: networkClient,
