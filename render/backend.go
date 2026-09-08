@@ -223,6 +223,7 @@ type uiProfileStats struct {
 type runner struct {
 	app             *gogpu.App
 	ui              *uiapp.App
+	uiWindow        *uiWindowProvider
 	uiImage         *Image
 	uiOverlayCanvas *ggcanvas.Canvas
 	uiTextCache     map[string]cachedOverlayImage
@@ -305,8 +306,9 @@ func Run(game Game, cfg config.WindowConfig, renderCfg config.RenderConfig) erro
 	events := newFanoutEventSource(gg.EventSource())
 	uiTheme := rotheme.Default.AsTheme()
 	uiTheme.Colors.Background = widget.RGBA8(0, 0, 0, 0)
+	uiWindow := &uiWindowProvider{WindowProvider: gg}
 	ui := uiapp.New(
-		uiapp.WithWindowProvider(gg),
+		uiapp.WithWindowProvider(uiWindow),
 		uiapp.WithPlatformProvider(roCursorPlatformProvider{PlatformProvider: gg}),
 		uiapp.WithEventSource(events),
 		uiapp.WithTheme(uiTheme),
@@ -316,6 +318,7 @@ func Run(game Game, cfg config.WindowConfig, renderCfg config.RenderConfig) erro
 	r := &runner{
 		app:        gg,
 		ui:         ui,
+		uiWindow:   uiWindow,
 		game:       game,
 		width:      cfg.Width,
 		height:     cfg.Height,
@@ -327,6 +330,7 @@ func Run(game Game, cfg config.WindowConfig, renderCfg config.RenderConfig) erro
 		vsync:      renderCfg.VSync,
 		fps:        renderCfg.FPS,
 	}
+	defer r.close()
 	if receiver, ok := game.(quitReceiver); ok {
 		receiver.SetQuitFunc(gg.Quit)
 	}
@@ -336,6 +340,12 @@ func Run(game Game, cfg config.WindowConfig, renderCfg config.RenderConfig) erro
 	game.Resize(cfg.Width, cfg.Height)
 	wireInput(events, game.InputState())
 
+	gg.OnSurfaceAvailable(func() {
+		// The primary window is registered before this callback, and close
+		// events are processed afterwards. X/Alt+F4 must drain UI redraws
+		// before GoGPU destroys that window, earlier than App.OnClose.
+		uiWindow.guardClose(gg.PrimaryWindow())
+	})
 	gg.OnResize(func(width, height int) {
 		if width <= 0 || height <= 0 {
 			return
@@ -356,27 +366,38 @@ func Run(game Game, cfg config.WindowConfig, renderCfg config.RenderConfig) erro
 			gg.Quit()
 		}
 	})
-	gg.OnClose(func() {
-		if r.cpuProfile != nil {
-			pprof.StopCPUProfile()
-			_ = r.cpuProfile.Close()
-			r.cpuProfile = nil
-		}
-		if r.gpu != nil {
-			r.gpu.release()
-			r.gpu = nil
-		}
-		r.stopAsyncUIRasterizer()
-		if r.uiCanvas != nil {
-			_ = r.uiCanvas.Close()
-			r.uiCanvas = nil
-		}
-		if r.uiOverlayCanvas != nil {
-			_ = r.uiOverlayCanvas.Close()
-			r.uiOverlayCanvas = nil
-		}
-	})
+	gg.OnClose(r.close)
 	return gg.Run()
+}
+
+func (r *runner) close() {
+	// App-level quits reach OnClose before native teardown. Window-close
+	// requests have already drained redraws through the pre-close callback.
+	if r.uiWindow != nil {
+		r.uiWindow.close()
+	}
+	if r.ui != nil {
+		r.ui.Window().Close()
+		r.ui = nil
+	}
+	if r.cpuProfile != nil {
+		pprof.StopCPUProfile()
+		_ = r.cpuProfile.Close()
+		r.cpuProfile = nil
+	}
+	if r.gpu != nil {
+		r.gpu.release()
+		r.gpu = nil
+	}
+	r.stopAsyncUIRasterizer()
+	if r.uiCanvas != nil {
+		_ = r.uiCanvas.Close()
+		r.uiCanvas = nil
+	}
+	if r.uiOverlayCanvas != nil {
+		_ = r.uiOverlayCanvas.Close()
+		r.uiOverlayCanvas = nil
+	}
 }
 
 func configureGogpuVSync(renderCfg config.RenderConfig) {
