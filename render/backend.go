@@ -260,6 +260,7 @@ type runner struct {
 	uiLogicalHeight int
 	uiAsync         *asyncUIRasterizer
 	uiAsyncBusy     bool
+	uiAsyncDraining bool
 	uiPendingLists  []uiDrawList
 	uiGeneration    uint64
 	uiDrag          uiDragLayer
@@ -1219,6 +1220,9 @@ func (r *runner) submitPendingUIDrawLists() {
 	list := r.uiPendingLists[len(r.uiPendingLists)-1]
 	r.uiPendingLists = nil
 	r.submitUIDrawList(list)
+	// Let this replacement reach the screen before recording more work.
+	// Otherwise continuous animation can keep every result superseded forever.
+	r.uiAsyncDraining = r.uiAsyncBusy
 }
 
 func (r *runner) collectAsyncUIResults(width, height int, deviceScale float64) {
@@ -1229,6 +1233,7 @@ func (r *runner) collectAsyncUIResults(width, height int, deviceScale float64) {
 		select {
 		case result := <-r.uiAsync.done:
 			r.uiAsyncBusy = false
+			r.uiAsyncDraining = false
 			if result.err != nil {
 				glog.Warnf("async ui raster failed: %v", result.err)
 				r.uiGeneration++
@@ -1283,6 +1288,7 @@ func (r *runner) stopAsyncUIRasterizer() {
 	r.uiAsync.stop()
 	r.uiAsync = nil
 	r.uiAsyncBusy = false
+	r.uiAsyncDraining = false
 	r.uiPendingLists = nil
 }
 
@@ -1449,7 +1455,7 @@ func (r *runner) shouldRecordAsyncUI(needsWork bool) bool {
 	if !needsWork {
 		return false
 	}
-	if r != nil && r.uiAsyncBusy && len(r.uiPendingLists) > 0 {
+	if r != nil && r.uiAsyncBusy && (r.uiAsyncDraining || len(r.uiPendingLists) > 0) {
 		r.lastUIWork = true
 		return false
 	}
