@@ -269,6 +269,7 @@ func (u *worldUI) nonConsoleKeyboardInputBlocked(ctx client.Context) bool {
 		u.vendingWindow.KeyboardShortcutsBlocked() ||
 		u.tradeWindow.IsOpen() ||
 		u.mailWindow.IsOpen() ||
+		u.guildWindow.KeyboardShortcutsBlocked() ||
 		u.friendSettings.IsOpen() ||
 		u.whisperWindow.IsOpen() ||
 		u.chatRoomCreate.IsOpen() ||
@@ -687,6 +688,9 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 		return nil, nil
 	}
 	if m.ui.mailWindow.UpdateModal(ctx) || m.ui.mailWindow.UpdateKeyboardInput(ctx) {
+		return nil, nil
+	}
+	if m.ui.guildWindow.UpdateKeyboardInput(ctx) {
 		return nil, nil
 	}
 	dead := playerIsDead(ctx)
