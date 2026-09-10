@@ -72,6 +72,7 @@ type gpuRenderer struct {
 	worldMeshBatchFloats   []float32
 	worldMeshBatchIndices  []uint32
 	worldMeshBufferPages   []*worldMeshBufferPage
+	worldMeshSubmission    worldMeshSubmissionCache
 	worldBillboardBatches  []worldBillboardBatch
 	worldBillboardFloats   []float32
 	statsEnabled           bool
@@ -103,8 +104,9 @@ type gpuWorldMesh struct {
 }
 
 type worldMeshBatch struct {
-	key    drawBatchKey
-	meshes []*WorldMesh
+	key      drawBatchKey
+	meshes   []*WorldMesh
+	revision uint64
 }
 
 type worldBillboardBatch struct {
@@ -927,16 +929,23 @@ func (r *gpuRenderer) drawWorldMesh(ctx *gogpu.Context, pass *wgpu.RenderPassEnc
 }
 
 func (r *gpuRenderer) depthWriteWorldMeshBatches(screen *Frame) []worldMeshBatch {
+	var commands []WorldMeshCommand
+	if screen != nil {
+		commands = screen.worldMeshes
+	}
+	if r.worldMeshSubmission.matches(commands) {
+		// A batch growing during the previous draw may have left an empty page.
+		r.pruneWorldMeshBufferPages()
+		return r.worldMeshBatches
+	}
+	r.worldMeshSubmission.remember(commands)
 	for i := range r.worldMeshBatches {
 		r.worldMeshBatches[i].key = drawBatchKey{}
 		clear(r.worldMeshBatches[i].meshes)
 		r.worldMeshBatches[i].meshes = r.worldMeshBatches[i].meshes[:0]
 	}
 	r.worldMeshBatches = r.worldMeshBatches[:0]
-	commandCount := 0
-	if screen != nil {
-		commandCount = len(screen.worldMeshes)
-	}
+	commandCount := len(commands)
 	if r.worldMeshBatchByKey == nil {
 		r.worldMeshBatchByKey = make(map[drawBatchKey]int, commandCount)
 	} else {
@@ -946,7 +955,7 @@ func (r *gpuRenderer) depthWriteWorldMeshBatches(screen *Frame) []worldMeshBatch
 		r.pruneWorldMeshBatchCache()
 		return nil
 	}
-	for _, meshCommand := range screen.worldMeshes {
+	for _, meshCommand := range commands {
 		mesh := meshCommand.Mesh
 		if mesh == nil || !mesh.options.DepthWrite || mesh.texture == nil || mesh.texture.pix == nil || len(mesh.vertices) == 0 || len(mesh.indices) == 0 {
 			continue
@@ -961,6 +970,7 @@ func (r *gpuRenderer) depthWriteWorldMeshBatches(screen *Frame) []worldMeshBatch
 			} else {
 				r.worldMeshBatches = append(r.worldMeshBatches, worldMeshBatch{key: key})
 			}
+			r.worldMeshBatches[batchIndex].revision = r.worldMeshSubmission.revision
 			r.worldMeshBatchByKey[key] = batchIndex
 		}
 		r.worldMeshBatches[batchIndex].meshes = append(r.worldMeshBatches[batchIndex].meshes, mesh)

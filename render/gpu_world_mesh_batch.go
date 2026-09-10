@@ -7,6 +7,38 @@ type worldMeshVersion struct {
 	version uint64
 }
 
+// WorldMesh geometry and render keys are immutable between versions. Reuse the
+// grouping while the submitted sequence is unchanged, including duplicates.
+type worldMeshSubmissionCache struct {
+	meshes   []worldMeshVersion
+	revision uint64
+}
+
+func (c *worldMeshSubmissionCache) matches(commands []WorldMeshCommand) bool {
+	if c.revision == 0 || len(c.meshes) != len(commands) {
+		return false
+	}
+	for i, command := range commands {
+		if c.meshes[i].mesh != command.Mesh || (command.Mesh != nil && c.meshes[i].version != command.Mesh.version) {
+			return false
+		}
+	}
+	return true
+}
+
+func (c *worldMeshSubmissionCache) remember(commands []WorldMeshCommand) {
+	clear(c.meshes)
+	c.meshes = reserveSlice(c.meshes, len(commands))
+	for _, command := range commands {
+		entry := worldMeshVersion{mesh: command.Mesh}
+		if command.Mesh != nil {
+			entry.version = command.Mesh.version
+		}
+		c.meshes = append(c.meshes, entry)
+	}
+	c.revision++
+}
+
 // gpuWorldMeshBatch combines the currently visible meshes sharing a render key.
 // Keep their order, including duplicate submissions, so merging draws preserves
 // depth and blending results. Visibility changes rebuild only affected batches.
@@ -19,11 +51,18 @@ type gpuWorldMeshBatch struct {
 	height      int
 	lightWidth  int
 	lightHeight int
+	revision    uint64
 }
 
-func (b *gpuWorldMeshBatch) matches(meshes []*WorldMesh, width, height, lightWidth, lightHeight int) bool {
+func (b *gpuWorldMeshBatch) matches(batch worldMeshBatch, width, height, lightWidth, lightHeight int) bool {
+	meshes := batch.meshes
 	if b.width != width || b.height != height || b.lightWidth != lightWidth || b.lightHeight != lightHeight || len(b.meshes) != len(meshes) {
 		return false
+	}
+	// Only reuse validation for the exact submission revision that produced it.
+	// Grouping can change while the camera is disabled and no batches upload.
+	if batch.revision != 0 && b.revision == batch.revision {
+		return true
 	}
 	for i, mesh := range meshes {
 		if b.meshes[i].mesh != mesh || b.meshes[i].version != mesh.version {
@@ -33,7 +72,8 @@ func (b *gpuWorldMeshBatch) matches(meshes []*WorldMesh, width, height, lightWid
 	return true
 }
 
-func (b *gpuWorldMeshBatch) remember(meshes []*WorldMesh, width, height, lightWidth, lightHeight int) {
+func (b *gpuWorldMeshBatch) remember(batch worldMeshBatch, width, height, lightWidth, lightHeight int) {
+	meshes := batch.meshes
 	clear(b.meshes)
 	b.meshes = reserveSlice(b.meshes, len(meshes))
 	for _, mesh := range meshes {
@@ -41,6 +81,7 @@ func (b *gpuWorldMeshBatch) remember(meshes []*WorldMesh, width, height, lightWi
 	}
 	b.width, b.height = width, height
 	b.lightWidth, b.lightHeight = lightWidth, lightHeight
+	b.revision = batch.revision
 }
 
 func (b *gpuWorldMeshBatch) release() {
@@ -74,7 +115,8 @@ func (r *gpuRenderer) ensureWorldMeshBatch(batch worldMeshBatch) (*gpuWorldMeshB
 		cached = &gpuWorldMeshBatch{}
 		r.worldMeshBatchCache[batch.key] = cached
 	}
-	if cached.matches(batch.meshes, width, height, lw, lh) {
+	if cached.matches(batch, width, height, lw, lh) {
+		cached.revision = batch.revision
 		return cached, nil
 	}
 	floats, indices := worldMeshBatchGPUData(r.worldMeshBatchFloats, r.worldMeshBatchIndices, batch, width, height, lw, lh)
@@ -98,7 +140,7 @@ func (r *gpuRenderer) ensureWorldMeshBatch(batch worldMeshBatch) (*gpuWorldMeshB
 	}
 	cached.firstIndex = uint32((allocation.offset + vertexBytes) / 4)
 	cached.indexCount = uint32(len(indices))
-	cached.remember(batch.meshes, width, height, lw, lh)
+	cached.remember(batch, width, height, lw, lh)
 	return cached, nil
 }
 

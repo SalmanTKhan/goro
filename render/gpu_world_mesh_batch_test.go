@@ -53,26 +53,26 @@ func TestWorldMeshBatchCacheTracksVisibilityOrderVersionsAndTextureSizes(t *test
 	a, b := testWorldMesh(WhiteImage(), nil), testWorldMesh(WhiteImage(), nil)
 	cached := &gpuWorldMeshBatch{}
 	meshes := []*WorldMesh{a, b}
-	cached.remember(meshes, 32, 16, 64, 128)
-	if !cached.matches(meshes, 32, 16, 64, 128) {
+	cached.remember(worldMeshBatch{meshes: meshes}, 32, 16, 64, 128)
+	if !cached.matches(worldMeshBatch{meshes: meshes}, 32, 16, 64, 128) {
 		t.Fatal("unchanged visible meshes invalidated the cache")
 	}
 	for _, changed := range [][]*WorldMesh{{a}, {b, a}, {a, a}, {a, b, a}, nil} {
-		if cached.matches(changed, 32, 16, 64, 128) {
+		if cached.matches(worldMeshBatch{meshes: changed}, 32, 16, 64, 128) {
 			t.Fatal("changed mesh visibility, order or multiplicity reused stale geometry")
 		}
 	}
 	for _, size := range [][4]int{{64, 16, 64, 128}, {32, 32, 64, 128}, {32, 16, 128, 128}, {32, 16, 64, 256}} {
-		if cached.matches(meshes, size[0], size[1], size[2], size[3]) {
+		if cached.matches(worldMeshBatch{meshes: meshes}, size[0], size[1], size[2], size[3]) {
 			t.Fatal("changed texture dimensions reused stale UVs")
 		}
 	}
 	a.version++
-	if cached.matches(meshes, 32, 16, 64, 128) {
+	if cached.matches(worldMeshBatch{meshes: meshes}, 32, 16, 64, 128) {
 		t.Fatal("changed mesh version reused stale geometry")
 	}
-	cached.remember(meshes[:1], 32, 16, 64, 128)
-	if !cached.matches(meshes[:1], 32, 16, 64, 128) {
+	cached.remember(worldMeshBatch{meshes: meshes[:1]}, 32, 16, 64, 128)
+	if !cached.matches(worldMeshBatch{meshes: meshes[:1]}, 32, 16, 64, 128) {
 		t.Fatal("updated visible set did not replace cached membership")
 	}
 	if cached.meshes[:cap(cached.meshes)][1].mesh != nil {
@@ -92,7 +92,7 @@ func TestWorldMeshBatchCacheReleasesInvisibleBatches(t *testing.T) {
 	for _, batch := range batches {
 		allocation, _ := page.allocate(4096)
 		cached := &gpuWorldMeshBatch{allocation: allocation}
-		cached.remember(batch.meshes, 1, 1, 1, 1)
+		cached.remember(batch, 1, 1, 1, 1)
 		r.worldMeshBatchCache[batch.key] = cached
 	}
 	keyA := drawBatchKey{texture: a.texture, options: a.options}
@@ -133,6 +133,83 @@ func TestWorldMeshBatchesKeepDistinctLightmapsAndRenderOptions(t *testing.T) {
 	}
 	if got := len((&gpuRenderer{}).depthWriteWorldMeshBatches(screen)); got != 12 {
 		t.Fatalf("distinct render states produced %d batches, want 12", got)
+	}
+}
+
+func TestWorldMeshSubmissionInvalidatesGroupingAndGPUValidation(t *testing.T) {
+	texture := WhiteImage()
+	options := &DrawTrianglesOptions{DepthWrite: true}
+	a, b := testWorldMesh(texture, options), testWorldMesh(texture, options)
+	screen := NewFrame(320, 240)
+	screen.DrawWorldMesh(a)
+	screen.DrawWorldMesh(b)
+	r := &gpuRenderer{}
+	batch := r.depthWriteWorldMeshBatches(screen)[0]
+	cached := &gpuWorldMeshBatch{}
+	cached.remember(batch, 1, 1, 1, 1)
+	if next := r.depthWriteWorldMeshBatches(screen)[0]; next.revision != batch.revision || !cached.matches(next, 1, 1, 1, 1) {
+		t.Fatal("unchanged submission did not reuse its grouping and validation")
+	}
+	emptyPage := &worldMeshBufferPage{buf: &wgpu.Buffer{}}
+	r.worldMeshBufferPages = append(r.worldMeshBufferPages, emptyPage)
+	r.depthWriteWorldMeshBatches(screen)
+	if emptyPage.buf != nil || len(r.worldMeshBufferPages) != 0 {
+		t.Fatal("unchanged submission retained an empty page left by an upload")
+	}
+	// Frame reuses its command backing array, so the cache must own its snapshot.
+	screen.worldMeshes[0], screen.worldMeshes[1] = screen.worldMeshes[1], screen.worldMeshes[0]
+	reordered := r.depthWriteWorldMeshBatches(screen)[0]
+	if reordered.revision == batch.revision || !slices.Equal(reordered.meshes, []*WorldMesh{b, a}) || cached.matches(reordered, 1, 1, 1, 1) {
+		t.Fatal("reordered commands reused stale grouping or GPU data")
+	}
+	// Grouping may run multiple times without any intervening upload (for example
+	// with the camera disabled). An unchanged second frame must not validate an
+	// older GPU batch just because the current CPU grouping is unchanged.
+	if unchanged := r.depthWriteWorldMeshBatches(screen)[0]; cached.matches(unchanged, 1, 1, 1, 1) {
+		t.Fatal("unchanged grouping bypassed validation of a stale GPU batch")
+	}
+	cached.remember(reordered, 1, 1, 1, 1)
+	b.version++
+	updated := r.depthWriteWorldMeshBatches(screen)[0]
+	if updated.revision == reordered.revision || cached.matches(updated, 1, 1, 1, 1) {
+		t.Fatal("a changed mesh version did not invalidate the GPU data")
+	}
+	cached.remember(updated, 1, 1, 1, 1)
+	for _, size := range [][4]int{{2, 1, 1, 1}, {1, 2, 1, 1}, {1, 1, 2, 1}, {1, 1, 1, 2}} {
+		if cached.matches(updated, size[0], size[1], size[2], size[3]) {
+			t.Fatal("unchanged revision bypassed texture dimension validation")
+		}
+	}
+	screen.DrawWorldMesh(b)
+	duplicated := r.depthWriteWorldMeshBatches(screen)[0]
+	if duplicated.revision == updated.revision || !slices.Equal(duplicated.meshes, []*WorldMesh{b, a, b}) || cached.matches(duplicated, 1, 1, 1, 1) {
+		t.Fatal("a duplicate submission was lost or reused stale geometry")
+	}
+	screen.BeginFrame()
+	if len(r.depthWriteWorldMeshBatches(screen)) != 0 {
+		t.Fatal("empty frame retained the previous scene's batches")
+	}
+	for _, entry := range r.worldMeshSubmission.meshes[:cap(r.worldMeshSubmission.meshes)] {
+		if entry.mesh != nil {
+			t.Fatal("empty frame retained an old mesh in the submission snapshot")
+		}
+	}
+}
+
+func TestWorldMeshSubmissionHandlesNilAndTransparentCommands(t *testing.T) {
+	r := &gpuRenderer{}
+	screen := NewFrame(320, 240)
+	opaque := testWorldMesh(WhiteImage(), &DrawTrianglesOptions{DepthWrite: true})
+	transparent := testWorldMesh(WhiteImage(), nil)
+	screen.worldMeshes = []WorldMeshCommand{{}, {Mesh: opaque}, {Mesh: transparent}}
+	for range 2 {
+		batches := r.depthWriteWorldMeshBatches(screen)
+		if len(batches) != 1 || !slices.Equal(batches[0].meshes, []*WorldMesh{opaque}) {
+			t.Fatal("cached grouping changed nil/transparent command filtering")
+		}
+	}
+	if len(r.depthWriteWorldMeshBatches(nil)) != 0 {
+		t.Fatal("nil frame did not clear the grouping")
 	}
 }
 
