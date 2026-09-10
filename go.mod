@@ -61,4 +61,4 @@ replace github.com/godexture/metadata-id3 => github.com/godexture/godec/plugins/
 
 replace github.com/gogpu/gg => github.com/kivutar/gg v0.52.4-0.20260907093528-f5ad04483d31
 
-replace github.com/gogpu/ui => github.com/kivutar/ui v0.1.55-0.20260907095244-a4c40d22caa3
+replace github.com/gogpu/ui => github.com/kivutar/ui v0.1.55-0.20260910051920-e1fc6c401b18
