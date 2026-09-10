@@ -35,8 +35,9 @@ type Colors struct {
 }
 
 type Typography struct {
-	FontFamily string
-	TextSize   float32
+	FontFamily     string
+	BoldFontFamily string
+	TextSize       float32
 }
 
 type Theme struct {

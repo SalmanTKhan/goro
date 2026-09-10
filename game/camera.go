@@ -155,6 +155,8 @@ func isCameraDoubleClick(lastAt, now time.Time, lastX, lastY, x, y int) bool {
 // handleMouseCameraReset recognizes the same right-button double-click gesture
 // used by the classic desktop client. It runs before world/UI click dispatch so
 // the second click cannot also rotate the camera or open a context action.
+//
+//lint:ignore U1000 retained for mouse-capable backends
 func (m *WorldMode) handleMouseCameraReset(ctx client.Context, blocked bool) bool {
 	if m == nil || ctx.Input == nil || !ctx.Input.MouseJustPressed(input.MouseButtonRight) {
 		return false

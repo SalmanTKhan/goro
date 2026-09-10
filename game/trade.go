@@ -150,6 +150,7 @@ func (m *WorldMode) handleTradeExec(ctx client.Context, exec network.TradeExec) 
 	m.ui.console.AddErrorMessage("Trade failed.")
 }
 
+//lint:ignore U1000 retained for mobile session integration
 func (m *WorldMode) handleMobileTradeItem(ctx client.Context, item network.TradeItem) {
 	if !m.mobileTrade.open {
 		return
@@ -161,6 +162,7 @@ func (m *WorldMode) handleMobileTradeItem(ctx client.Context, item network.Trade
 	m.mobileTrade.partnerOffer = append(m.mobileTrade.partnerOffer, mobileTradeOfferFromNetwork(ctx, item))
 }
 
+//lint:ignore U1000 retained for mobile session integration
 func (m *WorldMode) handleMobileTradeAddAck(ack network.TradeAddItemAck) {
 	if !m.mobileTrade.open {
 		return
@@ -183,6 +185,7 @@ func (m *WorldMode) handleMobileTradeAddAck(ack network.TradeAddItemAck) {
 	m.mobileTrade.ownOffer = append(m.mobileTrade.ownOffer, offer)
 }
 
+//lint:ignore U1000 retained for mobile session integration
 func (m *WorldMode) handleMobileTradeUndo() {
 	if !m.mobileTrade.open {
 		return
@@ -346,6 +349,7 @@ func mobileTradeOfferFromInventory(item mobileui.InventoryItemModel, quantity in
 	return mobileui.TradeOfferItemModel{ItemIndex: item.Index, ItemID: item.ItemID, Name: item.DisplayName, IconKey: item.IconKey, Quantity: quantity, Identified: item.Identified, Refine: item.Refine, Cards: item.Cards}
 }
 
+//lint:ignore U1000 retained for mobile session integration
 func mobileTradeOfferFromNetwork(ctx client.Context, item network.TradeItem) mobileui.TradeOfferItemModel {
 	name, iconKey := "", ""
 	if ctx.Resources != nil {

@@ -24,6 +24,10 @@ func Label(content string) *primitives.TextWidget {
 		Color(Default.Colors.LabelText)
 }
 
+func SectionLabel(content string) *primitives.TextWidget {
+	return Label(content)
+}
+
 // DrawLabel renders the semantic label style on a canvas.
 func DrawLabel(canvas widget.Canvas, content string, bounds geometry.Rect, align widget.TextAlign) {
 	if content == "" {

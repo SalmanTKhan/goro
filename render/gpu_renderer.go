@@ -193,6 +193,34 @@ func newGPURenderer(ctx *gogpu.Context, app *gogpu.App, cfg config.RenderConfig)
 	return r, nil
 }
 
+func newGPURendererFromProvider(provider GPUDeviceContext, cfg config.RenderConfig) (*gpuRenderer, error) {
+	if provider == nil || provider.Device() == nil {
+		return nil, fmt.Errorf("GPU device provider is not ready")
+	}
+	r := &gpuRenderer{
+		dev:          provider.Device(),
+		queue:        provider.Queue(),
+		format:       provider.SurfaceFormat(),
+		samplers:     make(map[samplerKey]*wgpu.Sampler),
+		textures:     make(map[*Image]*gpuImageTexture),
+		bindGroups:   make(map[bindGroupKey]*wgpu.BindGroup),
+		worldMeshes:  make(map[*WorldMesh]*gpuWorldMesh),
+		statsEnabled: cfg.Stats,
+		worldDebug:   cfg.WorldDebugStats,
+	}
+	if r.queue == nil {
+		r.queue = r.dev.Queue()
+	}
+	if r.queue == nil {
+		return nil, fmt.Errorf("GPU queue is not ready")
+	}
+	if err := r.init(nil); err != nil {
+		r.release()
+		return nil, err
+	}
+	return r, nil
+}
+
 func (r *gpuRenderer) init(_ *gogpu.Context) error {
 	var err error
 	r.uniform, err = r.dev.CreateBuffer(&wgpu.BufferDescriptor{

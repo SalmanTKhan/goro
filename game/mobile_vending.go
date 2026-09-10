@@ -61,6 +61,7 @@ func (m *WorldMode) MobileVendingModel(ctx client.Context) mobileui.MobileVendin
 	return mobileui.ProjectVending(true, m.mobileVending.loading, m.mobileVending.ownerAID, m.mobileVending.shopName, zeny, items, m.mobileVending.notice)
 }
 
+//lint:ignore U1000 retained for mobile session integration
 func (m *WorldMode) applyMobileVendingList(ctx client.Context, list network.VendingItemList) {
 	if m == nil || list.Own {
 		return
@@ -77,6 +78,7 @@ func (m *WorldMode) applyMobileVendingList(ctx client.Context, list network.Vend
 	}
 }
 
+//lint:ignore U1000 retained for mobile session integration
 func (m *WorldMode) applyMobileVendingResult(result network.VendingPurchaseResult) {
 	if m == nil || !m.mobileVending.open {
 		return

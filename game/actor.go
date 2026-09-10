@@ -1218,6 +1218,8 @@ func (m *WorldMode) drawHoveredActorNameLabel(screen *render.Frame, ctx client.C
 // renderer cannot discover it on its own. Keep the label anchored to the
 // selected actor/item and suppress a duplicate when the physical cursor is
 // already hovering the same target.
+//
+//lint:ignore U1000 retained for controller-capable backends
 func (m *WorldMode) drawControllerFocusedTargetNameLabel(screen *render.Frame, ctx client.Context, projection sceneProjection, now time.Time) {
 	if m == nil || screen == nil || ctx.Input == nil || ctx.World == nil {
 		return

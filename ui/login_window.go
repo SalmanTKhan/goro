@@ -49,7 +49,6 @@ func NewLoginWindow(ctx client.Context, username, password string, callbacks Log
 	}
 	w.Window = NewWindow(layout.W, layout.H)
 	w.OpenAt(layout.X, layout.Y, w.widgetTree())
-	w.restoreFocus(ctx)
 	return w
 }
 
@@ -65,8 +64,7 @@ func (w *LoginWindow) SetContext(ctx client.Context) {
 	if sameLayout {
 		return
 	}
-	w.SetContent(w.widgetTree())
-	w.restoreFocus(ctx)
+	w.rebuild()
 }
 
 func (w *LoginWindow) Update(ctx client.Context) bool {
@@ -76,15 +74,14 @@ func (w *LoginWindow) Update(ctx client.Context) bool {
 	return w.Window.Update(ctx)
 }
 
-func (w *LoginWindow) restoreFocus(ctx client.Context) {
-	if wc := windowWidgetContext(ctx); wc != nil {
-		// Register the initial/rebuilt field with the focus manager too, so
-		// Tab advances from it instead of selecting it a second time.
-		if w.user.IsFocused() {
-			wc.RequestFocus(w.user)
-		} else if w.password.IsFocused() {
-			wc.RequestFocus(w.password)
-		}
+func (w *LoginWindow) rebuild() {
+	userFocused, passwordFocused := w.fieldFocus()
+	w.SetContent(w.widgetTree())
+	if w.user != nil {
+		w.user.SetFocused(userFocused)
+	}
+	if w.password != nil {
+		w.password.SetFocused(passwordFocused)
 	}
 }
 
@@ -137,11 +134,9 @@ func (w *LoginWindow) widgetTree() widget.Widget {
 			primitives.Box(
 				primitives.HBox(
 					primitives.Box(
-						rotheme.Label("Account").
-							Align(widget.TextAlignRight).
+						rotheme.Text("Account").
 							LineHeight(fieldH/rotheme.Default.Typography.TextSize),
 					).
-						CrossAlign(primitives.CrossAxisStretch).
 						Width(labelW).
 						Height(fieldH),
 					primitives.Box(user).
@@ -153,11 +148,9 @@ func (w *LoginWindow) widgetTree() widget.Widget {
 				primitives.Box(offline).Height(fieldH),
 				primitives.HBox(
 					primitives.Box(
-						rotheme.Label("Password").
-							Align(widget.TextAlignRight).
+						rotheme.Text("Password").
 							LineHeight(fieldH/rotheme.Default.Typography.TextSize),
 					).
-						CrossAlign(primitives.CrossAxisStretch).
 						Width(labelW).
 						Height(fieldH),
 					primitives.Box(password).

@@ -297,6 +297,18 @@ func (m *WorldMode) sendPickupRequest(ctx client.Context, item worldstate.FloorI
 	}
 }
 
+func (m *WorldMode) startLocalPickupAnimation(ctx client.Context, started time.Time) {
+	if ctx.Session == nil {
+		return
+	}
+	if ctx.Session.AccountID != 0 {
+		m.startActorAnimation(ctx, ctx.Session.AccountID, spriteActionPickup, started, pickupAnimationDuration)
+	}
+	if ctx.Session.CharID != 0 {
+		m.startActorAnimation(ctx, ctx.Session.CharID, spriteActionPickup, started, pickupAnimationDuration)
+	}
+}
+
 func (m *WorldMode) facePlayerTowardItem(ctx client.Context, item worldstate.FloorItem) {
 	if ctx.World == nil {
 		return

@@ -48,6 +48,7 @@ func newCaptureReadbackRing(device *wgpu.Device) *captureReadbackRing {
 	return &captureReadbackRing{device: device}
 }
 
+//lint:ignore U1000 retained for capture-capable backends
 func (r *captureReadbackRing) prepare(width, height int) error {
 	if r == nil || r.device == nil {
 		return fmt.Errorf("capture GPU device is unavailable")
@@ -85,6 +86,7 @@ func (r *captureReadbackRing) prepare(width, height int) error {
 	return nil
 }
 
+//lint:ignore U1000 retained for capture-capable backends
 func (r *captureReadbackRing) encode(encoder *wgpu.CommandEncoder, source *wgpu.Texture, width, height int, meta captureFrameMeta) bool {
 	if r == nil || encoder == nil || source == nil || r.width != width || r.height != height {
 		if r != nil {
@@ -115,6 +117,7 @@ func (r *captureReadbackRing) encode(encoder *wgpu.CommandEncoder, source *wgpu.
 	return false
 }
 
+//lint:ignore U1000 retained for capture-capable backends
 func (r *captureReadbackRing) afterSubmit() {
 	if r == nil {
 		return
@@ -215,6 +218,7 @@ func (r *captureReadbackRing) releaseBuffers() {
 	}
 }
 
+//lint:ignore U1000 retained for capture-capable backends
 func align256(value int) int {
 	return (value + 255) &^ 255
 }
@@ -332,6 +336,7 @@ func (r *captureRuntime) requestStop(resize bool) {
 	r.resizeStop = r.resizeStop || resize
 }
 
+//lint:ignore U1000 retained for capture-capable backends
 func (r *captureRuntime) encode(encoder *wgpu.CommandEncoder, source *wgpu.Texture, width, height int, format gputypes.TextureFormat, pts time.Duration) bool {
 	if r == nil {
 		return false
@@ -376,6 +381,7 @@ func (r *captureRuntime) nextRecordingFrame(elapsed time.Duration) (bool, time.D
 	return true, pts
 }
 
+//lint:ignore U1000 retained for capture-capable backends
 func (r *captureRuntime) afterSubmit() {
 	if r != nil {
 		r.ring.afterSubmit()
