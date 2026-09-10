@@ -973,7 +973,7 @@ func (m *LoginMode) connectAndMaybeLogin(ctx client.Context, conn res.Connection
 	if err != nil {
 		m.loginPending = false
 		m.status = err.Error()
-		openConnectionFailedDialog(ctx, &m.disconnectDialog)
+		m.showConnectionFailed(ctx)
 		return
 	}
 
@@ -1087,7 +1087,7 @@ func (m *LoginMode) connectCharServer(ctx client.Context, server network.CharSer
 	cancel()
 	if err != nil {
 		m.status = "char connect failed: " + err.Error()
-		openConnectionFailedDialog(ctx, &m.disconnectDialog)
+		m.showConnectionFailed(ctx)
 		return false
 	}
 
@@ -1108,7 +1108,7 @@ func (m *LoginMode) connectMapServer(ctx client.Context, zone network.ZoneServer
 	cancel()
 	if err != nil {
 		m.status = "map connect failed: " + err.Error()
-		openConnectionFailedDialog(ctx, &m.disconnectDialog)
+		m.showConnectionFailed(ctx)
 		return
 	}
 
