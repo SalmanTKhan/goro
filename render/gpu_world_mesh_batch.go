@@ -1,10 +1,6 @@
 package render
 
-import (
-	"fmt"
-
-	"github.com/gogpu/wgpu"
-)
+import "fmt"
 
 type worldMeshVersion struct {
 	mesh    *WorldMesh
@@ -15,8 +11,8 @@ type worldMeshVersion struct {
 // Keep their order, including duplicate submissions, so merging draws preserves
 // depth and blending results. Visibility changes rebuild only affected batches.
 type gpuWorldMeshBatch struct {
-	vertexBuf   dynamicGPUBuffer
-	indexBuf    dynamicGPUBuffer
+	allocation  worldMeshBufferAllocation
+	firstIndex  uint32
 	indexCount  uint32
 	meshes      []worldMeshVersion
 	width       int
@@ -48,12 +44,7 @@ func (b *gpuWorldMeshBatch) remember(meshes []*WorldMesh, width, height, lightWi
 }
 
 func (b *gpuWorldMeshBatch) release() {
-	if b.vertexBuf.buf != nil {
-		b.vertexBuf.buf.Release()
-	}
-	if b.indexBuf.buf != nil {
-		b.indexBuf.buf.Release()
-	}
+	b.allocation.release()
 	*b = gpuWorldMeshBatch{}
 }
 
@@ -66,6 +57,7 @@ func (r *gpuRenderer) pruneWorldMeshBatchCache() {
 			delete(r.worldMeshBatchCache, key)
 		}
 	}
+	r.pruneWorldMeshBufferPages()
 }
 
 func (r *gpuRenderer) ensureWorldMeshBatch(batch worldMeshBatch) (*gpuWorldMeshBatch, error) {
@@ -87,14 +79,24 @@ func (r *gpuRenderer) ensureWorldMeshBatch(batch worldMeshBatch) (*gpuWorldMeshB
 	}
 	floats, indices := worldMeshBatchGPUData(r.worldMeshBatchFloats, r.worldMeshBatchIndices, batch, width, height, lw, lh)
 	r.worldMeshBatchFloats, r.worldMeshBatchIndices = floats, indices
-	if _, err := r.dynamicBuffer(&cached.vertexBuf, "goro-world-mesh-batch-vertices", len(floats)*4,
-		wgpu.BufferUsageVertex|wgpu.BufferUsageCopyDst, floatBytes(floats)); err != nil {
+	vertexBytes := len(floats) * 4
+	size := vertexBytes + len(indices)*4
+	if cached.allocation.page == nil || cached.allocation.size < size {
+		cached.allocation.release()
+		allocation, err := r.allocateWorldMeshBuffer(size)
+		if err != nil {
+			return nil, err
+		}
+		cached.allocation = allocation
+	}
+	allocation := cached.allocation
+	if err := r.queue.WriteBuffer(allocation.page.buf, uint64(allocation.offset), floatBytes(floats)); err != nil {
 		return nil, err
 	}
-	if _, err := r.dynamicBuffer(&cached.indexBuf, "goro-world-mesh-batch-indices", len(indices)*4,
-		wgpu.BufferUsageIndex|wgpu.BufferUsageCopyDst, u32Bytes(indices)); err != nil {
+	if err := r.queue.WriteBuffer(allocation.page.buf, uint64(allocation.offset+vertexBytes), u32Bytes(indices)); err != nil {
 		return nil, err
 	}
+	cached.firstIndex = uint32((allocation.offset + vertexBytes) / 4)
 	cached.indexCount = uint32(len(indices))
 	cached.remember(batch.meshes, width, height, lw, lh)
 	return cached, nil

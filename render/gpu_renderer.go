@@ -71,6 +71,7 @@ type gpuRenderer struct {
 	worldMeshBatchCache    map[drawBatchKey]*gpuWorldMeshBatch
 	worldMeshBatchFloats   []float32
 	worldMeshBatchIndices  []uint32
+	worldMeshBufferPages   []*worldMeshBufferPage
 	worldBillboardBatches  []worldBillboardBatch
 	worldBillboardFloats   []float32
 	statsEnabled           bool
@@ -511,7 +512,7 @@ func (r *gpuRenderer) Draw(ctx *gogpu.Context, screen *Frame) (bool, error) {
 	frame := r.buildFrame(screen)
 	meshBatches := r.depthWriteWorldMeshBatches(screen)
 	if r.statsEnabled && time.Since(r.statsLast) >= time.Second {
-		glog.Debugf("render stats world_commands=%d world_mesh_commands=%d world_mesh_batches=%d world_billboards=%d retained_world_meshes=%d world_batches=%d world_vertices=%d world_indices=%d commands=%d batches=%d vertices=%d indices=%d textures=%d bindgroups=%d", len(screen.worldCommands), len(screen.worldMeshes), len(meshBatches), len(screen.worldBillboards), len(r.worldMeshes), len(world.batches), len(world.floats)/worldVertexFloatCount, len(world.indices), len(screen.commands), len(frame.batches), len(frame.floats)/screenVertexFloatCount, len(frame.indices), len(r.textures), len(r.bindGroups))
+		glog.Debugf("render stats world_commands=%d world_mesh_commands=%d world_mesh_batches=%d world_mesh_buffer_pages=%d world_billboards=%d retained_world_meshes=%d world_batches=%d world_vertices=%d world_indices=%d commands=%d batches=%d vertices=%d indices=%d textures=%d bindgroups=%d", len(screen.worldCommands), len(screen.worldMeshes), len(meshBatches), len(r.worldMeshBufferPages), len(screen.worldBillboards), len(r.worldMeshes), len(world.batches), len(world.floats)/worldVertexFloatCount, len(world.indices), len(screen.commands), len(frame.batches), len(frame.floats)/screenVertexFloatCount, len(frame.indices), len(r.textures), len(r.bindGroups))
 		r.statsLast = time.Now()
 	}
 	if r.worldDebug && time.Since(r.worldDebugLast) >= time.Second {
@@ -997,11 +998,13 @@ func (r *gpuRenderer) drawWorldMeshBatch(ctx *gogpu.Context, pass *wgpu.RenderPa
 	if err != nil {
 		return err
 	}
-	state.setVertexBuffer(pass, gpuBatch.vertexBuf.buf)
-	state.setIndexBuffer(pass, gpuBatch.indexBuf.buf)
+	state.setVertexBuffer(pass, gpuBatch.allocation.page.buf)
+	state.setIndexBuffer(pass, gpuBatch.allocation.page.buf)
 	pass.DrawIndexed(gputypes.DrawIndexedArgs{
 		IndexCount:    gpuBatch.indexCount,
 		InstanceCount: 1,
+		FirstIndex:    gpuBatch.firstIndex,
+		BaseVertex:    int32(gpuBatch.allocation.offset / worldVertexStride),
 	})
 	return nil
 }
@@ -1297,6 +1300,7 @@ func (r *gpuRenderer) release() {
 		batch.release()
 		delete(r.worldMeshBatchCache, key)
 	}
+	r.pruneWorldMeshBufferPages()
 	for _, bg := range r.bindGroups {
 		if bg != nil {
 			bg.Release()

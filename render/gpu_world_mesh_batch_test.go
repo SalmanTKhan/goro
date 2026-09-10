@@ -86,8 +86,12 @@ func TestWorldMeshBatchCacheReleasesInvisibleBatches(t *testing.T) {
 	screen.DrawWorldMesh(a)
 	screen.DrawWorldMesh(b)
 	r := &gpuRenderer{worldMeshBatchCache: make(map[drawBatchKey]*gpuWorldMeshBatch)}
-	for _, batch := range r.depthWriteWorldMeshBatches(screen) {
-		cached := &gpuWorldMeshBatch{vertexBuf: dynamicGPUBuffer{buf: &wgpu.Buffer{}}, indexBuf: dynamicGPUBuffer{buf: &wgpu.Buffer{}}}
+	batches := r.depthWriteWorldMeshBatches(screen)
+	page := &worldMeshBufferPage{buf: &wgpu.Buffer{}, free: []worldMeshBufferRange{{size: worldMeshBufferPageSize}}}
+	r.worldMeshBufferPages = append(r.worldMeshBufferPages, page)
+	for _, batch := range batches {
+		allocation, _ := page.allocate(4096)
+		cached := &gpuWorldMeshBatch{allocation: allocation}
 		cached.remember(batch.meshes, 1, 1, 1, 1)
 		r.worldMeshBatchCache[batch.key] = cached
 	}
@@ -100,12 +104,15 @@ func TestWorldMeshBatchCacheReleasesInvisibleBatches(t *testing.T) {
 	if len(r.worldMeshBatchCache) != 1 || r.worldMeshBatchCache[keyA] != cachedA {
 		t.Fatal("visible batch was evicted or invisible batch retained")
 	}
-	if cachedB.vertexBuf.buf != nil || cachedB.indexBuf.buf != nil || len(cachedB.meshes) != 0 {
+	if cachedB.allocation.page != nil || len(cachedB.meshes) != 0 {
 		t.Fatal("evicted batch kept its buffers or mesh references")
+	}
+	if page.buf == nil || len(r.worldMeshBufferPages) != 1 || page.allocations != 1 {
+		t.Fatal("evicting one batch released a page still used by another batch")
 	}
 	screen.BeginFrame()
 	r.depthWriteWorldMeshBatches(screen)
-	if len(r.worldMeshBatchCache) != 0 || cachedA.vertexBuf.buf != nil || cachedA.indexBuf.buf != nil {
+	if len(r.worldMeshBatchCache) != 0 || cachedA.allocation.page != nil || len(r.worldMeshBufferPages) != 0 || page.buf != nil {
 		t.Fatal("empty frame did not release the previous map's batch buffers")
 	}
 }
