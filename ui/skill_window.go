@@ -323,6 +323,7 @@ func (w *SkillWindow) skillGridWidget(ctx Context, assets AssetProvider, actions
 	entries := w.skillGridEntries(ctx, assets)
 	grid := newSkillGridWidget(skillGridConfig{
 		entries: entries,
+		job:     selectedJob(ctx.Session),
 		onPress: func(skill session.Skill, mx, my int) {
 			w.pressSkill(ctx, actions, skill, mx, my)
 		},
