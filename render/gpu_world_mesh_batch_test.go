@@ -1,0 +1,147 @@
+package render
+
+import (
+	"slices"
+	"testing"
+
+	"github.com/gogpu/wgpu"
+)
+
+func TestWorldMeshBatchPreservesVertexDataAndTriangleOrder(t *testing.T) {
+	texture, light := NewImage(32, 16), NewImage(64, 128)
+	options := DrawTrianglesOptions{DepthWrite: true, DepthBias: 0.005, DisableFog: true}
+	a := NewWorldMeshWithLightmap([]Vertex3D{
+		{X: 7, Y: 8, Z: 9, SrcX: 16, SrcY: 8, LightSrcX: 32, LightSrcY: 64,
+			ColorR: 0.25, ColorG: 0.5, ColorB: 0.75, ColorA: 1, DepthX: 1, DepthY: 2, DepthZ: 3},
+		{X: 10, SrcX: 32, LightSrcY: 128},
+		{X: 11, SrcY: 16, LightSrcX: 64},
+	}, []uint16{2, 0, 1}, texture, light, &options)
+	b := testWorldMesh(texture, &options)
+	b.lightTexture = light
+	batch := worldMeshBatch{key: drawBatchKey{texture: texture, lightTexture: light, options: options}, meshes: []*WorldMesh{a, b, a}}
+	floats, indices := worldMeshBatchGPUData(nil, nil, batch, 32, 16, 64, 128)
+	if want := []uint32{2, 0, 1, 3, 4, 5, 8, 6, 7}; !slices.Equal(indices, want) {
+		t.Fatalf("merged triangle order = %v, want %v", indices, want)
+	}
+	first := []float32{7, 8, 9, 0.5, 0.5, 0.25, 0.5, 0.75, 1, 1, 2, 3, 0.005, 0, 0.5, 0.5}
+	if !slices.Equal(floats[:worldVertexFloatCount], first) {
+		t.Fatalf("first vertex = %v, want %v", floats[:worldVertexFloatCount], first)
+	}
+	var separate []float32
+	for _, mesh := range batch.meshes {
+		packed, _ := worldMeshGPUData(mesh, 32, 16)
+		separate = append(separate, packed...)
+	}
+	if !slices.Equal(floats, separate) {
+		t.Fatal("merging changed vertex data compared with separate mesh uploads")
+	}
+}
+
+func TestWorldMeshBatchRebasesIndicesBeyondUint16(t *testing.T) {
+	texture := WhiteImage()
+	options := DrawTrianglesOptions{DepthWrite: true}
+	a := NewWorldMesh(make([]Vertex3D, 65535), []uint16{0, 65533, 65534}, texture, &options)
+	b := testWorldMesh(texture, &options)
+	_, indices := worldMeshBatchGPUData(nil, nil, worldMeshBatch{meshes: []*WorldMesh{a, b, b}}, 1, 1, 1, 1)
+	want := []uint32{0, 65533, 65534, 65535, 65536, 65537, 65538, 65539, 65540}
+	if !slices.Equal(indices, want) {
+		t.Fatalf("merged indices = %v, want %v", indices, want)
+	}
+}
+
+func TestWorldMeshBatchCacheTracksVisibilityOrderVersionsAndTextureSizes(t *testing.T) {
+	a, b := testWorldMesh(WhiteImage(), nil), testWorldMesh(WhiteImage(), nil)
+	cached := &gpuWorldMeshBatch{}
+	meshes := []*WorldMesh{a, b}
+	cached.remember(meshes, 32, 16, 64, 128)
+	if !cached.matches(meshes, 32, 16, 64, 128) {
+		t.Fatal("unchanged visible meshes invalidated the cache")
+	}
+	for _, changed := range [][]*WorldMesh{{a}, {b, a}, {a, a}, {a, b, a}, nil} {
+		if cached.matches(changed, 32, 16, 64, 128) {
+			t.Fatal("changed mesh visibility, order or multiplicity reused stale geometry")
+		}
+	}
+	for _, size := range [][4]int{{64, 16, 64, 128}, {32, 32, 64, 128}, {32, 16, 128, 128}, {32, 16, 64, 256}} {
+		if cached.matches(meshes, size[0], size[1], size[2], size[3]) {
+			t.Fatal("changed texture dimensions reused stale UVs")
+		}
+	}
+	a.version++
+	if cached.matches(meshes, 32, 16, 64, 128) {
+		t.Fatal("changed mesh version reused stale geometry")
+	}
+	cached.remember(meshes[:1], 32, 16, 64, 128)
+	if !cached.matches(meshes[:1], 32, 16, 64, 128) {
+		t.Fatal("updated visible set did not replace cached membership")
+	}
+	if cached.meshes[:cap(cached.meshes)][1].mesh != nil {
+		t.Fatal("cache retained an invisible mesh in the unused slice tail")
+	}
+}
+
+func TestWorldMeshBatchCacheReleasesInvisibleBatches(t *testing.T) {
+	a, b := testWorldMesh(WhiteImage(), &DrawTrianglesOptions{DepthWrite: true}), testWorldMesh(NewImage(1, 1), &DrawTrianglesOptions{DepthWrite: true})
+	screen := NewFrame(320, 240)
+	screen.DrawWorldMesh(a)
+	screen.DrawWorldMesh(b)
+	r := &gpuRenderer{worldMeshBatchCache: make(map[drawBatchKey]*gpuWorldMeshBatch)}
+	for _, batch := range r.depthWriteWorldMeshBatches(screen) {
+		cached := &gpuWorldMeshBatch{vertexBuf: dynamicGPUBuffer{buf: &wgpu.Buffer{}}, indexBuf: dynamicGPUBuffer{buf: &wgpu.Buffer{}}}
+		cached.remember(batch.meshes, 1, 1, 1, 1)
+		r.worldMeshBatchCache[batch.key] = cached
+	}
+	keyA := drawBatchKey{texture: a.texture, options: a.options}
+	keyB := drawBatchKey{texture: b.texture, options: b.options}
+	cachedA, cachedB := r.worldMeshBatchCache[keyA], r.worldMeshBatchCache[keyB]
+	screen.BeginFrame()
+	screen.DrawWorldMesh(a)
+	r.depthWriteWorldMeshBatches(screen)
+	if len(r.worldMeshBatchCache) != 1 || r.worldMeshBatchCache[keyA] != cachedA {
+		t.Fatal("visible batch was evicted or invisible batch retained")
+	}
+	if cachedB.vertexBuf.buf != nil || cachedB.indexBuf.buf != nil || len(cachedB.meshes) != 0 {
+		t.Fatal("evicted batch kept its buffers or mesh references")
+	}
+	screen.BeginFrame()
+	r.depthWriteWorldMeshBatches(screen)
+	if len(r.worldMeshBatchCache) != 0 || cachedA.vertexBuf.buf != nil || cachedA.indexBuf.buf != nil {
+		t.Fatal("empty frame did not release the previous map's batch buffers")
+	}
+}
+
+func TestWorldMeshBatchesKeepDistinctLightmapsAndRenderOptions(t *testing.T) {
+	texture, light := WhiteImage(), NewImage(8, 8)
+	screen := NewFrame(320, 240)
+	for _, options := range []DrawTrianglesOptions{
+		{DepthWrite: true}, {DepthWrite: true, DepthBias: 0.001},
+		{DepthWrite: true, DisableFog: true}, {DepthWrite: true, Blend: BlendLighter},
+		{DepthWrite: true, Filter: FilterLinear}, {DepthWrite: true, Address: AddressRepeat},
+	} {
+		for _, lightTexture := range []*Image{nil, light} {
+			mesh := testWorldMesh(texture, &options)
+			mesh.lightTexture = lightTexture
+			screen.DrawWorldMesh(mesh)
+		}
+	}
+	if got := len((&gpuRenderer{}).depthWriteWorldMeshBatches(screen)); got != 12 {
+		t.Fatalf("distinct render states produced %d batches, want 12", got)
+	}
+}
+
+func BenchmarkDepthWriteWorldMeshBatches(b *testing.B) {
+	screen := NewFrame(1280, 720)
+	for range 32 {
+		texture := NewImage(16, 16)
+		for range 32 {
+			screen.DrawWorldMesh(testWorldMesh(texture, &DrawTrianglesOptions{DepthWrite: true}))
+		}
+	}
+	r := &gpuRenderer{}
+	r.depthWriteWorldMeshBatches(screen)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		r.depthWriteWorldMeshBatches(screen)
+	}
+}
