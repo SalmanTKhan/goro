@@ -3,14 +3,16 @@ module github.com/kivutar/goro/android-host
 go 1.26.4
 
 require (
-	github.com/gogpu/gpucontext v0.28.0
-	github.com/gogpu/gputypes v0.5.2
-	github.com/gogpu/ui v0.1.36
-	github.com/gogpu/wgpu v0.31.6
+	github.com/gogpu/gpucontext v0.31.3
+	github.com/gogpu/gputypes v0.8.0
+	github.com/gogpu/ui v0.1.54
+	github.com/gogpu/wgpu v0.34.3
 	github.com/kivutar/goro v0.0.0
 )
 
 require (
+	github.com/Zyko0/go-sdl3 v0.1.1 // indirect
+	github.com/Zyko0/purego-gen v0.0.0-20250727121216-3bcd331a1e0c // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/charmbracelet/colorprofile v0.2.3-0.20250311203215-f60798e515dc // indirect
 	github.com/charmbracelet/lipgloss v1.1.0 // indirect
@@ -18,13 +20,11 @@ require (
 	github.com/charmbracelet/x/ansi v0.8.0 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.13-0.20250311204145-2c3ea96c31dd // indirect
 	github.com/charmbracelet/x/term v0.2.1 // indirect
-	github.com/coregx/signals v0.1.0 // indirect
+	github.com/coregx/signals v0.1.1 // indirect
 	github.com/deepteams/webp v1.2.7 // indirect
 	github.com/ebitengine/oto/v3 v3.5.0-alpha.8 // indirect
 	github.com/ebitengine/purego v0.10.1 // indirect
-	github.com/go-fonts/dejavu v0.3.4 // indirect
 	github.com/go-logfmt/logfmt v0.6.1 // indirect
-	github.com/go-text/typesetting v0.3.4 // indirect
 	github.com/go-webgpu/goffi v0.6.3 // indirect
 	github.com/go-webgpu/webgpu v0.5.5 // indirect
 	github.com/godexture/codec-mp3 v0.0.0 // indirect
@@ -32,11 +32,11 @@ require (
 	github.com/godexture/format-mp3 v0.0.0 // indirect
 	github.com/godexture/metadata-id3 v0.0.0 // indirect
 	github.com/godexture/sdk v0.0.0 // indirect
-	github.com/gogpu/gg v0.48.16 // indirect
-	github.com/gogpu/gogpu v0.44.6 // indirect
-	github.com/gogpu/naga v0.18.0 // indirect
+	github.com/gogpu/gg v0.52.5 // indirect
+	github.com/gogpu/gogpu v0.54.0 // indirect
+	github.com/gogpu/naga v0.19.0 // indirect
 	github.com/jfreymuth/pulse v0.1.1 // indirect
-	github.com/klauspost/compress v1.19.2 // indirect
+	github.com/klauspost/compress v1.20.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-runewidth v0.0.16 // indirect
@@ -45,25 +45,24 @@ require (
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/yuin/gopher-lua v1.1.2 // indirect
 	golang.org/x/exp v0.0.0-20231006140011-7918f672742d // indirect
-	golang.org/x/image v0.43.0 // indirect
-	golang.org/x/sync v0.21.0 // indirect
+	golang.org/x/image v0.45.0 // indirect
+	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/text v0.38.0 // indirect
+	golang.org/x/text v0.41.0 // indirect
 )
 
 replace github.com/kivutar/goro => ../../..
 
-// Phase 0I compatibility probe: compile the root renderer against the
-// Android host's WGPU API before wiring concrete device handles.
-replace github.com/gogpu/wgpu v0.30.19 => github.com/gogpu/wgpu v0.31.6
+// Keep the nested Android host on the same gogpu/ui and gogpu/gg forks as the
+// root module so the shared renderer (github.com/gogpu/ui/fontdata, etc.)
+// resolves identically here.
+replace github.com/gogpu/gg => github.com/kivutar/gg v0.52.4-0.20260907093528-f5ad04483d31
 
+replace github.com/gogpu/ui => github.com/kivutar/ui v0.1.55-0.20260910051920-e1fc6c401b18
+
+// The x86_64 emulator ABI is built against local checkouts of the WGPU stack
+// (untracked; see scripts/build-android-test.ps1).
 replace github.com/gogpu/wgpu => .\.emulator-wgpu
-
-replace github.com/gogpu/gputypes v0.5.1 => github.com/gogpu/gputypes v0.5.2
-
-// Keep gogpu and its platform-provider interface on the root module's
-// compatible version while the Android host uses the newer raw WGPU handles.
-replace github.com/gogpu/gpucontext v0.28.0 => github.com/gogpu/gpucontext v0.21.1
 
 replace github.com/go-webgpu/goffi => .\.emulator-goffi
 
