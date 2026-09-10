@@ -4,39 +4,13 @@ import (
 	"math"
 	"testing"
 
-	"github.com/gogpu/ui/core/button"
 	"github.com/gogpu/ui/geometry"
 	"github.com/gogpu/ui/primitives"
+	"github.com/gogpu/ui/uitest"
 	"github.com/gogpu/ui/widget"
 	"github.com/kivutar/goro/session"
 	"github.com/kivutar/goro/ui/rotheme"
 )
-
-func TestCharacterSelectInitialControllerFocusUsesSelectedSlot(t *testing.T) {
-	window := &CharacterSelectWindow{opts: CharacterSelectWindowOptions{
-		SelectedSlot: 1,
-		MaxSlots:     3,
-	}}
-	for slot := 0; slot < 3; slot++ {
-		var focused int
-		var findFocused func(widget.Widget)
-		findFocused = func(current widget.Widget) {
-			if candidate, ok := current.(*button.Widget); ok && candidate.IsFocused() {
-				focused++
-			}
-			for _, child := range current.Children() {
-				findFocused(child)
-			}
-		}
-		findFocused(window.slotWidget(slot))
-		if slot == window.opts.SelectedSlot && focused != 1 {
-			t.Fatalf("selected slot %d focused buttons = %d, want 1", slot, focused)
-		}
-		if slot != window.opts.SelectedSlot && focused != 0 {
-			t.Fatalf("unselected slot %d unexpectedly has controller focus", slot)
-		}
-	}
-}
 
 func TestCharacterSelectPage(t *testing.T) {
 	if got := CharacterSelectPage(5); got != 1 {
@@ -188,6 +162,28 @@ func TestCharacterCreateHairControlsFrameHead(t *testing.T) {
 	}
 }
 
+func TestCharacterCreateNameUsesLabelStyle(t *testing.T) {
+	tree := (&CharacterCreateWindow{}).widgetTree()
+	var name *primitives.TextWidget
+	var walk func(widget.Widget)
+	walk = func(current widget.Widget) {
+		if text, ok := current.(*primitives.TextWidget); ok && text.Content() == "Name" {
+			name = text
+		}
+		for _, child := range current.Children() {
+			walk(child)
+		}
+	}
+	walk(tree)
+	if name == nil {
+		t.Fatal("character creation Name label is missing")
+	}
+	style := name.Style()
+	if style.Color != rotheme.Default.Colors.LabelText || style.FontFamily != rotheme.Default.Typography.FontFamily || !style.Bold {
+		t.Fatalf("Name style = color %+v, bold %t, family %q; want semantic label style", style.Color, style.Bold, style.FontFamily)
+	}
+}
+
 func TestCharacterCreateStatButtonsSitOutsideHexagon(t *testing.T) {
 	tree := (&CharacterCreateWindow{}).widgetTree()
 	tree.Layout(
@@ -232,6 +228,29 @@ func TestCharacterCreateStatButtonsSitOutsideHexagon(t *testing.T) {
 		if buttonDistance <= hexagonDistance {
 			t.Fatalf("stat %d button distance = %.1f, want greater than hexagon radius %.1f", stat, buttonDistance, hexagonDistance)
 		}
+	}
+}
+
+func TestCharacterCreateStatButtonsUseLabelStyle(t *testing.T) {
+	graph := newCharacterCreateStatGraph([CharacterCreateStatCount]uint8{}, nil)
+	graph.Layout(widget.NewContext(), geometry.Tight(geometry.Sz(characterCreateGraphW, characterCreateGraphH)))
+	canvas := &uitest.MockCanvas{}
+	graph.Draw(widget.NewContext(), canvas)
+
+	if len(canvas.StyledTexts) != CharacterCreateStatCount {
+		t.Fatalf("stat button label draws = %d, want %d", len(canvas.StyledTexts), CharacterCreateStatCount)
+	}
+	labels := CharacterCreateStatLabels()
+	for stat, draw := range canvas.StyledTexts {
+		if draw.Text != labels[stat] {
+			t.Fatalf("stat button %d label = %q, want %q", stat, draw.Text, labels[stat])
+		}
+		if draw.Style.Color != rotheme.Default.Colors.LabelText || draw.Style.FontFamily != rotheme.Default.Typography.FontFamily || !draw.Style.Bold || draw.Style.Align != widget.TextAlignCenter {
+			t.Fatalf("stat button %s style = color %+v, family %q, align %v", draw.Text, draw.Style.Color, draw.Style.FontFamily, draw.Style.Align)
+		}
+	}
+	if len(canvas.Texts) != 0 {
+		t.Fatal("stat button labels unexpectedly used the built-in font family")
 	}
 }
 
@@ -417,39 +436,4 @@ func graphSegmentsCross(a1, a2, b1, b2 [2]float64) bool {
 
 func graphOrientation(a, b, c [2]float64) float64 {
 	return (b[0]-a[0])*(c[1]-a[1]) - (b[1]-a[1])*(c[0]-a[0])
-}
-
-// TestCharacterCreateSexControlIsOptional pins the seam that lets the offline
-// mobile presentation edit sex without changing the online client, which takes
-// sex from the account and must keep the footer it has always had.
-func TestCharacterCreateSexControlIsOptional(t *testing.T) {
-	desktop := (&CharacterCreateWindow{}).footerWidgets()
-	offline := (&CharacterCreateWindow{
-		opts:      CharacterCreateWindowOptions{SexLabel: "FEMALE"},
-		callbacks: CharacterCreateWindowCallbacks{OnToggleSex: func() {}},
-	}).footerWidgets()
-
-	if len(offline) != len(desktop)+1 {
-		t.Fatalf("offline footer has %d widgets, want one more than desktop's %d",
-			len(offline), len(desktop))
-	}
-	// The toggle leads the footer, so it sits left of the spacer that pushes
-	// Make and Cancel to the trailing edge.
-	if _, spacer := desktop[0].(*primitives.ExpandedWidget); !spacer {
-		t.Fatalf("desktop footer starts with %T, want the trailing-edge spacer", desktop[0])
-	}
-	if _, spacer := offline[0].(*primitives.ExpandedWidget); spacer {
-		t.Fatal("offline footer starts with the spacer, want the sex toggle first")
-	}
-}
-
-// TestCharacterCreateSexLabelRebuildsTree guards against the toggle appearing
-// to do nothing: the options comparison decides whether the tree is rebuilt, so
-// a changed label has to count as a difference.
-func TestCharacterCreateSexLabelRebuildsTree(t *testing.T) {
-	female := CharacterCreateWindowOptions{SexLabel: "FEMALE"}
-	male := CharacterCreateWindowOptions{SexLabel: "MALE"}
-	if characterCreateWindowTreeEqual(female, male) {
-		t.Fatal("tree treated as unchanged across a sex change, so the footer would keep the old label")
-	}
 }

@@ -15,17 +15,29 @@ import (
 // The boolean result stops the current frame when packet handling changes modes
 // or begins a map transition.
 func (m *WorldMode) handleNetworkPackets(ctx client.Context, now time.Time) (Mode, bool) {
-	if ctx.Network == nil {
-		return nil, false
+	packets := ctx.Network.DrainPackets()
+	if len(m.deferredPackets) > 0 {
+		packets = append(m.deferredPackets, packets...)
+		m.deferredPackets = nil
 	}
-	for _, pkt := range ctx.Network.DrainPackets() {
+	for i, pkt := range packets {
 		if next, stop := m.handleNetworkPacket(ctx, pkt, now); stop {
+			// A map transition must not discard later packets from the same
+			// read, such as a mail ACK and the inventory item it returns.
+			tail := append([]network.Packet(nil), packets[i+1:]...)
+			if world, ok := next.(*WorldMode); ok {
+				world.deferredPackets = tail
+			} else if next == nil {
+				m.deferredPackets = tail
+			}
 			return next, true
 		}
 	}
 	networkErrors := ctx.Network.DrainErrors()
 	if handleNetworkDisconnectErrors(ctx, &m.ui.disconnectDialog, networkErrors) {
 		m.ui.npcCutin.Clear()
+		m.ui.mailWindow.CloseFromServer(ctx)
+		m.mail = mailState{}
 		return nil, true
 	}
 	for _, err := range networkErrors {
@@ -39,8 +51,13 @@ func (m *WorldMode) handleNetworkPackets(ctx client.Context, now time.Time) (Mod
 // result stops the current frame when the packet changes modes or starts a map
 // transition.
 func (m *WorldMode) handleNetworkPacket(ctx client.Context, pkt network.Packet, now time.Time) (Mode, bool) {
+	if m.handleMailPacket(ctx, pkt, now) {
+		return nil, false
+	}
 	if handleDisconnectPacket(ctx, &m.ui.disconnectDialog, pkt) {
 		m.ui.npcCutin.Clear()
+		m.ui.mailWindow.CloseFromServer(ctx)
+		m.mail = mailState{}
 		return nil, false
 	}
 	if notify, ok, err := network.ParseMapInfoNotify(pkt); err != nil {
@@ -902,30 +919,22 @@ func (m *WorldMode) handleNetworkPacket(ctx client.Context, pkt network.Packet, 
 		glog.Errorf("parse trade item 0x%04X: %v", pkt.ID, err)
 	} else if ok {
 		m.ui.tradeWindow.AddReceivedItem(ctx, tradeItem)
-		m.handleMobileTradeItem(ctx, tradeItem)
 		return nil, false
 	}
 	if tradeAck, ok, err := network.ParseTradeAddItemAck(pkt); err != nil {
 		glog.Errorf("parse trade add item ack 0x%04X: %v", pkt.ID, err)
 	} else if ok {
 		m.ui.tradeWindow.AddOwnItemAck(ctx, tradeAck)
-		m.handleMobileTradeAddAck(tradeAck)
 		return nil, false
 	}
 	if tradeConclude, ok, err := network.ParseTradeConclude(pkt); err != nil {
 		glog.Errorf("parse trade conclude 0x%04X: %v", pkt.ID, err)
 	} else if ok {
 		m.ui.tradeWindow.SetConcluded(ctx, tradeConclude.Other)
-		if tradeConclude.Other {
-			m.mobileTrade.otherConcluded = true
-		} else {
-			m.mobileTrade.selfConcluded = true
-		}
 		return nil, false
 	}
 	if network.ParseTradeCanceled(pkt) {
 		m.ui.tradeWindow.Close(ctx)
-		m.closeMobileTrade()
 		m.ui.console.AddErrorMessage("Trade canceled.")
 		return nil, false
 	}
@@ -937,7 +946,6 @@ func (m *WorldMode) handleNetworkPacket(ctx client.Context, pkt network.Packet, 
 	}
 	if network.ParseTradeUndo(pkt) {
 		m.ui.tradeWindow.Undo(ctx)
-		m.handleMobileTradeUndo()
 		return nil, false
 	}
 	if storageItem, ok, err := network.ParseStorageItemAdded(pkt); err != nil {
@@ -1018,7 +1026,6 @@ func (m *WorldMode) handleNetworkPacket(ctx client.Context, pkt network.Packet, 
 		if vendList.Own {
 			m.ui.vendingWindow.ApplyOwnList(ctx, vendList)
 		} else {
-			m.applyMobileVendingList(ctx, vendList)
 			m.ui.vendingWindow.OpenBuy(ctx, vendList)
 		}
 		return nil, false
@@ -1026,7 +1033,6 @@ func (m *WorldMode) handleNetworkPacket(ctx client.Context, pkt network.Packet, 
 	if vendResult, ok, err := network.ParseVendingPurchaseResult(pkt); err != nil {
 		glog.Errorf("parse vending purchase result 0x%04X: %v", pkt.ID, err)
 	} else if ok {
-		m.applyMobileVendingResult(vendResult)
 		m.ui.vendingWindow.ApplyPurchaseResult(ctx, vendResult)
 		return nil, false
 	}

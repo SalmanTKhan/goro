@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kivutar/goro/glog"
 	"github.com/kivutar/goro/input"
 )
 
@@ -104,10 +105,7 @@ type ScriptConfig struct {
 	Path string
 }
 
-type LogConfig struct {
-	Level string
-	File  string
-}
+type LogConfig = glog.LogConfig
 
 func LoadConfig(args []string) (Config, error) {
 	cfg := defaultConfig()

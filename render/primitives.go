@@ -7,8 +7,7 @@ import (
 	"math"
 	"sync"
 
-	"github.com/go-fonts/dejavu/dejavusans"
-	"github.com/go-fonts/dejavu/dejavusansbold"
+	"github.com/gogpu/ui/fontdata"
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/basicfont"
 	"golang.org/x/image/font/opentype"
@@ -25,11 +24,11 @@ var debugTextFixedWidth = 7
 var outlinedTextFace font.Face
 
 func init() {
-	regular, err := parseOpenTypeFace(dejavusans.TTF, 11)
+	regular, err := parseOpenTypeFace(fontdata.InterRegular, 11)
 	if err != nil {
 		return
 	}
-	bold, _ := parseOpenTypeFace(dejavusansbold.TTF, 12)
+	bold, _ := parseOpenTypeFace(fontdata.InterBold, 12)
 	textFontMu.Lock()
 	defer textFontMu.Unlock()
 	debugTextFace = noKernFace{Face: regular}
@@ -328,7 +327,7 @@ func roNameTextFace() font.Face {
 	if outlinedTextFace != nil {
 		return outlinedTextFace
 	}
-	if face, err := parseOpenTypeFace(dejavusansbold.TTF, 12); err == nil {
+	if face, err := parseOpenTypeFace(fontdata.InterBold, 12); err == nil {
 		outlinedTextFace = noKernFace{Face: face}
 		return outlinedTextFace
 	}
@@ -389,6 +388,18 @@ func DrawCenteredUIOutlinedTextAt(dst *Frame, text string, centerX, y float64, f
 
 func DrawCenteredUITextAtSize(dst *Frame, text string, centerX, y float64, foreground color.RGBA, size float32, bold bool) {
 	drawOrQueueUITextLabel(dst, text, centerX, y, foreground, color.RGBA{}, true, bold, size)
+}
+
+// DrawUITextBanner wraps and draws text together with its translucent background
+// using the same font metrics, cached at the display's resolution.
+func DrawUITextBanner(dst *Frame, text string, centerX, y, maxWidth float64, foreground color.RGBA, size float32, bold bool) {
+	if dst == nil || text == "" || maxWidth <= 20 {
+		return
+	}
+	dst.uiTextBoxes = append(dst.uiTextBoxes, UITextBoxCommand{
+		Text: text, X: centerX, Y: y, Anchor: UITextBoxAnchorTopCenter,
+		style: bannerOverlayTextBoxStyle(size, bold, foreground, float32(maxWidth)),
+	})
 }
 
 func DrawActorUILabels(dst *Frame, labels []string, emblem *Image, centerX, y float64, foreground, outline color.RGBA) {

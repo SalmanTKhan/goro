@@ -71,6 +71,7 @@ const (
 	UITextBoxAnchorTopLeft UITextBoxAnchor = iota
 	UITextBoxAnchorBottomCenter
 	UITextBoxAnchorTooltipCenter
+	UITextBoxAnchorTopCenter
 )
 
 type UITextBoxCommand struct {
@@ -81,4 +82,5 @@ type UITextBoxCommand struct {
 	Anchor   UITextBoxAnchor
 	MaxWidth float64
 	MaxLines int
+	style    overlayTextBoxStyle
 }

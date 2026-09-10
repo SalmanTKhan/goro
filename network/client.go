@@ -40,22 +40,28 @@ type Client struct {
 	packets []Packet
 	status  string
 	errs    []error
+
+	mapKeepaliveInterval time.Duration
+	mapKeepaliveStop     chan struct{}
 }
 
 const sendQueueSize = 256
 
+const defaultMapKeepaliveInterval = 5 * time.Second
+
 type outboundPacket struct {
 	data     []byte
 	enqueued time.Time
-	done     chan error
+	done     chan<- error
 }
 
 func NewClient(clientDate int, trace bool) *Client {
 	return &Client{
-		clientDate: clientDate,
-		trace:      trace,
-		framer:     NewFramer(PacketLengths2008()),
-		status:     "offline",
+		clientDate:           clientDate,
+		trace:                trace,
+		framer:               NewFramer(PacketLengths2008()),
+		status:               "offline",
+		mapKeepaliveInterval: defaultMapKeepaliveInterval,
 	}
 }
 
@@ -86,6 +92,7 @@ func (c *Client) Close() {
 	c.mu.Lock()
 	conn := c.conn
 	sendCh := c.sendCh
+	c.stopMapKeepaliveLocked()
 	c.conn = nil
 	c.sendCh = nil
 	c.status = "offline"
@@ -100,19 +107,35 @@ func (c *Client) Close() {
 }
 
 func (c *Client) Send(data []byte) error {
+	_, err := c.enqueue(data, nil)
+	return err
+}
+
+// enqueue adds a packet to the current connection's writer. When expected is
+// non-nil, it also prevents work owned by an old connection from crossing a
+// reconnect boundary.
+func (c *Client) enqueue(data []byte, expected net.Conn) (net.Conn, error) {
 	packet := append([]byte(nil), data...)
 	start := time.Now()
 	c.mu.Lock()
 	sendCh := c.sendCh
-	if c.conn == nil || sendCh == nil {
+	conn := c.conn
+	if conn == nil || sendCh == nil {
 		c.mu.Unlock()
-		return fmt.Errorf("not connected")
+		if expected == nil {
+			return nil, fmt.Errorf("not connected")
+		}
+		return nil, ErrDisconnected
+	}
+	if expected != nil && conn != expected {
+		c.mu.Unlock()
+		return nil, ErrDisconnected
 	}
 	select {
 	case sendCh <- outboundPacket{data: packet, enqueued: start}:
 	default:
 		c.mu.Unlock()
-		return fmt.Errorf("send queue full")
+		return nil, fmt.Errorf("send queue full")
 	}
 	c.mu.Unlock()
 	elapsed := time.Since(start)
@@ -121,7 +144,7 @@ func (c *Client) Send(data []byte) error {
 		headLen := min(len(packet), 32)
 		glog.Debugf("network enqueue opcode=0x%04X n=%d elapsed=%s head=%s", ID(packet), len(packet), elapsed, hex.EncodeToString(packet[:headLen]))
 	}
-	return nil
+	return conn, nil
 }
 
 func (c *Client) SendAccountLogin(username, password string, version uint32, clientType uint8) error {
@@ -203,10 +226,8 @@ func (c *Client) SendQuitGame() error {
 	return err
 }
 
-// SendQuitGameAndClose sends the explicit world disconnect packet and waits
-// for the write loop to flush it before closing the connection. A plain Close
-// is still used for transport failures, but clean user disconnects should not
-// turn a queued CZ_REQ_DISCONNECT into a bare TCP close.
+// SendQuitGameAndClose sends the disconnect packet and waits briefly for the
+// write loop to flush it before closing the connection.
 func (c *Client) SendQuitGameAndClose() error {
 	packet := BuildQuitGamePacket()
 	done := make(chan error, 1)
@@ -233,9 +254,6 @@ func (c *Client) SendQuitGameAndClose() error {
 		err = fmt.Errorf("disconnect write timeout")
 	}
 	c.Close()
-	if err == nil {
-		glog.Debugf("sent and flushed CZ_REQ_DISCONNECT opcode=0x%04X client_date=%d", ID(packet), c.clientDate)
-	}
 	return err
 }
 
@@ -246,17 +264,6 @@ func (c *Client) SendPing(accountID uint32) error {
 		glog.Debugf("sent PING opcode=0x%04X account_id=%d client_date=%d", ID(packet), accountID, c.clientDate)
 	} else if err != nil {
 		glog.Warnf("send PING failed opcode=0x%04X len=%d account_id=%d client_date=%d: %v", ID(packet), len(packet), accountID, c.clientDate, err)
-	}
-	return err
-}
-
-func (c *Client) SendTick(clientTick uint32) error {
-	packet := BuildTickSendPacketForClientDate(clientTick, c.clientDate)
-	err := c.Send(packet)
-	if err == nil && c.trace {
-		glog.Debugf("sent CZ_REQUEST_TIME opcode=0x%04X tick=%d client_date=%d", ID(packet), clientTick, c.clientDate)
-	} else if err != nil {
-		glog.Warnf("send CZ_REQUEST_TIME failed opcode=0x%04X len=%d client_date=%d: %v", ID(packet), len(packet), c.clientDate, err)
 	}
 	return err
 }
@@ -284,10 +291,15 @@ func (c *Client) SendMapServerEnter(accountID, charID, authCode, clientTick uint
 		ClientTick: clientTick,
 		Sex:        sex,
 	}, c.clientDate)
+	conn, err := c.enqueue(packet, nil)
+	if err != nil {
+		return err
+	}
 	if c.trace {
 		glog.Debugf("sent CZ_ENTER2 opcode=0x%04X len=%d client_date=%d sex_offset=%d", ID(packet), len(packet), c.clientDate, len(packet)-1)
 	}
-	return c.Send(packet)
+	c.startMapKeepalive(conn)
+	return nil
 }
 
 func (c *Client) SendWalkToXY(x, y int) error {
@@ -613,17 +625,17 @@ func (c *Client) DrainErrors() []error {
 
 func (c *Client) readLoop(conn net.Conn) {
 	buf := make([]byte, 4096)
-	// Framing is connection-local. A reconnect must never inherit a partial
-	// packet from the socket that was closed before it.
-	framer := NewFramer(PacketLengths2008())
 	for {
 		n, err := conn.Read(buf)
 		if n > 0 {
+			if err == nil {
+				err = c.refreshMapReadDeadline(conn)
+			}
 			if c.trace {
 				headLen := min(n, 32)
 				glog.Debugf("network read n=%d head=%s", n, hex.EncodeToString(buf[:headLen]))
 			}
-			packets, frameErr := framer.Push(buf[:n])
+			packets, frameErr := c.framer.Push(buf[:n])
 			c.mu.Lock()
 			c.packets = append(c.packets, packets...)
 			if frameErr != nil {
@@ -632,14 +644,10 @@ func (c *Client) readLoop(conn net.Conn) {
 			c.mu.Unlock()
 		}
 		if err != nil {
-			if c.isCurrentConn(conn) {
-				if err == io.EOF {
-					c.addError(ErrDisconnected)
-				} else {
-					c.addError(err)
-				}
+			if err == io.EOF {
+				err = ErrDisconnected
 			}
-			c.clearConn(conn)
+			c.clearConn(conn, err)
 			return
 		}
 	}
@@ -653,10 +661,7 @@ func (c *Client) writeLoop(conn net.Conn, sendCh <-chan outboundPacket) {
 			if packet.done != nil {
 				packet.done <- err
 			}
-			if c.isCurrentConn(conn) {
-				c.addError(err)
-			}
-			c.clearConn(conn)
+			c.clearConn(conn, err)
 			return
 		}
 		if packet.done != nil {
@@ -670,16 +675,17 @@ func (c *Client) writeLoop(conn net.Conn, sendCh <-chan outboundPacket) {
 	}
 }
 
-func (c *Client) isCurrentConn(conn net.Conn) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.conn == conn
-}
-
-func (c *Client) clearConn(conn net.Conn) {
+func (c *Client) clearConn(conn net.Conn, err error) {
 	c.mu.Lock()
 	if c.conn == conn {
+		// Report the failure and detach this connection atomically. Closing it
+		// wakes both I/O loops; only the first error should reach the UI, and
+		// a late error from an old connection must not affect a replacement.
+		if err != nil {
+			c.errs = append(c.errs, err)
+		}
 		sendCh := c.sendCh
+		c.stopMapKeepaliveLocked()
 		c.conn = nil
 		c.sendCh = nil
 		c.status = "offline"
@@ -694,11 +700,5 @@ func (c *Client) clearConn(conn net.Conn) {
 func (c *Client) setStatus(status string) {
 	c.mu.Lock()
 	c.status = status
-	c.mu.Unlock()
-}
-
-func (c *Client) addError(err error) {
-	c.mu.Lock()
-	c.errs = append(c.errs, err)
 	c.mu.Unlock()
 }

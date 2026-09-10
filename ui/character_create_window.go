@@ -175,7 +175,7 @@ func (w *CharacterCreateWindow) widgetTree() widget.Widget {
 								Width(characterCreatePanelW).
 								Height(characterCreatePanelH),
 							primitives.Box(
-								rotheme.Text("Name").
+								rotheme.Label("Name").
 									LineHeight(characterCreateNameLabelH/rotheme.Default.Typography.TextSize),
 								primitives.Box(name).
 									Width(characterCreatePanelW).
@@ -503,7 +503,7 @@ func (w *characterCreateStatGraph) Draw(_ widget.Context, canvas widget.Canvas) 
 		}
 		canvas.DrawRoundRect(rect, bg, rotheme.ButtonRadius)
 		canvas.StrokeRoundRect(rect, rotheme.Default.Colors.ButtonBorder, rotheme.ButtonRadius, 1)
-		rotheme.DrawText(canvas, CharacterCreateStatLabels()[stat], rect, rotheme.Default.Typography.TextSize, rotheme.Default.Colors.Text, false, widget.TextAlignCenter)
+		rotheme.DrawLabel(canvas, CharacterCreateStatLabels()[stat], rect, widget.TextAlignCenter)
 	}
 }
 

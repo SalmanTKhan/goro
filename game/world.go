@@ -23,172 +23,125 @@ import (
 )
 
 type WorldMode struct {
-	walkCooldownUntil          time.Time
-	nextHeldWalkAt             time.Time
-	tickCooldown               int
-	camera                     followCamera
-	cameraShakeStart           time.Time
-	cameraShakeEnd             time.Time
-	whitePixel                 *render.Image
-	tileCursor                 *render.Image
-	textures                   map[string]*render.Image
-	textureMiss                map[string]struct{}
-	imageCache                 map[string]image.Image
-	imageMiss                  map[string]struct{}
-	strEffects                 map[string]*res.STR
-	strEffectMiss              map[string]struct{}
-	playerView                 *humanoidSpriteView
-	shadowView                 *spriteView
-	shadowViewMiss             bool
-	cartViews                  map[int]*spriteView
-	cartViewMiss               map[int]struct{}
-	falconViews                map[int]*spriteView
-	falconViewMiss             map[int]struct{}
-	falcons                    map[uint32]*falconRenderState
-	cursorView                 *spriteView
-	cursorViewMiss             bool
-	slotMachineView            *spriteView
-	slotMachineMiss            bool
-	cursorFallback             *render.Image
-	cursorAction               int
-	cursorStarted              time.Time
-	damageNumberView           *spriteView
-	damageNumberMiss           bool
-	damageNumbers              map[string]*spriteBillboard
-	cursorLevelNums            map[string]*spriteBillboard
-	damageMsgView              *spriteView
-	damageMsgMiss              bool
-	timeFontView               *spriteView
-	timeFontMiss               bool
-	itemMarker                 *render.Image
-	itemViews                  map[itemSpriteKey]*spriteView
-	itemViewMiss               map[itemSpriteKey]struct{}
-	effectViews                map[string]*spriteView
-	effectViewMiss             map[string]struct{}
-	actorViews                 map[actorSpriteKey]*humanoidSpriteView
-	actorViewMiss              map[actorSpriteKey]struct{}
-	mercenaryViews             map[actorSpriteKey]*humanoidSpriteView
-	mercenaryViewMiss          map[actorSpriteKey]struct{}
-	nonPCViews                 map[int]*spriteView
-	nonPCViewMiss              map[int]struct{}
-	gr2Models                  map[int]*gr2ModelView
-	gr2ModelMiss               map[int]struct{}
-	petAccessoryIDs            map[uint32]uint32
-	petAccessoryViews          map[petAccessorySpriteKey]*spriteView
-	petAccessoryMiss           map[petAccessorySpriteKey]struct{}
-	rsmMeshCache               map[int][]retainedWorldMesh
-	rsmNodeMatrices            map[*res.RSM]map[string]mat4
-	rsmAnimNodes               map[animatedRSMNodeKey]map[string]mat4
-	rsmBoundsCache             map[rsmBoundsCacheKey]rsmBounds
-	rsmFaceMetaCache           map[*res.RSM]map[*res.RSMNode][]rsmFaceMeta
-	rsmTextureMiss             map[string]struct{}
-	rsmAnimScratch             animatedRSMScratch
-	rsmPlacementGrid           *rsmPlacementGrid
-	runtimeRSMModels           map[string]*res.RSM
-	gndMeshCache               *gndRetainedMeshCache
-	pendingWarp                bool
-	pendingAttack              attackIntent
-	pendingPickup              pickupIntent
-	pendingSkill               pendingSkillTarget
-	pendingSkillText           pendingSkillTextTarget
-	senseRequest               senseRequest
-	pendingPetCapture          petCaptureState
-	petProperty                network.PetProperty
-	hasPetProperty             bool
-	petOldFullness             uint16
-	petLastTalk                time.Time
-	petInfoRequested           bool
-	petID                      uint32
-	homDeleteID                uint32
-	mercDeleteID               uint32
-	petSlotMachine             petSlotMachineState
-	lockedAttackID             uint32
-	attackFocusID              uint32
-	attackFocusStart           time.Time
-	controllerMoveDir          input.Direction8
-	controllerMoveTargetX      int
-	controllerMoveTargetY      int
-	controllerMoveTargetKnown  bool
-	controllerStopPending      bool
-	controllerStopWaitForAck   bool
-	controllerZoomAt           time.Time
-	controllerMenuHeldAt       time.Time
-	controllerMenuSuppressed   bool
-	controllerFocusItemID      uint32
-	controllerFocusItemStart   time.Time
-	lastCameraResetClickAt     time.Time
-	lastCameraResetClickX      int
-	lastCameraResetClickY      int
-	scriptHighlight            actorHighlight
-	lastAttackAt               time.Time
-	lastChaseAt                time.Time
-	actorAnims                 map[uint32]actorAnimation
-	damageFloaters             []damageFloater
-	worldEffects               []worldEffect
-	actorCastBars              map[uint32]actorCastBar
-	serverProgress             serverProgressState
-	showDigit                  showDigitState
-	scheduledSounds            []scheduledSound
-	scheduledStops             []scheduledActorStop
-	scheduledResumes           []scheduledWalkResume
-	mapSoundNext               map[int]time.Time
-	mapWeatherSounds           map[int]time.Time
-	mapWeatherCloud            mapWeatherCloudState
-	mapWeatherPokJuk           mapWeatherFireworkState
-	actorDeaths                map[uint32]time.Time
-	actorVanishes              map[uint32]actorVanishFade
-	actorSoundFrames           map[uint32]actorSoundFrame
-	actorLife                  map[uint32]actorLife
-	offlineItemIDs             map[uint32]struct{}
-	offlineActorIDs            map[uint32]struct{}
-	skillUnitModels            map[uint32]skillUnitModel
-	hiddenSkillUnits           map[uint32]skillUnitModel
-	actorNameReqAt             map[uint32]time.Time
-	guildEmblems               map[uint32]guildEmblem
-	speechBubbles              map[uint32]speechBubble
-	gndNormalSource            *res.GND
-	gndTopNormals              [][4]modelPoint3
-	taekwonNight               bool
-	ui                         worldUI
-	pendingChatRoom            network.ChatRoomCreate
-	pendingTradeName           string
-	guildAction                gameui.GuildMemberAction
-	guildOpenPending           bool
-	mobileTradeRequest         *mobileTradeRequestState
-	mobileTrade                mobileTradeState
-	mobileVending              mobileVendingState
-	mapFade                    mapFadeState
-	hoveredWalk                hoveredWalkCellCache
-	bot                        *luaBot
-	companionAI                companionAISystem
-	metrics                    RenderMetrics
-	terrainTextureFallbacks    int
-	rsmTextureFallbacks        int
-	rsmEmptyTextureFallbacks   int
-	rsmTextureFallbackExamples []string
-}
-
-// RenderMetrics is a low-overhead runtime projection used by the mobile
-// alpha harness. It measures source-path work without making the renderer or
-// Android host authoritative for gameplay.
-type RenderMetrics struct {
-	TextureDecodeDuration      time.Duration
-	TextureDecodeCount         int
-	TextureEncodedBytes        int64
-	TextureDecodedRGBABytes    int64
-	TerrainBuildDuration       time.Duration
-	TerrainChunkBuilds         int
-	TerrainTextureFallbacks    int
-	RSMTextureFallbacks        int
-	RSMEmptyTextureFallbacks   int
-	RSMTextureFallbackExamples []string
-}
-
-func (m *WorldMode) RenderMetrics() RenderMetrics {
-	if m == nil {
-		return RenderMetrics{}
-	}
-	return m.metrics
+	mail              mailState
+	walkCooldownUntil time.Time
+	nextHeldWalkAt    time.Time
+	camera            followCamera
+	cameraShakeStart  time.Time
+	cameraShakeEnd    time.Time
+	whitePixel        *render.Image
+	tileCursor        *render.Image
+	textures          map[string]*render.Image
+	textureMiss       map[string]struct{}
+	imageCache        map[string]image.Image
+	imageMiss         map[string]struct{}
+	strEffects        map[string]*res.STR
+	strEffectMiss     map[string]struct{}
+	playerView        *humanoidSpriteView
+	shadowView        *spriteView
+	shadowViewMiss    bool
+	cartViews         map[int]*spriteView
+	cartViewMiss      map[int]struct{}
+	falconViews       map[int]*spriteView
+	falconViewMiss    map[int]struct{}
+	falcons           map[uint32]*falconRenderState
+	cursorView        *spriteView
+	cursorViewMiss    bool
+	slotMachineView   *spriteView
+	slotMachineMiss   bool
+	cursorFallback    *render.Image
+	cursorAction      int
+	cursorStarted     time.Time
+	damageNumberView  *spriteView
+	damageNumberMiss  bool
+	damageNumbers     map[string]*spriteBillboard
+	cursorLevelNums   map[string]*spriteBillboard
+	damageMsgView     *spriteView
+	damageMsgMiss     bool
+	timeFontView      *spriteView
+	timeFontMiss      bool
+	itemMarker        *render.Image
+	itemViews         map[itemSpriteKey]*spriteView
+	itemViewMiss      map[itemSpriteKey]struct{}
+	effectViews       map[string]*spriteView
+	effectViewMiss    map[string]struct{}
+	actorViews        map[actorSpriteKey]*humanoidSpriteView
+	actorViewMiss     map[actorSpriteKey]struct{}
+	mercenaryViews    map[actorSpriteKey]*humanoidSpriteView
+	mercenaryViewMiss map[actorSpriteKey]struct{}
+	nonPCViews        map[int]*spriteView
+	nonPCViewMiss     map[int]struct{}
+	gr2Models         map[int]*gr2ModelView
+	gr2ModelMiss      map[int]struct{}
+	petAccessoryIDs   map[uint32]uint32
+	petAccessoryViews map[petAccessorySpriteKey]*spriteView
+	petAccessoryMiss  map[petAccessorySpriteKey]struct{}
+	rsmMeshCache      map[int][]retainedWorldMesh
+	rsmNodeMatrices   map[*res.RSM]map[string]mat4
+	rsmAnimNodes      map[*res.RSM]animatedRSMNodeCache
+	rsmBoundsCache    map[rsmBoundsCacheKey]rsmBounds
+	rsmFaceMetaCache  map[*res.RSM]map[*res.RSMNode][]rsmFaceMeta
+	rsmAnimScratch    animatedRSMScratch
+	rsmPlacementGrid  *rsmPlacementGrid
+	runtimeRSMModels  map[string]*res.RSM
+	gndMeshCache      *gndRetainedMeshCache
+	pendingWarp       bool
+	deferredPackets   []network.Packet
+	pendingAttack     attackIntent
+	pendingPickup     pickupIntent
+	pendingSkill      pendingSkillTarget
+	pendingSkillText  pendingSkillTextTarget
+	senseRequest      senseRequest
+	guildAction       gameui.GuildMemberAction
+	guildOpenPending  bool
+	pendingPetCapture petCaptureState
+	petProperty       network.PetProperty
+	hasPetProperty    bool
+	petOldFullness    uint16
+	petLastTalk       time.Time
+	petInfoRequested  bool
+	petID             uint32
+	homDeleteID       uint32
+	mercDeleteID      uint32
+	petSlotMachine    petSlotMachineState
+	lockedAttackID    uint32
+	attackFocusID     uint32
+	attackFocusStart  time.Time
+	scriptHighlight   actorHighlight
+	lastAttackAt      time.Time
+	lastChaseAt       time.Time
+	actorAnims        map[uint32]actorAnimation
+	damageFloaters    []damageFloater
+	worldEffects      []worldEffect
+	actorCastBars     map[uint32]actorCastBar
+	serverProgress    serverProgressState
+	showDigit         showDigitState
+	scheduledSounds   []scheduledSound
+	scheduledStops    []scheduledActorStop
+	scheduledResumes  []scheduledWalkResume
+	mapSoundNext      map[int]time.Time
+	mapWeatherSounds  map[int]time.Time
+	mapWeatherCloud   mapWeatherCloudState
+	mapWeatherPokJuk  mapWeatherFireworkState
+	actorDeaths       map[uint32]time.Time
+	actorVanishes     map[uint32]actorVanishFade
+	actorSoundFrames  map[uint32]actorSoundFrame
+	actorLife         map[uint32]actorLife
+	skillUnitModels   map[uint32]skillUnitModel
+	hiddenSkillUnits  map[uint32]skillUnitModel
+	actorNameReqAt    map[uint32]time.Time
+	guildEmblems      map[uint32]guildEmblem
+	speechBubbles     map[uint32]speechBubble
+	gndNormalSource   *res.GND
+	gndTopNormals     [][4]modelPoint3
+	taekwonNight      bool
+	ui                worldUI
+	pendingChatRoom   network.ChatRoomCreate
+	pendingTradeName  string
+	mapFade           mapFadeState
+	hoveredWalk       hoveredWalkCellCache
+	bot               *luaBot
+	companionAI       companionAISystem
 }
 
 type worldUI struct {
@@ -265,8 +218,8 @@ type worldUI struct {
 	skillTextPrompt      gameui.TextPromptWindow
 	playerContext        gameui.PlayerContextMenu
 	tradeWindow          gameui.TradeWindow
+	mailWindow           gameui.MailWindow
 	settingsWindow       gameui.SettingsWindow
-	controllerWindow     gameui.ControllerWindow
 	shortcutBar          gameui.ShortcutBar
 }
 
@@ -295,7 +248,6 @@ func (u *worldUI) nonConsoleKeyboardInputBlocked(ctx client.Context) bool {
 		u.mercenaryConfirm.IsOpen() ||
 		u.starPlaceConfirm.IsOpen() ||
 		u.settingsWindow.IsOpen() ||
-		u.controllerWindow.IsOpen() ||
 		u.autoSpellWindow.IsOpen() ||
 		u.monsterInfoWindow.IsOpen() ||
 		u.identifyWindow.IsOpen() ||
@@ -316,6 +268,8 @@ func (u *worldUI) nonConsoleKeyboardInputBlocked(ctx client.Context) bool {
 		u.shopWindow.KeyboardShortcutsBlocked() ||
 		u.vendingWindow.KeyboardShortcutsBlocked() ||
 		u.tradeWindow.IsOpen() ||
+		u.mailWindow.IsOpen() ||
+		u.guildWindow.KeyboardShortcutsBlocked() ||
 		u.friendSettings.IsOpen() ||
 		u.whisperWindow.IsOpen() ||
 		u.chatRoomCreate.IsOpen() ||
@@ -331,6 +285,7 @@ func (u *worldUI) interactionModalOpen() bool {
 		return false
 	}
 	return u.teleportModal.IsOpen() ||
+		u.mailWindow.ModalOpen() ||
 		u.autoSpellWindow.IsOpen() ||
 		u.storagePassword.IsOpen() ||
 		u.friendRequest.IsOpen() ||
@@ -373,6 +328,9 @@ type pendingSkillTarget struct {
 	skill       session.Skill
 	maxLevel    int
 	targetID    uint32
+	ground      bool
+	x, y        int
+	text        string
 	expires     time.Time
 	readyAt     time.Time
 	source      string
@@ -437,25 +395,8 @@ func (m *WorldMode) Name() string {
 	return "world"
 }
 
-// registerUIPredicates tells the UI manager about the two pieces of world state
-// the controller routing needs but that live outside the widget tree: whether
-// the chat console owns text entry, and whether a rebinding capture is open.
-func (m *WorldMode) registerUIPredicates(ctx client.Context) {
-	registrar, ok := ctx.UIManager.(interface {
-		SetTextInputPredicate(func() bool)
-		SetControllerRebindPredicate(func() bool)
-	})
-	if !ok {
-		return
-	}
-	registrar.SetTextInputPredicate(func() bool { return m.ui.console.Active() })
-	registrar.SetControllerRebindPredicate(func() bool { return m.ui.controllerWindow.RebindActive() })
-	m.ui.settingsWindow.OnControllerSetup = func() { m.ui.controllerWindow.Toggle(ctx) }
-}
-
 func (m *WorldMode) Enter(ctx client.Context) {
 	now := time.Now()
-	m.registerUIPredicates(ctx)
 	m.bindNPCDialogLifecycle()
 	m.startMapPrewarm()
 	m.camera.ResetTracking()
@@ -485,13 +426,6 @@ func (m *WorldMode) Enter(ctx client.Context) {
 	m.itemMarker = nil
 	m.itemViews = make(map[itemSpriteKey]*spriteView)
 	m.itemViewMiss = make(map[itemSpriteKey]struct{})
-	m.offlineItemIDs = make(map[uint32]struct{})
-	m.offlineActorIDs = make(map[uint32]struct{})
-	m.metrics = RenderMetrics{}
-	m.terrainTextureFallbacks = 0
-	m.rsmTextureFallbacks = 0
-	m.rsmEmptyTextureFallbacks = 0
-	m.rsmTextureFallbackExamples = nil
 	m.effectViews = make(map[string]*spriteView)
 	m.effectViewMiss = make(map[string]struct{})
 	m.actorViews = make(map[actorSpriteKey]*humanoidSpriteView)
@@ -507,10 +441,9 @@ func (m *WorldMode) Enter(ctx client.Context) {
 	m.petAccessoryMiss = make(map[petAccessorySpriteKey]struct{})
 	m.rsmMeshCache = make(map[int][]retainedWorldMesh)
 	m.rsmNodeMatrices = make(map[*res.RSM]map[string]mat4)
-	m.rsmAnimNodes = make(map[animatedRSMNodeKey]map[string]mat4)
+	m.rsmAnimNodes = make(map[*res.RSM]animatedRSMNodeCache)
 	m.rsmBoundsCache = make(map[rsmBoundsCacheKey]rsmBounds)
 	m.rsmFaceMetaCache = make(map[*res.RSM]map[*res.RSMNode][]rsmFaceMeta)
-	m.rsmTextureMiss = make(map[string]struct{})
 	m.rsmAnimScratch.reset()
 	m.rsmPlacementGrid = nil
 	m.gndMeshCache = nil
@@ -519,9 +452,6 @@ func (m *WorldMode) Enter(ctx client.Context) {
 	m.pendingPickup = pickupIntent{}
 	m.pendingSkill = pendingSkillTarget{}
 	m.pendingSkillText = pendingSkillTextTarget{}
-	m.mobileTradeRequest = nil
-	m.mobileTrade = mobileTradeState{}
-	m.mobileVending = mobileVendingState{}
 	m.guildAction = gameui.GuildMemberAction{}
 	m.guildOpenPending = false
 	m.ui.guildMemberPrompt.Close()
@@ -610,11 +540,7 @@ func (m *WorldMode) Enter(ctx client.Context) {
 		ctx.World.RSMFail = 0
 		m.playMapBGM(ctx, ctx.World.MapName)
 	}
-	if ctx.Network != nil {
-		if err := ctx.Network.SendLoadEndAck(); err == nil {
-			m.tickCooldown = 1
-		}
-	}
+	_ = ctx.Network.SendLoadEndAck()
 }
 
 func (m *WorldMode) rebindPersistentUI(ctx client.Context) {
@@ -698,9 +624,6 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 		}
 		if m.mapFade.hasChange {
 			change := m.mapFade.change
-			if !mapAssetsReady(ctx, change.MapName) {
-				return nil, nil
-			}
 			m.mapFade = mapFadeState{phase: mapFadeHold, started: now}
 			next := m.handleMapChange(ctx, change)
 			if next != nil {
@@ -724,16 +647,11 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 	if next, stop := m.handleNetworkPackets(ctx, now); stop {
 		return next, nil
 	}
-	if ctx.Offline != nil {
-		if change, ok := ctx.Offline.PeekMapChange(); ok && mapAssetsReady(ctx, change.Map) {
-			_, _ = ctx.Offline.ConsumeMapChange()
-			next := m.handleMapChange(ctx, network.MapChange{MapName: change.Map, X: change.X, Y: change.Y})
-			if next != nil {
-				return next, nil
-			}
-		}
-		m.syncOfflineProjection(ctx)
-	}
+	// Status presentation must follow server updates even when a window or
+	// modal consumes input for the rest of the frame.
+	removeExpiredStatusEffects(ctx.Session, now)
+	m.ui.statusIcons.Update(ctx, now)
+	m.updateMail(ctx, now)
 	m.ui.pvpCounter.Update(ctx)
 	progressBlocksActions := m.updateServerProgress(ctx, now)
 	if !progressBlocksActions && m.handleLevelUpNotificationAction(ctx, m.ui.levelUpNotifications.Update(ctx)) {
@@ -741,7 +659,6 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 		// prevents the same press from reaching the map after the icon closes.
 		return nil, nil
 	}
-	m.preemptControllerCombat(ctx)
 	if !progressBlocksActions {
 		m.updatePendingAttack(ctx, "update", false)
 		m.processPendingAttack(ctx)
@@ -760,17 +677,6 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 	m.processMapSounds(ctx, now)
 	m.playDueScheduledSounds(ctx, now)
 
-	if m.tickCooldown > 0 {
-		m.tickCooldown--
-	}
-	if m.tickCooldown == 0 && ctx.Network != nil {
-		if err := ctx.Network.SendTick(uint32(time.Now().UnixMilli())); err == nil {
-			m.tickCooldown = 300
-		} else {
-			m.tickCooldown = 60
-		}
-	}
-
 	m.camera.Update(ctx, now)
 	if m.mapFade.phase == mapFadeHold || m.mapFade.phase == mapFadePrewarm {
 		return nil, nil
@@ -788,12 +694,14 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 	if m.ui.inventoryBag.UpdateDropPrompt(ctx) {
 		return nil, nil
 	}
-	dead := playerIsDead(ctx)
-	keyboardBlocked := m.ui.keyboardInputBlocked(ctx)
-	if m.handleMouseCameraReset(ctx, dead || keyboardBlocked) {
+	if m.ui.mailWindow.UpdateModal(ctx) || m.ui.mailWindow.UpdateKeyboardInput(ctx) {
 		return nil, nil
 	}
-	m.updateControllerInput(ctx, dead, keyboardBlocked)
+	if m.ui.guildWindow.UpdateKeyboardInput(ctx) {
+		return nil, nil
+	}
+	dead := playerIsDead(ctx)
+	keyboardBlocked := m.ui.keyboardInputBlocked(ctx)
 	m.updateBotInput(ctx, !dead && !keyboardBlocked)
 	if m.updatePetSlotMachine(ctx) {
 		return nil, nil
@@ -963,7 +871,7 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 		}
 		return nil, nil
 	}
-	if m.ui.teleportModal.Update(ctx, m) {
+	if m.ui.teleportModal.Update(ctx) {
 		return nil, nil
 	}
 	if m.updateAutoSpellWindow(ctx) {
@@ -1006,9 +914,6 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 		return nil, nil
 	}
 	if m.ui.settingsWindow.Update(ctx) {
-		return nil, nil
-	}
-	if m.ui.controllerWindow.Update(ctx) {
 		return nil, nil
 	}
 	if !dead && m.ui.escapeMenu.Update(ctx) {
@@ -1056,7 +961,7 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 	if m.ui.petEggWindow.Update(ctx) {
 		return nil, nil
 	}
-	if m.ui.inventoryBag.UpdateDrag(ctx, &m.ui.shortcutBar, &m.ui.storageWindow, &m.ui.cartWindow, &m.ui.tradeWindow, &m.ui.equipmentWindow) {
+	if m.ui.inventoryBag.UpdateDrag(ctx, &m.ui.shortcutBar, &m.ui.storageWindow, &m.ui.cartWindow, &m.ui.tradeWindow, &m.ui.equipmentWindow, &m.ui.mailWindow) {
 		return nil, nil
 	}
 	if m.ui.storageWindow.UpdateDrag(ctx, &m.ui.inventoryBag, &m.ui.cartWindow) {
@@ -1080,7 +985,10 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 	if m.ui.shortcutBar.Update(ctx, m) {
 		return nil, nil
 	}
-	if m.ui.inventoryBag.Update(ctx, &m.ui.shortcutBar, &m.ui.storageWindow, &m.ui.cartWindow, &m.ui.tradeWindow, &m.ui.equipmentWindow, &m.ui.itemInfoWindow) {
+	if m.ui.mailWindow.Update(ctx, &m.ui.itemInfoWindow) {
+		return nil, nil
+	}
+	if m.ui.inventoryBag.Update(ctx, &m.ui.shortcutBar, &m.ui.storageWindow, &m.ui.cartWindow, &m.ui.tradeWindow, &m.ui.equipmentWindow, &m.ui.itemInfoWindow, &m.ui.mailWindow) {
 		return nil, nil
 	}
 	if m.ui.tradeWindow.Update(ctx, &m.ui.itemInfoWindow) {
@@ -1192,8 +1100,6 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 		}
 	}
 	minimapDragging := m.ui.minimap.Update(ctx)
-	removeExpiredStatusEffects(ctx.Session, now)
-	m.ui.statusIcons.Update(ctx, now)
 	m.syncLevel99AuraEffects(ctx, now)
 	pointerBlocked := minimapDragging || m.mapPointerBlocked(ctx)
 	if !pointerBlocked {
@@ -1214,14 +1120,14 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 		m.nextHeldWalkAt = now.Add(heldWalkRepeatInterval)
 	}
 	if leftClick && m.pendingSkill.skill.ID != 0 {
-		screenW, screenH := ctx.UIScreenSize()
+		screenW, screenH := ctx.ScreenSize()
 		projection := m.sceneProjection(ctx, screenW, screenH, now)
 		m.skills().HandleClick(ctx, projection, now)
 		return nil, nil
 	}
 
 	if leftClick {
-		screenW, screenH := ctx.UIScreenSize()
+		screenW, screenH := ctx.ScreenSize()
 		projection := m.sceneProjection(ctx, screenW, screenH, now)
 		if m.handlePetCaptureClick(ctx, projection, now) {
 			return nil, nil
@@ -1241,7 +1147,7 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 			glog.Debugf("click pickup target mouse=%d,%d id=%d item_id=%d amount=%d player=%d,%d target=%d,%d", ctx.Input.MouseX, ctx.Input.MouseY, item.ID, item.ItemID, item.Amount, playerX, playerY, item.X, item.Y)
 			m.clearLockedAttack()
 			m.clearAttackFocus()
-			m.ApplyPlayerCommand(ctx, input.PlayerCommand{Kind: input.CommandPickUpItem, ItemID: item.ID})
+			m.requestPickup(ctx, item, "click")
 			return nil, nil
 		}
 		if actor, ok := hoveredCursorActor(ctx, projection, ctx.Input.MouseX, ctx.Input.MouseY, now, m.actorDeaths); ok && isWarpActor(actor) {
@@ -1257,13 +1163,13 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 		}
 		if actor, ok := clickedAttackTarget(ctx, projection, ctx.Input.MouseX, ctx.Input.MouseY, now, m.actorDeaths); ok {
 			glog.Debugf("click attack target mouse=%d,%d id=%d name=%q job=%d object_type=%d player=%d,%d target=%d,%d", ctx.Input.MouseX, ctx.Input.MouseY, actor.ID, actor.Name, actor.Job, actor.ObjectType, playerX, playerY, actor.X, actor.Y)
-			m.ApplyPlayerCommand(ctx, input.PlayerCommand{Kind: input.CommandAttackActor, ActorID: actor.ID})
+			m.requestAttack(ctx, actor, "click")
 			return nil, nil
 		}
 		if actor, ok := clickedTalkTarget(ctx, projection, ctx.Input.MouseX, ctx.Input.MouseY, now, m.actorDeaths); ok {
 			glog.Debugf("click npc talk target mouse=%d,%d id=%d name=%q job=%d object_type=%d player=%d,%d target=%d,%d", ctx.Input.MouseX, ctx.Input.MouseY, actor.ID, actor.Name, actor.Job, actor.ObjectType, playerX, playerY, actor.X, actor.Y)
 			m.clearAttackFocus()
-			m.ApplyPlayerCommand(ctx, input.PlayerCommand{Kind: input.CommandInteractActor, ActorID: actor.ID})
+			m.requestNPCTalk(ctx, actor, "click")
 			return nil, nil
 		}
 		if targetX, targetY, ok := clickedWalkTarget(ctx, projection, ctx.Input.MouseX, ctx.Input.MouseY); ok && m.walkReady(now) {
@@ -1273,26 +1179,13 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 				m.requestChangeDirection(ctx, targetX, targetY, "click")
 				return nil, nil
 			}
-			m.ApplyPlayerCommand(ctx, input.PlayerCommand{Kind: input.CommandMoveTo, Position: input.WorldPosition{X: float64(targetX), Y: float64(targetY)}})
+			m.requestWalk(ctx, targetX, targetY, "click")
 		}
 	}
 	if m.updateHeldWalk(ctx, pointerBlocked, now) {
 		return nil, nil
 	}
 	return nil, nil
-}
-
-func mapAssetsReady(ctx client.Context, mapName string) bool {
-	if ctx.Assets == nil {
-		return true
-	}
-	requirement := ctx.Assets.RequireMap(mapName)
-	if requirement.Ready {
-		return true
-	}
-	_ = ctx.Assets.RequestPack(mapName)
-	glog.Infof("map transition waiting for assets map=%s missing=%v", mapName, requirement.Missing)
-	return false
 }
 
 func (m *WorldMode) handleEscapeMenuAction(ctx client.Context) {
@@ -1460,13 +1353,8 @@ func (m *WorldMode) requestSessionGuildEmblem(ctx client.Context) {
 }
 
 func (m *WorldMode) handleMapChange(ctx client.Context, change network.MapChange) Mode {
-	if ctx.Assets != nil {
-		requirement := ctx.Assets.RequireMap(change.MapName)
-		if !requirement.Ready {
-			_ = ctx.Assets.RequestPack(change.MapName)
-			glog.Infof("map transition waiting for assets map=%s missing=%v", change.MapName, requirement.Missing)
-			return nil
-		}
+	if m.ui.mailWindow.IsOpen() || m.mail.pending.Kind != gameui.MailActionNone {
+		m.closeMail(ctx)
 	}
 	m.clearServerProgress()
 	m.showDigit = showDigitState{}
@@ -1486,12 +1374,6 @@ func (m *WorldMode) handleMapChange(ctx client.Context, change network.MapChange
 	}
 	m.clearLocalDeathState(ctx)
 	currentMap := ctx.World.MapName
-	if ctx.Offline != nil {
-		if err := ctx.Offline.ActivateMap(change.MapName, change.X, change.Y); err != nil {
-			glog.Warnf("offline map change rejected map=%s x=%d y=%d: %v", change.MapName, change.X, change.Y, err)
-			return nil
-		}
-	}
 	reuseLoadedMap := !change.ServerMove && sameLoadedMap(ctx, change.MapName)
 	glog.Debugf("map change current=%s target=%s x=%d y=%d server_move=%t addr=%s port=%d reuse_loaded=%t", currentMap, change.MapName, change.X, change.Y, change.ServerMove, change.Address, change.Port, reuseLoadedMap)
 	ctx.World.ResetMapProperty()
@@ -1505,13 +1387,13 @@ func (m *WorldMode) handleMapChange(ctx client.Context, change network.MapChange
 		if ctx.Network != nil {
 			if err := ctx.Network.SendLoadEndAck(); err != nil {
 				glog.Warnf("same-map warp load ack failed map=%s x=%d y=%d: %v", change.MapName, change.X, change.Y, err)
-			} else {
-				m.tickCooldown = 1
 			}
 		}
 		return nil
 	}
 	if change.ServerMove {
+		m.mail = mailState{}
+		m.deferredPackets = nil
 		ctx.Session.Zone.Address = change.Address
 		ctx.Session.Zone.Port = change.Port
 		dialCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -1546,6 +1428,8 @@ func (m *WorldMode) handleLevelUpNotificationAction(ctx client.Context, action g
 
 func (m *WorldMode) nextWorldMode() *WorldMode {
 	next := NewWorldMode()
+	next.mail = m.mail
+	next.deferredPackets = m.deferredPackets
 	next.camera.yawOffset = m.camera.yawOffset
 	next.camera.pitch = m.camera.pitch
 	next.camera.zoom = m.camera.zoom
@@ -1582,12 +1466,12 @@ func (m *WorldMode) nextWorldMode() *WorldMode {
 	next.pendingChatRoom = m.pendingChatRoom
 	next.ui.partySettings = m.ui.partySettings
 	next.ui.settingsWindow = m.ui.settingsWindow
-	next.ui.controllerWindow = m.ui.controllerWindow
 	next.ui.partyCreate = m.ui.partyCreate
 	next.ui.partyInvite = m.ui.partyInvite
 	next.ui.skillTextPrompt = m.ui.skillTextPrompt
 	next.ui.shortcutBar = m.ui.shortcutBar
 	next.ui.minimap = m.ui.minimap
+	next.ui.statusIcons = m.ui.statusIcons
 	next.ui.pvpCounter = m.ui.pvpCounter
 	next.ui.levelUpNotifications = m.ui.levelUpNotifications
 	m.companionAI.close()
@@ -1628,22 +1512,7 @@ func (m *WorldMode) requestNPCTalk(ctx client.Context, actor worldstate.Actor, s
 	if playerIsDead(ctx) {
 		return
 	}
-	// Talking is an explicit non-combat action. Clear both queued chase and
-	// lock-on state before contacting the NPC so an earlier monster target
-	// cannot resume while the server is opening the conversation.
-	m.clearControllerCombatIntent()
 	if ctx.Network == nil {
-		if ctx.Offline != nil {
-			m.clearLockedAttack()
-			name, _, _, _, ok := ctx.Offline.TargetForActor(actor.ID)
-			if !ok {
-				name = actor.Name
-			}
-			message := fmt.Sprintf("%s is available on %s.", name, ctx.Offline.MapName)
-			m.ui.npcDialog.Apply(network.NPCDialog{Kind: network.NPCDialogSay, NPCID: actor.ID, Message: message})
-			m.setWalkCooldown(walkRequestCooldown)
-			return
-		}
 		m.setWalkCooldown(walkErrorCooldown)
 		return
 	}
@@ -1674,10 +1543,6 @@ func (m *WorldMode) Draw(ctx client.Context, screen *render.Frame) {
 			m.drawTileCursor(screen, ctx, projection)
 		}
 		if ctx.World.RSW != nil && len(ctx.World.RSM) > 0 {
-			// Model-backed maps use the production RSW/RSM scene path, but floor
-			// items are still independent world entities. Keep them in this path
-			// as well; otherwise drops only appear on GAT/fallback maps.
-			m.drawGroundItems(screen, ctx, projection, now)
 			actorOverlays = m.drawSceneModelsAndActors(screen, ctx, projection, vertexFog, now)
 		} else {
 			m.drawSkillUnitRSMModels(screen, ctx, projection, now)
@@ -1708,7 +1573,6 @@ func (m *WorldMode) Draw(ctx client.Context, screen *render.Frame) {
 		m.ui.homunculusSkill.Draw(screen, ctx, m)
 		m.ui.mercenarySkill.Draw(screen, ctx, m)
 		m.drawHoveredGroundItemLabel(screen, ctx, projection, now)
-		m.drawControllerFocusedTargetNameLabel(screen, ctx, projection, now)
 	}
 }
 

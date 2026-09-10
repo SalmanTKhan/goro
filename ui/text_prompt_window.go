@@ -86,7 +86,7 @@ func (w *TextPromptWindow) widgetTree(ctx Context) widget.Widget {
 		Size(textPromptW, ROWindowTitleHeight+textPromptContentH+ROWindowFooterHeight),
 		Content(
 			primitives.Box(
-				rotheme.SectionLabel(w.label),
+				rotheme.Label(w.label),
 				primitives.Box(w.input(ctx)).
 					Height(24).
 					CrossAlign(primitives.CrossAxisStretch),

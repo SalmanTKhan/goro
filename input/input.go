@@ -67,6 +67,7 @@ const (
 type TouchID int64
 
 type State struct {
+	frameID                  uint64
 	keys                     map[Key]bool
 	prev                     map[Key]bool
 	justKeys                 map[Key]bool
@@ -132,7 +133,14 @@ func (s *State) Update() {
 	s.EndFrame()
 }
 
+// FrameID identifies the current batch of input events. UI opened by an event
+// can use it to avoid handling that same event again during the frame update.
+func (s *State) FrameID() uint64 {
+	return s.frameID
+}
+
 func (s *State) EndFrame() {
+	s.frameID++
 	for key, down := range s.keys {
 		s.prev[key] = down
 	}
@@ -170,6 +178,20 @@ func (s *State) EndFrame() {
 	s.updateTouches()
 }
 
+// ResetKeyboard forgets held keys and pending keyboard input after focus loss.
+// Releases may happen in another window and never reach us. Clear the edge
+// history too, so cancellation does not trigger actions bound to key releases.
+func (s *State) ResetKeyboard() {
+	clear(s.keys)
+	clear(s.prev)
+	clear(s.justKeys)
+	clear(s.keyCodes)
+	clear(s.prevKeyCodes)
+	clear(s.justKeyCodes)
+	clear(s.justKeyCodeUps)
+	s.textInput = s.textInput[:0]
+}
+
 func (s *State) SetKey(key Key, pressed bool) {
 	if pressed && !s.keys[key] {
 		s.justKeys[key] = true
@@ -196,10 +218,6 @@ func (s *State) SetKeyCode(code KeyCode, pressed bool) {
 	}
 }
 
-// SetPointerSource selects which input source pointer events are attributed
-// to. The controller's virtual cursor sets this to InputSourceController while
-// it injects events so the pad is not misread as a mouse. The zero value keeps
-// the historical behavior of attributing pointer events to the mouse.
 func (s *State) SetPointerSource(source InputSource) {
 	if s == nil {
 		return
@@ -214,32 +232,6 @@ func (s *State) pointerInputSource() InputSource {
 	return s.pointerSource
 }
 
-func (s *State) SetMouseButton(button MouseButton, pressed bool) {
-	if pressed && !s.buttons[button] {
-		s.justMouse[button] = true
-	}
-	if !pressed && s.buttons[button] {
-		s.justMouseReleased[button] = true
-	}
-	s.buttons[button] = pressed
-	if pressed {
-		s.source = s.pointerInputSource()
-	}
-}
-
-func (s *State) SetMousePosition(x, y int) {
-	if s.hasMouse {
-		s.MouseDX += x - s.MouseX
-		s.MouseDY += y - s.MouseY
-	} else {
-		s.hasMouse = true
-	}
-	s.MouseX, s.MouseY = x, y
-	s.source = s.pointerInputSource()
-}
-
-// SetController publishes the current controller snapshot for the next game
-// update. Button edge queries compare this snapshot with the previous frame.
 func (s *State) SetController(snapshot ControllerSnapshot) {
 	if s == nil {
 		return
@@ -269,17 +261,11 @@ func (s *State) ControllerButtonDown(button ControllerButton) bool {
 }
 
 func (s *State) ControllerButtonJustPressed(button ControllerButton) bool {
-	if s == nil {
-		return false
-	}
-	return s.controller.ButtonDown(button) && !s.prevController.ButtonDown(button)
+	return s != nil && s.controller.ButtonDown(button) && !s.prevController.ButtonDown(button)
 }
 
 func (s *State) ControllerButtonJustReleased(button ControllerButton) bool {
-	if s == nil {
-		return false
-	}
-	return !s.controller.ButtonDown(button) && s.prevController.ButtonDown(button)
+	return s != nil && !s.controller.ButtonDown(button) && s.prevController.ButtonDown(button)
 }
 
 func (s *State) ConsumeControllerAction(action Action) {
@@ -292,40 +278,47 @@ func (s *State) ControllerActionConsumed(action Action) bool {
 	return s != nil && s.consumedActions.Has(action)
 }
 
-// ConsumeControllerCamera marks the right stick as already spent this frame.
-// The renderer sets it when the right stick is aiming the virtual pointer, so
-// gameplay does not also rotate the camera with the same deflection.
 func (s *State) ConsumeControllerCamera() {
 	if s != nil {
 		s.controllerCameraConsumed = true
 	}
 }
-
-func (s *State) ControllerCameraConsumed() bool {
-	return s != nil && s.controllerCameraConsumed
-}
-
-// ConsumeControllerZoom marks the trigger zoom channel as already spent this
-// frame. Modal controller UI uses it alongside camera consumption so L2/R2
-// paging or shortcut chords cannot also zoom the world behind the window.
+func (s *State) ControllerCameraConsumed() bool { return s != nil && s.controllerCameraConsumed }
 func (s *State) ConsumeControllerZoom() {
 	if s != nil {
 		s.controllerZoomConsumed = true
 	}
 }
-
-func (s *State) ControllerZoomConsumed() bool {
-	return s != nil && s.controllerZoomConsumed
-}
-
+func (s *State) ControllerZoomConsumed() bool { return s != nil && s.controllerZoomConsumed }
 func (s *State) ConsumeControllerMovement() {
 	if s != nil {
 		s.controllerMoveConsumed = true
 	}
 }
+func (s *State) ControllerMovementConsumed() bool { return s != nil && s.controllerMoveConsumed }
 
-func (s *State) ControllerMovementConsumed() bool {
-	return s != nil && s.controllerMoveConsumed
+func (s *State) SetMouseButton(button MouseButton, pressed bool) {
+	if pressed && !s.buttons[button] {
+		s.justMouse[button] = true
+	}
+	if !pressed && s.buttons[button] {
+		s.justMouseReleased[button] = true
+	}
+	s.buttons[button] = pressed
+	if pressed {
+		s.source = s.pointerInputSource()
+	}
+}
+
+func (s *State) SetMousePosition(x, y int) {
+	if s.hasMouse {
+		s.MouseDX += x - s.MouseX
+		s.MouseDY += y - s.MouseY
+	} else {
+		s.hasMouse = true
+	}
+	s.MouseX, s.MouseY = x, y
+	s.source = s.pointerInputSource()
 }
 
 func (s *State) AddWheel(x, y float64) {
@@ -346,16 +339,11 @@ func (s *State) TextInput() string {
 }
 
 func (s *State) SetTouch(id TouchID, x, y int, pressed bool) {
-	if s == nil {
-		return
-	}
 	if pressed {
 		s.touches[id] = TouchPoint{ID: id, X: x, Y: y}
-		s.source = InputSourceTouch
 		return
 	}
 	delete(s.touches, id)
-	s.source = InputSourceTouch
 }
 
 func (s *State) Pressed(key Key) bool {

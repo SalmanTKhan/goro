@@ -13,23 +13,23 @@ import (
 const (
 	smallPromptWidth        = 286
 	smallPromptHeight       = 128
-	alertPromptHeight       = 156
 	smallPromptContentH     = 42
 	smallPromptSidePad      = 12
 	smallPromptLineH        = 14
 	smallPromptDefaultLines = 2
-	alertPromptMaxLines     = 4
+	smallPromptMaxLines     = 4
 	smallPromptLineMaxRunes = 42
 )
 
 type ConfirmModal struct {
 	Window
-	title    string
-	message  string
-	onOK     func()
-	onCancel func()
-	okOnly   bool
-	ctx      client.Context
+	title       string
+	message     string
+	onOK        func()
+	onCancel    func()
+	okOnly      bool
+	ctx         client.Context
+	openedFrame uint64
 }
 
 func (m *ConfirmModal) Open(ctx client.Context, title, message string, onOK, onCancel func()) {
@@ -38,10 +38,7 @@ func (m *ConfirmModal) Open(ctx client.Context, title, message string, onOK, onC
 	m.onOK = onOK
 	m.onCancel = onCancel
 	m.okOnly = false
-	m.ctx = ctx
-	m.EnsureWindow(smallPromptWidth, m.promptHeight())
-	m.Window.Open(ctx, m.widgetTree(ctx))
-	m.Publish(ctx)
+	m.openPrompt(ctx)
 }
 
 func (m *ConfirmModal) OpenAlert(ctx client.Context, title, message string, onOK func()) {
@@ -50,8 +47,18 @@ func (m *ConfirmModal) OpenAlert(ctx client.Context, title, message string, onOK
 	m.onOK = onOK
 	m.onCancel = nil
 	m.okOnly = true
+	m.openPrompt(ctx)
+}
+
+func (m *ConfirmModal) openPrompt(ctx client.Context) {
 	m.ctx = ctx
+	m.openedFrame = 0
+	if ctx.Input != nil {
+		m.openedFrame = ctx.Input.FrameID()
+	}
 	m.EnsureWindow(smallPromptWidth, m.promptHeight())
+	m.CloseOnEsc = false // Escape is handled here, including opening-frame suppression.
+	m.SetSize(smallPromptWidth, m.promptHeight())
 	m.Window.Open(ctx, m.widgetTree(ctx))
 	m.Publish(ctx)
 }
@@ -61,7 +68,9 @@ func (m *ConfirmModal) Update(ctx client.Context) bool {
 	if !m.Window.IsOpen() {
 		return false
 	}
-	if ctx.Input != nil {
+	// Widget callbacks can open this modal before the triggering key reaches
+	// input.State. Only accept keyboard confirmation in a later input frame.
+	if ctx.Input != nil && ctx.Input.FrameID() != m.openedFrame {
 		if ctx.Input.JustPressed(input.KeyEscape) {
 			if m.okOnly {
 				m.Confirm(ctx)
@@ -111,17 +120,11 @@ func (m *ConfirmModal) openWindow(ctx client.Context) {
 }
 
 func (m *ConfirmModal) promptHeight() int {
-	if m.okOnly {
-		return alertPromptHeight
-	}
 	return ROWindowTitleHeight + smallPromptContentH + smallPromptLineH*(m.messageMaxLines()-1) + ROWindowFooterHeight
 }
 
 func (m *ConfirmModal) messageMaxLines() int {
-	if m.okOnly {
-		return alertPromptMaxLines
-	}
-	return smallPromptVisibleLineCount(m.message, alertPromptMaxLines)
+	return max(smallPromptDefaultLines, smallPromptVisibleLineCount(m.message, smallPromptMaxLines))
 }
 
 func (m *ConfirmModal) widgetTree(ctx client.Context) widget.Widget {
