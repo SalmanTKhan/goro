@@ -18,6 +18,30 @@ function tick()
 end
 ```
 
+## Headless mode
+
+Run the same scripts without a window or audio:
+
+```sh
+./goro --headless --data-dir ~/OldRO \
+  --username tester --password secret --char-slot 0 \
+  --script scripts/loot-and-attack.lua
+```
+
+`--headless` enables automatic login and requires credentials and a character
+slot (0–8). These can also come from the existing `[login]` configuration.
+As with `--autologin`, the first login server and first character server are
+selected. The script is optional; without one the client stays connected.
+
+The headless renderer runs the normal update and draw callbacks at 60 Hz,
+then discards the draw commands. It creates no window or GPU device. Resource
+loading, animation timing, fades, and Lua behavior follow the graphical client.
+Stop the process with Ctrl+C.
+
+This only replaces the renderer: login errors and interactive dialogs still
+behave as in the graphical client, and there is no automatic reconnect or new
+Lua API for answering dialogs. `--no-ui` only hides the graphical client's UI.
+
 ## API
 
 All functions are exposed through the global `goro` table.
