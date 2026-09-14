@@ -555,6 +555,7 @@ func (m *WorldMode) Enter(ctx client.Context) Mode {
 }
 
 func (m *WorldMode) rebindPersistentUI(ctx client.Context) {
+	m.ui.console.Rebind(ctx)
 	m.ui.console.OnGuildWindow = func() { m.toggleGuildWindow(ctx) }
 	m.ui.guildWindow.EmblemImage = func(ctx client.Context) image.Image {
 		if ctx.Session == nil || m.guildEmblems == nil {
@@ -740,6 +741,9 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 	// through the UI. Handle keyboard-only window shortcuts before pointer
 	// dispatch, otherwise their JustPressed event can be lost.
 	if m.chatShortcutFromInput(ctx) || m.toggleEmoteWindowFromInput(ctx) || m.toggleGuildWindowFromInput(ctx) {
+		return nil, nil
+	}
+	if !dead && !m.ui.nonConsoleKeyboardInputBlocked(ctx) && m.ui.shortcutBar.UpdateKeyboardInput(ctx, m, m.ui.console.Active()) {
 		return nil, nil
 	}
 	if dead {

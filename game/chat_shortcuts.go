@@ -8,13 +8,33 @@ import (
 	"github.com/kivutar/goro/input"
 )
 
-// SuppressShortcutText filters only active physical shortcuts before their
-// accompanying text reaches editors. Actions still run in frame input handling.
-func (m *WorldMode) SuppressShortcutText(ctx client.Context, code input.KeyCode) bool {
-	if !plainAltDown(ctx.Input) || code == gpucontext.KeyUnknown {
+// PrepareTextInput routes ordinary typing to classic chat, or filters the text
+// accompanying active shortcuts. Shortcut actions still run in frame input.
+func (m *WorldMode) PrepareTextInput(ctx client.Context, code input.KeyCode) bool {
+	if m.uiInputSuspended() {
 		return false
 	}
-	if !m.serverProgress.started.IsZero() || m.mapFade.phase == mapFadeOut || m.mapFade.phase == mapFadeHold || m.mapFade.phase == mapFadePrewarm {
+	if m.suppressShortcutText(ctx, code) {
+		return true
+	}
+	if !m.ui.nonConsoleKeyboardInputBlocked(ctx) {
+		return m.ui.console.PrepareTextInput(ctx, code)
+	}
+	return false
+}
+
+func (m *WorldMode) PrepareKeyInput(ctx client.Context, code input.KeyCode, mods gpucontext.Modifiers) {
+	if !m.uiInputSuspended() && !m.ui.nonConsoleKeyboardInputBlocked(ctx) {
+		m.ui.console.PrepareKeyInput(ctx, code, mods)
+	}
+}
+
+func (m *WorldMode) uiInputSuspended() bool {
+	return !m.serverProgress.started.IsZero() || m.mapFade.phase == mapFadeOut || m.mapFade.phase == mapFadeHold || m.mapFade.phase == mapFadePrewarm
+}
+
+func (m *WorldMode) suppressShortcutText(ctx client.Context, code input.KeyCode) bool {
+	if !plainAltDown(ctx.Input) || code == gpucontext.KeyUnknown {
 		return false
 	}
 	if code == gpucontext.KeyM {

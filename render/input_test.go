@@ -1,11 +1,41 @@
 package render
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/gogpu/gpucontext"
 	"github.com/kivutar/goro/input"
 )
+
+func TestFanoutPreparesEditingKeysBeforeDispatch(t *testing.T) {
+	source := &fanoutEventSource{}
+	filtered := newFanoutEventSource(source)
+	state := input.NewState()
+	var order []string
+	filtered.prepareKeyInput = func(code input.KeyCode, mods gpucontext.Modifiers) {
+		if code != gpucontext.KeyDelete || mods != gpucontext.ModControl {
+			t.Fatal("key preparation lost the physical key or modifiers")
+		}
+		order = append(order, "prepare")
+	}
+	filtered.OnKeyPress(func(gpucontext.Key, gpucontext.Modifiers) {
+		order = append(order, "ui")
+	})
+	wireInput(filtered, state)
+	for _, fn := range source.keyPress {
+		fn(gpucontext.KeyDelete, gpucontext.ModControl)
+	}
+	if !reflect.DeepEqual(order, []string{"prepare", "ui"}) || !state.KeyCodeJustPressed(gpucontext.KeyDelete) {
+		t.Fatalf("editing key dispatch order=%v; physical press must remain available", order)
+	}
+	for _, fn := range source.keyRelease {
+		fn(gpucontext.KeyDelete, 0)
+	}
+	if len(order) != 2 || state.KeyCodeDown(gpucontext.KeyDelete) {
+		t.Fatal("release prepared focus or failed to release the key")
+	}
+}
 
 func TestFanoutPreservesTextWithoutShortcutFilter(t *testing.T) {
 	source := &fanoutEventSource{}
@@ -34,7 +64,7 @@ func TestFanoutFiltersOnlyActiveShortcutText(t *testing.T) {
 	var uiText string
 	filtered.OnTextInput(func(text string) { uiText += text })
 	active := true
-	filtered.suppressShortcutText = func(code input.KeyCode) bool {
+	filtered.prepareTextInput = func(code input.KeyCode) bool {
 		return active && state.Pressed(input.KeyAlt) && code == gpucontext.KeyM
 	}
 	press := func(key gpucontext.Key, mods gpucontext.Modifiers) {

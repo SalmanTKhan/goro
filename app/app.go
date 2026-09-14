@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/gogpu/gpucontext"
 	gameaudio "github.com/kivutar/goro/audio"
 	"github.com/kivutar/goro/client"
 	"github.com/kivutar/goro/config"
@@ -124,8 +125,14 @@ func (g *Game) InputState() *input.State {
 	return g.input
 }
 
-func (g *Game) SuppressShortcutText(code input.KeyCode) bool {
-	return g.modes != nil && g.modes.SuppressShortcutText(g.modeContext(), code)
+func (g *Game) PrepareTextInput(code input.KeyCode) bool {
+	return g.modes != nil && g.modes.PrepareTextInput(g.modeContext(), code)
+}
+
+func (g *Game) PrepareKeyInput(code input.KeyCode, mods gpucontext.Modifiers) {
+	if g.modes != nil {
+		g.modes.PrepareKeyInput(g.modeContext(), code, mods)
+	}
 }
 
 func (g *Game) SetQuitFunc(quit func()) {

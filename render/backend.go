@@ -47,8 +47,9 @@ type uiAppReceiver interface {
 	SetUIApp(client.UIApp)
 }
 
-type shortcutTextFilter interface {
-	SuppressShortcutText(input.KeyCode) bool
+type keyboardInputPreparer interface {
+	PrepareKeyInput(input.KeyCode, gpucontext.Modifiers)
+	PrepareTextInput(input.KeyCode) bool
 }
 
 type uiAppBridge struct {
@@ -312,8 +313,9 @@ func Run(game Game, cfg config.WindowConfig, renderCfg config.RenderConfig) erro
 	widget.RegisterClipboardProvider(gg)
 	defer widget.RegisterClipboardProvider(nil)
 	events := newFanoutEventSource(gg.EventSource())
-	if filter, ok := game.(shortcutTextFilter); ok {
-		events.suppressShortcutText = filter.SuppressShortcutText
+	if preparer, ok := game.(keyboardInputPreparer); ok {
+		events.prepareKeyInput = preparer.PrepareKeyInput
+		events.prepareTextInput = preparer.PrepareTextInput
 	}
 	uiTheme := rotheme.Default.AsTheme()
 	uiTheme.Colors.Background = widget.RGBA8(0, 0, 0, 0)
@@ -445,7 +447,8 @@ func graphicsAPI(name string) (gogputypes.GraphicsAPI, error) {
 }
 
 type fanoutEventSource struct {
-	suppressShortcutText func(input.KeyCode) bool
+	prepareKeyInput      func(input.KeyCode, gpucontext.Modifiers)
+	prepareTextInput     func(input.KeyCode) bool
 	keyPress             []func(gpucontext.Key, gpucontext.Modifiers)
 	keyRelease           []func(gpucontext.Key, gpucontext.Modifiers)
 	textInput            []func(string)
@@ -465,6 +468,11 @@ func newFanoutEventSource(source gpucontext.EventSource) *fanoutEventSource {
 	keyCode := gpucontext.KeyUnknown
 	source.OnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
 		keyCode = key
+		// Editing keys do not generate text events. Restore their destination
+		// before UI dispatch so the first Delete/Backspace is not lost.
+		if f.prepareKeyInput != nil {
+			f.prepareKeyInput(key, mods)
+		}
 		for _, fn := range f.keyPress {
 			fn(key, mods)
 		}
@@ -478,9 +486,9 @@ func newFanoutEventSource(source gpucontext.EventSource) *fanoutEventSource {
 		}
 	})
 	source.OnTextInput(func(text string) {
-		// Only the active mode knows which shortcuts are available. In
-		// particular, Alt/Option text must remain usable on login and in forms.
-		if f.suppressShortcutText != nil && f.suppressShortcutText(keyCode) {
+		// Let the active mode focus a text field or suppress shortcut text
+		// before either UI or game listeners receive it.
+		if f.prepareTextInput != nil && f.prepareTextInput(keyCode) {
 			return
 		}
 		for _, fn := range f.textInput {

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gogpu/gpucontext"
 	"github.com/gogpu/ui/core/scrollview"
 	"github.com/gogpu/ui/core/textfield"
 	"github.com/gogpu/ui/primitives"
@@ -66,6 +67,7 @@ type ChatConsole struct {
 	ctx                       client.Context
 	window                    Window
 	inputField                *textfield.Widget
+	inputBinding              *consoleInputBinding
 	scrollY                   state.Signal[float32]
 	cacheKey                  string
 	renderedMessagesKey       string
@@ -89,7 +91,59 @@ type ChatConsole struct {
 }
 
 func (c *ChatConsole) Active() bool {
-	return c != nil && c.active
+	if c == nil {
+		return false
+	}
+	if c.inputField != nil {
+		return c.inputField.IsFocused()
+	}
+	return c.active
+}
+
+// PrepareTextInput runs before UI dispatch, so the first typed character goes
+// through the normal textfield editor too (including selection and Unicode).
+// The world calls it only when no other form or modal owns keyboard input.
+func (c *ChatConsole) PrepareTextInput(ctx client.Context, code input.KeyCode) bool {
+	c.ctx = ctx
+	if c.Active() {
+		return false
+	}
+	battle := ctx.Session != nil && ctx.Session.BattleMode
+	enter := ctx.Input != nil && ctx.Input.JustPressed(input.KeyEnter)
+	space := code == gpucontext.KeySpace && ctx.Input != nil &&
+		!ctx.Input.Pressed(input.KeyAlt) && !ctx.Input.Pressed(input.KeyCtrl)
+	if battle && !enter && !space {
+		return false
+	}
+	if enter {
+		// Enter and the first character can arrive in the same frame. Do not
+		// interpret that opening Enter as a submission in UpdateInput.
+		ctx.Input.ConsumeKeyCodePress(gpucontext.KeyEnter)
+	}
+	c.inputWidget()
+	c.setActive(true)
+	return battle && space && !enter
+}
+
+// PrepareKeyInput restores classic chat for editing/navigation keys as well as
+// text. It only changes focus; the textfield still performs the edit itself.
+func (c *ChatConsole) PrepareKeyInput(ctx client.Context, code input.KeyCode, mods gpucontext.Modifiers) {
+	if c.Active() || ctx.Session != nil && ctx.Session.BattleMode || mods&(gpucontext.ModAlt|gpucontext.ModSuper) != 0 {
+		return
+	}
+	switch code {
+	case gpucontext.KeyBackspace, gpucontext.KeyDelete, gpucontext.KeyHome, gpucontext.KeyEnd,
+		gpucontext.KeyLeft, gpucontext.KeyRight, gpucontext.KeyUp, gpucontext.KeyDown:
+	case gpucontext.KeyA, gpucontext.KeyC, gpucontext.KeyV, gpucontext.KeyX:
+		if mods&gpucontext.ModControl == 0 {
+			return
+		}
+	default:
+		return
+	}
+	c.ctx = ctx
+	c.inputWidget()
+	c.setActive(true)
 }
 
 func (c *ChatConsole) Update(ctx client.Context) bool {
@@ -136,6 +190,11 @@ func (c *ChatConsole) UpdateInput(ctx client.Context) bool {
 	}
 	if ctx.Input.JustPressed(input.KeyEnter) && !c.active {
 		c.setActive(true)
+		// Normal chat is always ready to send, even after a map click. Only
+		// Battle Mode needs an opening Enter before submitting the draft.
+		if ctx.Session == nil || !ctx.Session.BattleMode {
+			c.submit(ctx)
+		}
 		return true
 	}
 	if c.active && ctx.Input.JustPressed(input.KeyEnter) {
@@ -162,6 +221,21 @@ func (c *ChatConsole) UpdateInput(ctx client.Context) bool {
 func (c *ChatConsole) Publish(ctx client.Context) {
 	c.ensureWindow(ctx)
 	c.window.Publish(ctx)
+}
+
+// Rebind reconnects the editor callbacks after the console is copied to a new
+// world mode, keeping the same field so its caret and selection survive.
+func (c *ChatConsole) Rebind(ctx client.Context) {
+	c.ctx = ctx
+	c.input = c.currentInput()
+	c.active = c.Active()
+	if c.inputBinding != nil {
+		c.inputBinding.console = c
+	}
+	if c.window.IsOpen() {
+		c.window.RebindContent(ctx, c.widgetTree(c.window.width, c.window.height))
+		c.setActive(c.active)
+	}
 }
 
 func (c *ChatConsole) Unpublish(ctx client.Context) {
@@ -272,7 +346,10 @@ func (c *ChatConsole) submitText(ctx client.Context, inputText string) {
 	}
 	text := strings.TrimSpace(inputText)
 	if text == "" {
-		c.setActive(false)
+		// With Battle Mode off, an empty Enter is harmless: chat stays ready.
+		if ctx.Session != nil && ctx.Session.BattleMode {
+			c.setActive(false)
+		}
 		return
 	}
 	c.rememberInput(text)
@@ -283,7 +360,8 @@ func (c *ChatConsole) submitText(ctx client.Context, inputText string) {
 }
 
 // SendText executes a chat message or command without changing the editor's
-// draft, focus or history. Both console submissions and Alt+number use it.
+// draft or history. Commands such as /bm may intentionally change input mode.
+// Both console submissions and Alt+number use it.
 func (c *ChatConsole) SendText(ctx client.Context, text string) bool {
 	text = strings.TrimSpace(text)
 	if text == "" {
@@ -305,6 +383,20 @@ func (c *ChatConsole) submitCommand(ctx client.Context, text string) bool {
 	}
 	command := strings.ToLower(strings.Fields(text)[0])
 	switch command {
+	case "/bm", "/battlemode":
+		if ctx.Session == nil {
+			return true
+		}
+		ctx.Session.BattleMode = !ctx.Session.BattleMode
+		status := "OFF"
+		if ctx.Session.BattleMode {
+			status = "ON"
+			c.setActive(false)
+		}
+		c.AddSystemMessage("Battle Mode %s", status)
+		c.inputWidget().SetNeedsRedraw(true)
+		c.invalidate()
+		return true
 	case "/sit":
 		c.submitSitStand(ctx, !consolePlayerSitting(ctx))
 		return true
@@ -987,21 +1079,14 @@ func (c *ChatConsole) inputWidget() *textfield.Widget {
 	if c.inputField != nil {
 		return c.inputField
 	}
+	c.inputBinding = &consoleInputBinding{console: c}
 	c.inputField = rotheme.TextField(
 		c.input,
 		textfield.TypeText,
-		func(value string) {
-			c.input = value
-			c.historyIndex = 0
-			c.historyDraft = ""
-			c.scrollToBottom()
-		},
-		func(value string) {
-			c.pendingSubmit = value
-			c.hasPendingSubmit = true
-		},
+		c.inputBinding.onChange,
+		c.inputBinding.onSubmit,
 		textfield.MaxLength(consoleMaxInput),
-		textfield.Placeholder("Press Enter to chat"),
+		textfield.PainterOpt(c.inputBinding),
 	)
 	c.inputField.SetFocused(c.active)
 	return c.inputField
@@ -1019,12 +1104,49 @@ func (c *ChatConsole) setInput(text string) {
 func (c *ChatConsole) setActive(active bool) {
 	c.active = active
 	if c.inputField != nil {
+		if wc := windowWidgetContext(c.ctx); wc != nil {
+			if active {
+				wc.RequestFocus(c.inputField)
+			} else {
+				wc.ReleaseFocus(c.inputField)
+			}
+		}
 		c.inputField.SetFocused(active)
 	}
 	if active {
 		c.scrollToBottom()
 	}
 	c.invalidate()
+}
+
+// The cached field's callbacks and painter follow its current console owner
+// without rebuilding the editor when a map change copies ChatConsole.
+type consoleInputBinding struct{ console *ChatConsole }
+
+func (b *consoleInputBinding) onChange(value string) {
+	c := b.console
+	c.input = value
+	c.historyIndex = 0
+	c.historyDraft = ""
+	c.scrollToBottom()
+}
+
+func (b *consoleInputBinding) onSubmit(value string) {
+	b.console.pendingSubmit = value
+	b.console.hasPendingSubmit = true
+}
+
+func (b *consoleInputBinding) PaintTextField(canvas widget.Canvas, state *textfield.PaintState) {
+	paint := *state
+	paint.Placeholder = "Type to chat"
+	battle := b.console.ctx.Session != nil && b.console.ctx.Session.BattleMode
+	if battle {
+		paint.Placeholder = "Press Enter or Space to chat"
+	}
+	rotheme.TextFieldPainter{}.PaintTextField(canvas, &paint)
+	if battle && !state.Focused {
+		canvas.StrokeRect(state.Bounds, rotheme.Default.Colors.InputFocus, 1)
+	}
 }
 
 func (c *ChatConsole) syncActiveFromField() {

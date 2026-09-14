@@ -27,13 +27,13 @@ func TestChatShortcutWindowToggleAndBlocking(t *testing.T) {
 	m := &WorldMode{}
 	ctx.Input.SetKeyCode(gpucontext.KeyLeftAlt, true)
 	ctx.Input.SetKeyCode(gpucontext.KeyM, true)
-	if !m.SuppressShortcutText(ctx, gpucontext.KeyM) || !m.chatShortcutFromInput(ctx) || !m.ui.chatShortcuts.IsOpen() {
+	if !m.PrepareTextInput(ctx, gpucontext.KeyM) || !m.chatShortcutFromInput(ctx) || !m.ui.chatShortcuts.IsOpen() {
 		t.Fatal("Alt+M did not open shortcut list")
 	}
 	if !m.ui.keyboardInputBlocked(ctx) {
 		t.Fatal("shortcut editor did not block game hotkeys")
 	}
-	if !m.SuppressShortcutText(ctx, gpucontext.KeyM) || m.chatShortcutFromInput(ctx) || !m.ui.chatShortcuts.IsOpen() {
+	if !m.PrepareTextInput(ctx, gpucontext.KeyM) || m.chatShortcutFromInput(ctx) || !m.ui.chatShortcuts.IsOpen() {
 		t.Fatal("held Alt+M retriggered or leaked text")
 	}
 	ctx.Input.SetKeyCode(gpucontext.KeyM, false)
@@ -49,38 +49,38 @@ func TestChatShortcutTextOnlyInterceptsAvailableBindings(t *testing.T) {
 	ctx.Config.ChatShortcuts[0] = "/ns"
 	ctx.Input.SetKeyCode(gpucontext.KeyLeftAlt, true)
 	ctx.Input.SetKeyCode(gpucontext.Key1, true)
-	if !m.SuppressShortcutText(ctx, gpucontext.Key1) {
+	if !m.PrepareTextInput(ctx, gpucontext.Key1) {
 		t.Fatal("bound Alt+1 text leaked")
 	}
 	if !ctx.Input.KeyCodeJustPressed(gpucontext.Key1) || ctx.Session.NoShift {
 		t.Fatal("text filter consumed or executed a shortcut")
 	}
-	if m.SuppressShortcutText(ctx, gpucontext.Key2) {
+	if m.PrepareTextInput(ctx, gpucontext.Key2) {
 		t.Fatal("unbound Option text was swallowed")
 	}
 	for _, key := range []gpucontext.Key{gpucontext.KeyL, gpucontext.KeyG} {
-		if !m.SuppressShortcutText(ctx, key) {
+		if !m.PrepareTextInput(ctx, key) {
 			t.Fatalf("Alt+%v text leaked", key)
 		}
 	}
 	for _, modifier := range []gpucontext.Key{gpucontext.KeyLeftControl, gpucontext.KeyRightAlt, gpucontext.KeyLeftShift, gpucontext.KeyLeftSuper, gpucontext.KeyRightSuper} {
 		ctx.Input.SetKeyCode(gpucontext.KeyLeftAlt, true)
 		ctx.Input.SetKeyCode(modifier, true)
-		if m.SuppressShortcutText(ctx, gpucontext.Key1) {
+		if m.PrepareTextInput(ctx, gpucontext.Key1) {
 			t.Fatalf("text with %v was swallowed", modifier)
 		}
 		ctx.Input.SetKeyCode(modifier, false)
 	}
 	ctx.Input.SetKeyCode(gpucontext.KeyLeftAlt, true)
 	m.ui.settingsWindow.OpenWindow(ctx)
-	if m.SuppressShortcutText(ctx, gpucontext.Key1) {
+	if m.PrepareTextInput(ctx, gpucontext.Key1) {
 		t.Fatal("shortcut text was swallowed while a form blocked shortcuts")
 	}
-	if m.SuppressShortcutText(ctx, gpucontext.KeyM) {
+	if m.PrepareTextInput(ctx, gpucontext.KeyM) {
 		t.Fatal("Alt+M was swallowed while a form blocked shortcuts")
 	}
 	login := &Manager{mode: NewLoginMode()}
-	if login.SuppressShortcutText(ctx, gpucontext.KeyM) {
+	if login.PrepareTextInput(ctx, gpucontext.KeyM) {
 		t.Fatal("login intercepted a world shortcut")
 	}
 }
