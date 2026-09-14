@@ -47,6 +47,10 @@ type uiAppReceiver interface {
 	SetUIApp(client.UIApp)
 }
 
+type shortcutTextFilter interface {
+	SuppressShortcutText(input.KeyCode) bool
+}
+
 type uiAppBridge struct {
 	*uiapp.App
 	runner *runner
@@ -308,6 +312,9 @@ func Run(game Game, cfg config.WindowConfig, renderCfg config.RenderConfig) erro
 	widget.RegisterClipboardProvider(gg)
 	defer widget.RegisterClipboardProvider(nil)
 	events := newFanoutEventSource(gg.EventSource())
+	if filter, ok := game.(shortcutTextFilter); ok {
+		events.suppressShortcutText = filter.SuppressShortcutText
+	}
 	uiTheme := rotheme.Default.AsTheme()
 	uiTheme.Colors.Background = widget.RGBA8(0, 0, 0, 0)
 	uiWindow := &uiWindowProvider{WindowProvider: gg}
@@ -438,6 +445,7 @@ func graphicsAPI(name string) (gogputypes.GraphicsAPI, error) {
 }
 
 type fanoutEventSource struct {
+	suppressShortcutText func(input.KeyCode) bool
 	keyPress             []func(gpucontext.Key, gpucontext.Modifiers)
 	keyRelease           []func(gpucontext.Key, gpucontext.Modifiers)
 	textInput            []func(string)
@@ -454,17 +462,27 @@ type fanoutEventSource struct {
 
 func newFanoutEventSource(source gpucontext.EventSource) *fanoutEventSource {
 	f := &fanoutEventSource{}
+	keyCode := gpucontext.KeyUnknown
 	source.OnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
+		keyCode = key
 		for _, fn := range f.keyPress {
 			fn(key, mods)
 		}
 	})
 	source.OnKeyRelease(func(key gpucontext.Key, mods gpucontext.Modifiers) {
+		if key == keyCode {
+			keyCode = gpucontext.KeyUnknown
+		}
 		for _, fn := range f.keyRelease {
 			fn(key, mods)
 		}
 	})
 	source.OnTextInput(func(text string) {
+		// Only the active mode knows which shortcuts are available. In
+		// particular, Alt/Option text must remain usable on login and in forms.
+		if f.suppressShortcutText != nil && f.suppressShortcutText(keyCode) {
+			return
+		}
 		for _, fn := range f.textInput {
 			fn(text)
 		}
@@ -495,6 +513,9 @@ func newFanoutEventSource(source gpucontext.EventSource) *fanoutEventSource {
 		}
 	})
 	source.OnFocus(func(focused bool) {
+		if !focused {
+			keyCode = gpucontext.KeyUnknown
+		}
 		for _, fn := range f.focus {
 			fn(focused)
 		}
