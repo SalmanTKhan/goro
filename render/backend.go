@@ -48,6 +48,7 @@ type uiAppReceiver interface {
 }
 
 type keyboardInputPreparer interface {
+	HandleKeyPress(input.KeyCode)
 	PrepareKeyInput(input.KeyCode, gpucontext.Modifiers)
 	PrepareTextInput(input.KeyCode) bool
 }
@@ -314,6 +315,7 @@ func Run(game Game, cfg config.WindowConfig, renderCfg config.RenderConfig) erro
 	defer widget.RegisterClipboardProvider(nil)
 	events := newFanoutEventSource(gg.EventSource())
 	if preparer, ok := game.(keyboardInputPreparer); ok {
+		events.handleKeyPress = preparer.HandleKeyPress
 		events.prepareKeyInput = preparer.PrepareKeyInput
 		events.prepareTextInput = preparer.PrepareTextInput
 	}
@@ -447,6 +449,8 @@ func graphicsAPI(name string) (gogputypes.GraphicsAPI, error) {
 }
 
 type fanoutEventSource struct {
+	inputState           *input.State
+	handleKeyPress       func(input.KeyCode)
 	prepareKeyInput      func(input.KeyCode, gpucontext.Modifiers)
 	prepareTextInput     func(input.KeyCode) bool
 	keyPress             []func(gpucontext.Key, gpucontext.Modifiers)
@@ -468,16 +472,33 @@ func newFanoutEventSource(source gpucontext.EventSource) *fanoutEventSource {
 	keyCode := gpucontext.KeyUnknown
 	source.OnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
 		keyCode = key
+		repeated := false
+		if f.inputState != nil {
+			repeated = f.inputState.KeyCodeDown(key)
+			f.inputState.SetKeyCode(key, true)
+		}
+		if !repeated && f.handleKeyPress != nil {
+			f.handleKeyPress(key)
+		}
+		if f.keyConsumed(key) {
+			return
+		}
 		// Editing keys do not generate text events. Restore their destination
 		// before UI dispatch so the first Delete/Backspace is not lost.
 		if f.prepareKeyInput != nil {
 			f.prepareKeyInput(key, mods)
+		}
+		if f.keyConsumed(key) {
+			return
 		}
 		for _, fn := range f.keyPress {
 			fn(key, mods)
 		}
 	})
 	source.OnKeyRelease(func(key gpucontext.Key, mods gpucontext.Modifiers) {
+		if f.inputState != nil {
+			f.inputState.SetKeyCode(key, false)
+		}
 		if key == keyCode {
 			keyCode = gpucontext.KeyUnknown
 		}
@@ -486,8 +507,14 @@ func newFanoutEventSource(source gpucontext.EventSource) *fanoutEventSource {
 		}
 	})
 	source.OnTextInput(func(text string) {
-		// Let the active mode focus a text field or suppress shortcut text
-		// before either UI or game listeners receive it.
+		if f.inputState != nil {
+			f.inputState.AddTextInput(text)
+		}
+		if f.keyConsumed(keyCode) {
+			return
+		}
+		// Keep the raw snapshot available to input handlers, but let the
+		// active mode focus an editor or suppress text before UI dispatch.
 		if f.prepareTextInput != nil && f.prepareTextInput(keyCode) {
 			return
 		}
@@ -523,6 +550,9 @@ func newFanoutEventSource(source gpucontext.EventSource) *fanoutEventSource {
 	source.OnFocus(func(focused bool) {
 		if !focused {
 			keyCode = gpucontext.KeyUnknown
+			if f.inputState != nil {
+				f.inputState.ResetKeyboard()
+			}
 		}
 		for _, fn := range f.focus {
 			fn(focused)
@@ -544,6 +574,10 @@ func newFanoutEventSource(source gpucontext.EventSource) *fanoutEventSource {
 		}
 	})
 	return f
+}
+
+func (f *fanoutEventSource) keyConsumed(code input.KeyCode) bool {
+	return f.inputState != nil && f.inputState.KeyCodeConsumed(code)
 }
 
 func (f *fanoutEventSource) OnKeyPress(fn func(gpucontext.Key, gpucontext.Modifiers)) {
@@ -594,21 +628,13 @@ func (f *fanoutEventSource) OnIMECompositionEnd(fn func(string)) {
 	f.imeCompositionEnd = append(f.imeCompositionEnd, fn)
 }
 
-func wireInput(events gpucontext.EventSource, state *input.State) {
+func wireInput(events *fanoutEventSource, state *input.State) {
+	// Keyboard snapshots are collected before default UI dispatch. Pointer
+	// events keep their existing listener order.
+	events.inputState = state
 	if state == nil {
 		return
 	}
-	events.OnKeyPress(func(key gpucontext.Key, _ gpucontext.Modifiers) {
-		state.SetKeyCode(key, true)
-	})
-	events.OnKeyRelease(func(key gpucontext.Key, _ gpucontext.Modifiers) {
-		state.SetKeyCode(key, false)
-	})
-	events.OnFocus(func(focused bool) {
-		if !focused {
-			state.ResetKeyboard()
-		}
-	})
 	events.OnMouseMove(func(x, y float64) {
 		state.SetMousePosition(int(x+0.5), int(y+0.5))
 	})
@@ -626,9 +652,6 @@ func wireInput(events gpucontext.EventSource, state *input.State) {
 	})
 	events.OnScroll(func(x, y float64) {
 		state.AddWheel(x, y)
-	})
-	events.OnTextInput(func(text string) {
-		state.AddTextInput(text)
 	})
 }
 

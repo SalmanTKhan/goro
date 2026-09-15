@@ -125,6 +125,12 @@ func (g *Game) InputState() *input.State {
 	return g.input
 }
 
+func (g *Game) HandleKeyPress(code input.KeyCode) {
+	if g.modes != nil {
+		g.modes.HandleKeyPress(g.modeContext(), code)
+	}
+}
+
 func (g *Game) PrepareTextInput(code input.KeyCode) bool {
 	return g.modes != nil && g.modes.PrepareTextInput(g.modeContext(), code)
 }
