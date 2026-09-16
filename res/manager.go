@@ -44,6 +44,8 @@ type Manager struct {
 	songTalksLoaded          map[SongTalkKind]bool
 	petTalks                 map[string]map[string]map[string][]string
 	petTalksLoaded           bool
+	questMetadata            map[uint32]QuestMetadata
+	questMetadataLoaded      bool
 }
 
 type CameraViewPoint struct {

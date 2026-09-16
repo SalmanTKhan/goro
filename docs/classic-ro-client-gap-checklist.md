@@ -36,18 +36,19 @@ duplicated stealth state are needed.
 
 ### Quest journal and markers
 
-- [ ] Parse the 2008 quest list packets (`0x02B1` through `0x02B5` and relevant updates).
-- [ ] Store active quest state, descriptions, objectives, and hunt progress in the session.
-- [ ] Implement the quest list and quest detail UI.
-- [ ] Handle quest activation/state acknowledgement (`0x02B6`).
-- [ ] Handle quest removal and state updates (`0x02B7` where applicable).
+- [x] Parse the 2008 quest list packets (`0x02B1` through `0x02B5` and relevant updates).
+- [x] Store character-owned quest state, objectives, and hunt progress; load descriptions from `questid2display.txt`.
+- [x] Implement the quest list and quest detail UI (`Alt+U`, Active/Inactive/All tabs).
+- [x] Send quest activation changes (`0x02B6`) and wait for server acknowledgement (`0x02B7`).
+- [x] Handle quest removal/completion (`0x02B4`) and state updates (`0x02B7`).
 - [ ] Display quest NPC markers in the world.
 - [ ] Display quest markers and objective dots on the minimap.
-- [ ] Preserve the existing quest EXP console notifications.
-- [ ] Add packet, session-state, UI, and marker regression tests.
+- [x] Preserve the existing quest EXP console notifications.
+- [x] Add packet, resource, session-state, and journal UI regression tests.
+- [ ] Add marker regression tests.
 
-See [the packet audit](packet-coverage-20080910.md), especially the currently
-untracked `0x02B1`-`0x02B7` family.
+See [the quest journal notes](quest-journal.md) for scope, protocol references,
+and a manual test using the local rAthena server. Markers remain a separate part.
 
 ### Legacy mail
 

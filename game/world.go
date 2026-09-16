@@ -203,6 +203,7 @@ type worldUI struct {
 	mercenaryConfirm     gameui.ConfirmModal
 	statsWindow          gameui.StatsWindow
 	skillWindow          gameui.SkillWindow
+	questWindow          gameui.QuestWindow
 	emoteWindow          gameui.EmoteWindow
 	chatShortcuts        gameui.ChatShortcutsWindow
 	friendsWindow        gameui.FriendsWindow
@@ -586,6 +587,7 @@ func (m *WorldMode) rebindPersistentUI(ctx client.Context) {
 	m.ui.itemWindows.Rebind(ctx, m)
 	m.ui.statsWindow.Rebind(ctx)
 	m.ui.skillWindow.Rebind(ctx, m)
+	m.ui.questWindow.Rebind(ctx, func(id uint32, active bool) { m.setQuestActive(ctx, id, active) })
 	m.ui.levelUpNotifications.Rebind(ctx)
 	m.ui.emoteWindow.OnSelect = m.ui.chatShortcuts.SelectEmotion
 	m.ui.emoteWindow.Rebind(ctx, &m.ui.console)
@@ -709,6 +711,7 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 		return nil, nil
 	}
 	m.ui.console.UpdatePresentation(ctx)
+	m.ui.questWindow.UpdatePresentation(ctx, now)
 	if progressBlocksActions {
 		return nil, nil
 	}
@@ -739,7 +742,7 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 	// Window.Update consumes pointer hover so that map input does not pass
 	// through the UI. Handle keyboard-only window shortcuts before pointer
 	// dispatch, otherwise their JustPressed event can be lost.
-	if m.chatShortcutFromInput(ctx) || m.toggleEmoteWindowFromInput(ctx) || m.toggleGuildWindowFromInput(ctx) {
+	if m.chatShortcutFromInput(ctx) || m.toggleEmoteWindowFromInput(ctx) || m.toggleGuildWindowFromInput(ctx) || m.toggleQuestWindowFromInput(ctx) {
 		return nil, nil
 	}
 	if !dead && !m.ui.nonConsoleKeyboardInputBlocked(ctx) && m.ui.shortcutBar.UpdateKeyboardInput(ctx, m, m.ui.console.Active()) {
@@ -1035,6 +1038,9 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 		return nil, nil
 	}
 	if m.ui.skillWindow.Update(ctx, &m.ui.shortcutBar, m) {
+		return nil, nil
+	}
+	if m.ui.questWindow.Update(ctx) {
 		return nil, nil
 	}
 	if m.ui.homunculusSkill.Update(ctx, &m.ui.shortcutBar, m) {
@@ -1465,6 +1471,7 @@ func (m *WorldMode) nextWorldMode() *WorldMode {
 	next.petLastTalk = m.petLastTalk
 	next.ui.statsWindow = m.ui.statsWindow
 	next.ui.skillWindow = m.ui.skillWindow
+	next.ui.questWindow = m.ui.questWindow
 	next.ui.emoteWindow = m.ui.emoteWindow
 	next.ui.chatShortcuts = m.ui.chatShortcuts
 	next.ui.friendsWindow = m.ui.friendsWindow

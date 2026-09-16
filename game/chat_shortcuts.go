@@ -43,7 +43,7 @@ func (m *WorldMode) suppressShortcutText(ctx client.Context, code input.KeyCode)
 	if m.ui.nonConsoleKeyboardInputBlocked(ctx) {
 		return false
 	}
-	if code == gpucontext.KeyL || code == gpucontext.KeyG {
+	if code == gpucontext.KeyL || code == gpucontext.KeyG || code == gpucontext.KeyU {
 		return true
 	}
 	for slot, key := range chatShortcutKeys {
