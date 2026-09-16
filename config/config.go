@@ -15,6 +15,8 @@ import (
 )
 
 type Config struct {
+	// ConfigPath is the absolute file path selected by LoadConfig for saving settings.
+	ConfigPath    string
 	Headless      bool
 	DataDir       string
 	Window        WindowConfig
@@ -94,23 +96,39 @@ type ScriptConfig struct {
 }
 
 func LoadConfig(args []string) (Config, error) {
+	// Parse once to find explicitly supplied paths, using the same flag rules as
+	// the final pass. Defer validation until file settings have also been loaded.
+	cli := defaultConfig()
+	if err := parseCLI(&cli, args); err != nil {
+		return Config{}, err
+	}
 	cfg := defaultConfig()
 
-	// File defaults < saved user settings < explicit command-line flags.
-	configPath, explicitConfig := configPathFromArgs(args)
-	if configPath != "" {
-		if err := applyINIFile(&cfg, configPath, explicitConfig); err != nil {
+	// Defaults < ./goro.ini < --data-dir/goro.ini < --config < command-line flags.
+	cfg.ConfigPath = "goro.ini"
+	if err := applyINIFile(&cfg, cfg.ConfigPath, false); err != nil {
+		return Config{}, err
+	}
+	if cli.DataDir != "" {
+		cfg.ConfigPath = filepath.Join(cli.DataDir, "goro.ini")
+		if err := applyINIFile(&cfg, cfg.ConfigPath, false); err != nil {
 			return Config{}, err
 		}
 	}
-	if path, err := UserConfigPath(); err == nil {
-		if err := applyINIFile(&cfg, path, false); err != nil {
+	if cli.ConfigPath != "" {
+		cfg.ConfigPath = cli.ConfigPath
+		if err := applyINIFile(&cfg, cfg.ConfigPath, true); err != nil {
 			return Config{}, err
 		}
 	}
 	if err := applyCLI(&cfg, args); err != nil {
 		return Config{}, err
 	}
+	path, err := filepath.Abs(cfg.ConfigPath)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.ConfigPath = path
 	cfg.DataDir = resolveDataDir(cfg.DataDir)
 	return cfg, nil
 }
@@ -126,14 +144,6 @@ type UserSettings struct {
 	LessEffects bool
 	SnapTargets bool
 	SnapItems   bool
-}
-
-func UserConfigPath() (string, error) {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, "goro", "goro.ini"), nil
 }
 
 func UserDataDir() (string, error) {
@@ -166,7 +176,7 @@ func NextScreenshotPath(now time.Time) (string, error) {
 	}
 }
 
-func SaveUserSettings(settings UserSettings) (string, error) {
+func (cfg Config) SaveUserSettings(settings UserSettings) (string, error) {
 	if settings.BGMVolume < 0 || settings.BGMVolume > 1 {
 		return "", fmt.Errorf("bgm volume must be between 0 and 1")
 	}
@@ -193,18 +203,18 @@ func SaveUserSettings(settings UserSettings) (string, error) {
 			"itemsnap":     formatINIValueBool(settings.SnapItems),
 		},
 	}
-	return saveUserConfigValues(values)
+	return cfg.saveConfigValues(values)
 }
 
 // SaveLoginID remembers only the ID, independently of explicit login credentials.
-func SaveLoginID(username string, keep bool) (string, error) {
+func (cfg Config) SaveLoginID(username string, keep bool) (string, error) {
 	if !keep {
 		username = ""
 	}
 	if strings.ContainsAny(username, "\r\n\x00") {
 		return "", fmt.Errorf("login ID must be a single line without NUL characters")
 	}
-	return saveUserConfigValues(map[string]map[string]string{
+	return cfg.saveConfigValues(map[string]map[string]string{
 		"login": {
 			"keep_id":        formatINIValueBool(keep),
 			"saved_username": `"` + username + `"`,
@@ -212,10 +222,10 @@ func SaveLoginID(username string, keep bool) (string, error) {
 	})
 }
 
-func saveUserConfigValues(values map[string]map[string]string) (string, error) {
-	path, err := UserConfigPath()
-	if err != nil {
-		return "", err
+func (cfg Config) saveConfigValues(values map[string]map[string]string) (string, error) {
+	path := cfg.ConfigPath
+	if path == "" {
+		return "", fmt.Errorf("no config file selected")
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", err
@@ -270,22 +280,6 @@ func defaultConfig() Config {
 	}
 }
 
-func configPathFromArgs(args []string) (string, bool) {
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "--config" && i+1 < len(args) {
-			return args[i+1], true
-		}
-		if strings.HasPrefix(arg, "--config=") {
-			return strings.TrimPrefix(arg, "--config="), true
-		}
-	}
-	if _, err := os.Stat("goro.ini"); err == nil {
-		return "goro.ini", false
-	}
-	return "", false
-}
-
 func applyINIFile(cfg *Config, path string, explicit bool) error {
 	file, err := os.Open(path)
 	if err != nil {
@@ -302,15 +296,14 @@ func applyINIFile(cfg *Config, path string, explicit bool) error {
 	return nil
 }
 
-func applyCLI(cfg *Config, args []string) error {
+func parseCLI(cfg *Config, args []string) error {
 	fs := flag.NewFlagSet("goro", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 
-	configPath := ""
 	windowed := false
-	fs.StringVar(&configPath, "config", "", "path to goro ini configuration")
+	fs.StringVar(&cfg.ConfigPath, "config", cfg.ConfigPath, "path to goro ini configuration (also used to save settings)")
 	fs.BoolVar(&cfg.Headless, "headless", false, "run without a window or audio (implies autologin)")
-	fs.StringVar(&cfg.DataDir, "data-dir", cfg.DataDir, "Ragnarok data directory")
+	fs.StringVar(&cfg.DataDir, "data-dir", cfg.DataDir, "Ragnarok data directory (loads goro.ini from this directory)")
 	fs.StringVar(&cfg.Window.Title, "title", cfg.Window.Title, "window title")
 	fs.IntVar(&cfg.Window.Width, "width", cfg.Window.Width, "window width")
 	fs.IntVar(&cfg.Window.Height, "height", cfg.Window.Height, "window height")
@@ -353,8 +346,24 @@ func applyCLI(cfg *Config, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	var pathErr error
+	fs.Visit(func(f *flag.Flag) {
+		if (f.Name == "config" || f.Name == "data-dir") && f.Value.String() == "" {
+			pathErr = fmt.Errorf("--%s requires a non-empty path", f.Name)
+		}
+	})
+	if pathErr != nil {
+		return pathErr
+	}
 	if windowed {
 		cfg.Window.Fullscreen = false
+	}
+	return nil
+}
+
+func applyCLI(cfg *Config, args []string) error {
+	if err := parseCLI(cfg, args); err != nil {
+		return err
 	}
 	if cfg.Headless {
 		cfg.Login.AutoLogin = true

@@ -34,7 +34,7 @@ func (w *ChatShortcutsWindow) load(ctx Context) {
 	}
 	w.loaded = true
 	var err error
-	w.commands, err = config.LoadChatShortcuts(ctx.Config.ChatShortcuts)
+	w.commands, err = ctx.Config.LoadChatShortcuts()
 	if err != nil {
 		glog.Warnf("load chat shortcuts: %v", err)
 	}
@@ -133,7 +133,7 @@ func (w *ChatShortcutsWindow) setCommand(slot int, command string) {
 		return
 	}
 	w.commands[slot] = command
-	if _, err := config.SaveChatShortcuts(w.commands); err != nil {
+	if _, err := w.ctx.Config.SaveChatShortcuts(w.commands); err != nil {
 		glog.Warnf("save chat shortcuts: %v", err)
 		if w.console != nil {
 			w.console.AddErrorMessage("Could not save chat shortcuts: %s", err)
