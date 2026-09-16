@@ -14,7 +14,12 @@ locally; the NPC/server still decides its outcome.
 
 Titles, descriptions, and artwork come from `data/questid2display.txt` in the
 client data. Unlisted server quests retain their ID, objectives, and deadline,
-with a `Quest #ID` title. World/minimap quest markers are not part of this change.
+with a `Quest #ID` title.
+
+Quest NPC markers and automatic quest/objective minimap overlays are outside our
+2008 scope, not a planned follow-up. rAthena's `clif_quest_show_event` gates the
+NPC marker packet (`0x0446`) on `PACKETVER >= 20090218`. Existing server compass
+markers are a separate feature and remain supported.
 
 ## Testing on local rAthena
 

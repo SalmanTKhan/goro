@@ -257,6 +257,8 @@ Currently implemented (not a claim of complete reference-client parity):
    * Classic Battle Mode (`/bm`), direct typing, and F12 shortcut-bar switching
    * Console
    * Minimap with player, NPC, party, and guild markers
+   * Classic world map with player/party locations and minimap previews
+   * Quest journal with descriptions, hunt progress, and time limits
    * Items with vertical category tabs
    * Equipment
    * Option

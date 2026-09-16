@@ -22,6 +22,7 @@ const (
 	IconButtonRight
 	IconButtonUp
 	IconButtonDown
+	IconButtonSearch
 )
 
 var iconButtonSegments = map[IconButtonKind][][4]float32{
@@ -113,6 +114,11 @@ func drawIconGlyph(canvas widget.Canvas, bounds geometry.Rect, kind IconButtonKi
 	midX := float32(int(bounds.Min.X + bounds.Width()/2))
 	midY := float32(int(bounds.Min.Y+bounds.Height()/2)) + iconButtonGlyphYOffset
 	half := float32(icon / 2)
+	if kind == IconButtonSearch {
+		canvas.StrokeCircle(geometry.Pt(midX-1, midY-1), half, color, 1)
+		canvas.DrawLine(geometry.Pt(midX+half-1, midY+half-1), geometry.Pt(midX+half+2, midY+half+2), color, 1)
+		return
+	}
 	for _, s := range iconButtonSegments[kind] {
 		canvas.DrawLine(
 			geometry.Pt(midX+s[0]*half, midY+s[1]*half),

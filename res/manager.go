@@ -46,6 +46,8 @@ type Manager struct {
 	petTalksLoaded           bool
 	questMetadata            map[uint32]QuestMetadata
 	questMetadataLoaded      bool
+	worldMapEntries          []WorldMapEntry
+	worldMapEntriesLoaded    bool
 }
 
 type CameraViewPoint struct {

@@ -47,7 +47,7 @@ func TestIconButtonGlyphKeepsIntegerXAndQuarterPixelY(t *testing.T) {
 
 func TestIconButtonShadowMatchesSharedButton(t *testing.T) {
 	bounds := geometry.NewRect(0, 0, IconButtonSize, IconButtonSize)
-	for _, kind := range []IconButtonKind{IconButtonClose, IconButtonPlus, IconButtonMinus} {
+	for _, kind := range []IconButtonKind{IconButtonClose, IconButtonPlus, IconButtonMinus, IconButtonSearch} {
 		painted := &uitest.MockCanvas{}
 		IconButtonPainter{Kind: kind}.PaintButton(painted, button.PaintState{Bounds: bounds})
 		direct := &uitest.MockCanvas{}
