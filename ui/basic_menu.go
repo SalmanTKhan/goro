@@ -10,7 +10,9 @@ import (
 const (
 	basicMenuX         = windowScreenMargin
 	basicMenuY         = characterWindowY + characterWindowHeight + basicMenuFollowGap
-	basicMenuFollowGap = 6
+	basicMenuFollowGap = 2
+	basicMenuToggleH   = 10
+	basicMenuToggleGap = 2
 	basicMenuCols      = 4
 	basicMenuRows      = 2
 	basicMenuButtonW   = 72
@@ -24,6 +26,7 @@ type BasicMenu struct {
 	Window
 	content   widget.Widget
 	callbacks BasicMenuCallbacks
+	collapsed bool
 }
 
 type BasicMenuCallbacks struct {
@@ -55,7 +58,7 @@ var basicMenuButtons = []basicMenuButton{
 
 func (m *BasicMenu) Update(ctx client.Context, callbacks BasicMenuCallbacks) bool {
 	m.callbacks = callbacks
-	width, height := basicMenuSize()
+	width, height := basicMenuSize(m.collapsed)
 	if m.EnsureWindow(width, height) {
 		m.titleHeight = 0
 		m.CloseOnEsc = false
@@ -72,7 +75,7 @@ func (m *BasicMenu) Update(ctx client.Context, callbacks BasicMenuCallbacks) boo
 
 func (m *BasicMenu) Rebind(ctx client.Context, callbacks BasicMenuCallbacks) {
 	m.callbacks = callbacks
-	width, height := basicMenuSize()
+	width, height := basicMenuSize(m.collapsed)
 	if m.EnsureWindow(width, height) {
 		m.titleHeight = 0
 		m.CloseOnEsc = false
@@ -91,11 +94,22 @@ func (m *BasicMenu) FollowCharacterWindow(ctx client.Context, character *Charact
 	if character == nil || !character.IsOpen() {
 		return
 	}
-	width, height := basicMenuSize()
+	width, height := basicMenuSize(m.collapsed)
 	if m.EnsureWindow(width, height) {
 		m.titleHeight = 0
 		m.CloseOnEsc = false
 	}
+	// The menu owns the attached extent, including when only its toggle is
+	// visible. Expanding near the bottom moves the whole group back on screen.
+	bottom := basicMenuFollowGap + height
+	if bottom > character.dragBottom && !character.dragging {
+		_, screenH := ctx.ScreenSize()
+		maxY := maxInt(windowScreenMargin, screenH-character.height-bottom-windowScreenMargin)
+		if character.y > maxY {
+			character.setPosition(ctx, character.x, maxY)
+		}
+	}
+	character.dragBottom = bottom
 	x := character.x
 	y := character.y + character.height + basicMenuFollowGap
 	if character.dragLayer {
@@ -141,18 +155,41 @@ func (m *BasicMenu) endFollowDrag(ctx client.Context) {
 }
 
 func basicMenuBounds() (int, int, int, int) {
-	w, h := basicMenuSize()
+	w, h := basicMenuSize(false)
 	return basicMenuX, basicMenuY, w, h
 }
 
-func basicMenuSize() (int, int) {
-	w := basicMenuPad*2 + basicMenuCols*basicMenuButtonW + (basicMenuCols-1)*basicMenuGapX
-	h := basicMenuPad*2 + basicMenuRows*basicMenuButtonH + (basicMenuRows-1)*basicMenuGapY
+func basicMenuSize(collapsed bool) (int, int) {
+	w, h := characterWindowWidth, basicMenuToggleH
+	if !collapsed {
+		h += basicMenuToggleGap + basicMenuPad*2 + basicMenuRows*basicMenuButtonH + (basicMenuRows-1)*basicMenuGapY
+	}
 	return w, h
+}
+
+func (m *BasicMenu) toggleCollapsed() {
+	m.collapsed = !m.collapsed
+	width, height := basicMenuSize(m.collapsed)
+	m.SetSize(width, height)
+	m.content = nil
+	m.SetContent(m.widgetTree())
+	m.Publish(m.ctx)
 }
 
 func (m *BasicMenu) widgetTree() widget.Widget {
 	if m.content != nil {
+		return m.content
+	}
+	width, height := basicMenuSize(m.collapsed)
+	kind := rotheme.IconButtonCollapse
+	if m.collapsed {
+		kind = rotheme.IconButtonExpand
+	}
+	toggle := rotheme.IconButton(kind, m.toggleCollapsed).
+		Width(float32(width)).Height(basicMenuToggleH).
+		CrossAlign(primitives.CrossAxisStretch)
+	if m.collapsed {
+		m.content = toggle
 		return m.content
 	}
 	rows := make([]widget.Widget, 0, basicMenuRows)
@@ -176,10 +213,9 @@ func (m *BasicMenu) widgetTree() widget.Widget {
 				CrossAlign(primitives.CrossAxisStretch),
 		)
 	}
-	width, height := basicMenuSize()
-	m.content = Win(
+	panel := Win(
 		TitleBar(false),
-		Size(float32(width), float32(height)),
+		Size(float32(width), float32(height-basicMenuToggleH-basicMenuToggleGap)),
 		Content(
 			primitives.Box(rows...).
 				Padding(basicMenuPad).
@@ -187,6 +223,9 @@ func (m *BasicMenu) widgetTree() widget.Widget {
 				CrossAlign(primitives.CrossAxisStretch),
 		),
 	)
+	m.content = primitives.Box(toggle, panel).
+		Width(float32(width)).Height(float32(height)).
+		Gap(basicMenuToggleGap).CrossAlign(primitives.CrossAxisStretch)
 	return m.content
 }
 

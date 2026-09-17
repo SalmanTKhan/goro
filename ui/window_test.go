@@ -362,8 +362,8 @@ func TestScreenEdgeAnchorsUseWindowMargin(t *testing.T) {
 	if characterWindowX != windowScreenMargin || characterWindowY != windowScreenMargin {
 		t.Fatalf("character window position = %d,%d; want %d,%d", characterWindowX, characterWindowY, windowScreenMargin, windowScreenMargin)
 	}
-	if x, y, _, _ := basicMenuBounds(); x != windowScreenMargin || y != windowScreenMargin+characterWindowHeight+6 {
-		t.Fatalf("basic menu position = %d,%d; want x=%d y=%d", x, y, windowScreenMargin, windowScreenMargin+characterWindowHeight+6)
+	if x, y, _, _ := basicMenuBounds(); x != windowScreenMargin || y != windowScreenMargin+characterWindowHeight+basicMenuFollowGap {
+		t.Fatalf("basic menu position = %d,%d; want x=%d y=%d", x, y, windowScreenMargin, windowScreenMargin+characterWindowHeight+basicMenuFollowGap)
 	}
 	if x, y, _, _ := MinimapBounds(ctx.ScreenW, ctx.ScreenH); x != ctx.ScreenW-minimapWidth-windowScreenMargin || y != windowScreenMargin {
 		t.Fatalf("minimap position = %d,%d; want x=%d y=%d", x, y, ctx.ScreenW-minimapWidth-windowScreenMargin, windowScreenMargin)
