@@ -582,6 +582,7 @@ func (m *WorldMode) rebindPersistentUI(ctx client.Context) {
 		return emblem.image.RGBA()
 	}
 	m.setGuildEmblemOptions(ctx)
+	m.ui.characterWindow.Rebind(ctx)
 	m.ui.basicMenu.Rebind(ctx, m.basicMenuCallbacks(ctx))
 	m.ui.inventoryBag.Rebind(ctx, &m.ui.itemWindows)
 	m.ui.equipmentWindow.Rebind(ctx, &m.ui.itemWindows, &m.ui.cartWindow, m)

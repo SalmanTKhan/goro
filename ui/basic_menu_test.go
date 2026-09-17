@@ -66,6 +66,10 @@ func (a basicMenuTestApp) HoveredWidget() widget.Widget {
 	return a.app.Window().HoveredWidget()
 }
 
+func (a basicMenuTestApp) WidgetContext() widget.Context {
+	return a.app.Window().Context()
+}
+
 func TestBasicMenuRowsUsePointerCursor(t *testing.T) {
 	app := uiapp.New()
 	manager := NewManager()
@@ -131,11 +135,13 @@ func TestBasicMenuFollowsCharacterWindow(t *testing.T) {
 }
 
 func TestCharacterDragKeepsAttachedBasicMenuOnScreen(t *testing.T) {
-	t.Run("expanded", func(t *testing.T) { testCharacterDragKeepsAttachedBasicMenuOnScreen(t, false) })
-	t.Run("collapsed", func(t *testing.T) { testCharacterDragKeepsAttachedBasicMenuOnScreen(t, true) })
+	t.Run("expanded", func(t *testing.T) { testCharacterDragKeepsAttachedBasicMenuOnScreen(t, false, false) })
+	t.Run("collapsed", func(t *testing.T) { testCharacterDragKeepsAttachedBasicMenuOnScreen(t, true, false) })
+	t.Run("compact expanded", func(t *testing.T) { testCharacterDragKeepsAttachedBasicMenuOnScreen(t, false, true) })
+	t.Run("compact collapsed", func(t *testing.T) { testCharacterDragKeepsAttachedBasicMenuOnScreen(t, true, true) })
 }
 
-func testCharacterDragKeepsAttachedBasicMenuOnScreen(t *testing.T, collapsed bool) {
+func testCharacterDragKeepsAttachedBasicMenuOnScreen(t *testing.T, collapsed, compact bool) {
 	t.Helper()
 	inputState := input.NewState()
 	app := &windowDragTestApp{}
@@ -154,10 +160,13 @@ func testCharacterDragKeepsAttachedBasicMenuOnScreen(t *testing.T, collapsed boo
 	menu.FollowCharacterWindow(ctx, &character)
 	menu.Update(ctx, BasicMenuCallbacks{})
 
+	if compact {
+		character.toggleCompact()
+	}
 	if collapsed {
 		menu.toggleCollapsed()
-		menu.FollowCharacterWindow(ctx, &character)
 	}
+	menu.FollowCharacterWindow(ctx, &character)
 	inputState.SetMousePosition(character.x+10, character.y+5)
 	inputState.SetMouseButton(input.MouseButtonLeft, true)
 	if !character.Update(ctx) {

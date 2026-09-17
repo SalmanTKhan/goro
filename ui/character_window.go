@@ -10,6 +10,7 @@ import (
 	"github.com/gogpu/ui/event"
 	"github.com/gogpu/ui/geometry"
 	"github.com/gogpu/ui/primitives"
+	"github.com/gogpu/ui/state"
 	"github.com/gogpu/ui/widget"
 	"github.com/kivutar/goro/db"
 	"github.com/kivutar/goro/session"
@@ -17,18 +18,19 @@ import (
 )
 
 const (
-	characterWindowX                  = windowScreenMargin
-	characterWindowY                  = windowScreenMargin
-	characterWindowWidth              = 324
-	characterWindowHeight             = 134
-	characterEXPPanelPaddingX float32 = 6
-	characterEXPPanelPaddingY float32 = 4
-	characterEXPPanelGap      float32 = 2
-	characterEXPPanelRadius   float32 = 5
-	characterEXPLabelWidth    float32 = 76
-	characterEXPLabelBarGap   float32 = 6
-	characterEXPBarHeight     float32 = 6
-	characterTextLineHeight   float32 = 1.2
+	characterWindowX                     = windowScreenMargin
+	characterWindowY                     = windowScreenMargin
+	characterWindowWidth                 = 324
+	characterWindowHeight                = 134
+	characterWindowCompactHeight         = 80
+	characterEXPPanelPaddingX    float32 = 6
+	characterEXPPanelPaddingY    float32 = 4
+	characterEXPPanelGap         float32 = 2
+	characterEXPPanelRadius      float32 = 5
+	characterEXPLabelWidth       float32 = 76
+	characterEXPLabelBarGap      float32 = 6
+	characterEXPBarHeight        float32 = 6
+	characterTextLineHeight      float32 = 1.2
 )
 
 var (
@@ -42,10 +44,13 @@ var (
 type CharacterWindow struct {
 	Window
 	snapshot string
+	compact  bool
+	title    state.Signal[string]
+	body     *characterInfoBody
 }
 
 func (w *CharacterWindow) Update(ctx Context) bool {
-	w.EnsureWindow(characterWindowWidth, characterWindowHeight)
+	w.EnsureWindow(characterWindowWidth, w.windowHeight())
 	w.CloseOnEsc = false
 	if ctx.Session == nil {
 		w.Close()
@@ -59,50 +64,156 @@ func (w *CharacterWindow) Update(ctx Context) bool {
 	nextSnapshot := characterWindowSnapshot(ctx.Session)
 	if nextSnapshot != w.snapshot {
 		w.snapshot = nextSnapshot
-		w.SetContent(w.widgetTree(ctx))
+		if title := characterWindowTitle(ctx.Session, w.compact); title != w.title.Get() {
+			w.title.Set(title)
+		}
+		w.body.replace(windowWidgetContext(ctx), w.bodyTree(ctx))
+		invalidateWindowLayout(ctx)
+		if overlay := w.positionedOverlay(); overlay != nil {
+			invalidateWindowRect(ctx, overlay.markFrameDirty())
+		}
 	}
 	consumed := w.Window.Update(ctx)
 	w.Publish(ctx)
 	return consumed
 }
 
+func (w *CharacterWindow) Rebind(ctx Context) {
+	if !w.IsOpen() {
+		return
+	}
+	w.snapshot = characterWindowSnapshot(ctx.Session)
+	w.RebindContent(ctx, w.widgetTree(ctx))
+}
+
+func (w *CharacterWindow) windowHeight() int {
+	if w.compact {
+		return characterWindowCompactHeight
+	}
+	return characterWindowHeight
+}
+
+func (w *CharacterWindow) toggleCompact() {
+	w.compact = !w.compact
+	w.SetSize(characterWindowWidth, w.windowHeight())
+	if !w.compact {
+		_, screenH := w.ctx.ScreenSize()
+		maxY := maxInt(windowScreenMargin, screenH-w.height-w.dragBottom-windowScreenMargin)
+		w.setPosition(w.ctx, w.x, min(w.y, maxY))
+	}
+	w.SetContent(w.widgetTree(w.ctx))
+	w.Publish(w.ctx)
+}
+
 func (w *CharacterWindow) widgetTree(ctx Context) widget.Widget {
-	character, vitals, progress, inventory := characterWindowData(ctx.Session)
+	kind := rotheme.IconButtonMinus
+	if w.compact {
+		kind = rotheme.IconButtonPlus
+	}
+	w.title = state.NewSignal(characterWindowTitle(ctx.Session, w.compact))
+	w.body = newCharacterInfoBody(w.bodyTree(ctx))
+	return Win(
+		TitleSignal(w.title),
+		TitleButton(kind, w.toggleCompact),
+		CloseButton(false),
+		Size(float32(characterWindowWidth), float32(w.windowHeight())),
+		Content(w.body),
+	)
+}
+
+func characterWindowTitle(s *session.Session, compact bool) string {
+	character := selectedCharacter(s)
 	name := strings.TrimSpace(character.Name)
 	if name == "" {
 		name = "Player"
 	}
 	jobName := strings.TrimSpace(db.JobDisplayName(int(character.Job)))
 	title := trimRunes(name, 20)
-	if jobName != "" {
+	if !compact && jobName != "" {
 		title = trimRunes(fmt.Sprintf("%s (%s)", name, jobName), 32)
 	}
+	return title
+}
 
+func (w *CharacterWindow) bodyTree(ctx Context) *primitives.BoxWidget {
+	character, vitals, progress, inventory := characterWindowData(ctx.Session)
+	if w.compact {
+		// Classic BasicInfo's small view keeps numeric vitals and a level/EXP
+		// summary, without the bars, weight, or zeny.
+		jobName := strings.TrimSpace(db.JobDisplayName(int(character.Job)))
+		baseEXP := math.Floor(ratioInt64(progress.BaseExp, progress.NextBaseExp)*1000) / 10
+		return primitives.Box(
+			rotheme.Text(fmt.Sprintf("Lv. %d / %s / Lv. %d / Exp. %.1f%%", progress.BaseLevel, jobName, progress.JobLevel, baseEXP)).
+				MaxLines(1).Ellipsis(),
+			primitives.HBox(
+				characterTextCell(fmt.Sprintf("HP %d / %d", vitals.HP, vitals.MaxHP), 146, rotheme.Default.Colors.MutedText),
+				characterTextCell(fmt.Sprintf("SP %d / %d", vitals.SP, vitals.MaxSP), 146, rotheme.Default.Colors.MutedText),
+			).Gap(8),
+		).PaddingXY(12, 9).Gap(4).CrossAlign(primitives.CrossAxisStretch)
+	}
 	weightColor := rotheme.Default.Colors.Text
 	if inventory.MaxWeight > 0 && inventory.Weight*100 >= inventory.MaxWeight*50 {
 		weightColor = Color(ErrorTextColor)
 	}
-
-	return Win(
-		Title(title),
-		CloseButton(false),
-		Size(float32(characterWindowWidth), float32(characterWindowHeight)),
-		Content(
-			primitives.Box(
-				primitives.HBox(
-					characterRatioRow("HP", vitals.HP, vitals.MaxHP, Color(characterWindowHPColor), 146),
-					characterRatioRow("SP", vitals.SP, vitals.MaxSP, Color(characterWindowSPColor), 146),
-				).Gap(8),
-				characterEXPPanel(progress, characterWindowWidth-24),
-				primitives.HBox(
-					characterAlignedTextCell(fmt.Sprintf("Weight : %d / %d", displayWeight(inventory.Weight), displayWeight(inventory.MaxWeight)), 146, weightColor, primitives.TextAlignStart),
-					characterAlignedTextCell(fmt.Sprintf("Zeny : %s", formatHUDNumber(inventory.Zeny)), 146, rotheme.Default.Colors.Text, primitives.TextAlignEnd),
-				),
-			).
-				PaddingXY(12, 9).
-				Gap(8),
+	return primitives.Box(
+		primitives.HBox(
+			characterRatioRow("HP", vitals.HP, vitals.MaxHP, Color(characterWindowHPColor), 146),
+			characterRatioRow("SP", vitals.SP, vitals.MaxSP, Color(characterWindowSPColor), 146),
+		).Gap(8),
+		characterEXPPanel(progress, characterWindowWidth-24),
+		primitives.HBox(
+			characterAlignedTextCell(fmt.Sprintf("Weight : %d / %d", displayWeight(inventory.Weight), displayWeight(inventory.MaxWeight)), 146, weightColor, primitives.TextAlignStart),
+			characterAlignedTextCell(fmt.Sprintf("Zeny : %s", formatHUDNumber(inventory.Zeny)), 146, rotheme.Default.Colors.Text, primitives.TextAlignEnd),
 		),
-	)
+	).PaddingXY(12, 9).Gap(8)
+}
+
+// characterInfoBody lets the read-only stats refresh without unmounting the
+// header and cancelling an in-progress click on its mode button.
+type characterInfoBody struct {
+	widget.WidgetBase
+	child *primitives.BoxWidget
+}
+
+func newCharacterInfoBody(child *primitives.BoxWidget) *characterInfoBody {
+	b := &characterInfoBody{child: child}
+	b.SetVisible(true)
+	child.SetParent(b)
+	return b
+}
+
+func (b *characterInfoBody) replace(ctx widget.Context, child *primitives.BoxWidget) {
+	widget.UnmountTree(b.child)
+	b.child = child
+	child.SetParent(b)
+	if b.IsMounted() && ctx != nil {
+		widget.MountTree(child, ctx)
+	}
+	b.MarkNeedsLayout()
+	b.SetNeedsRedraw(true)
+}
+
+func (b *characterInfoBody) Layout(ctx widget.Context, constraints geometry.Constraints) geometry.Size {
+	size := widget.LayoutChild(b.child, ctx, constraints)
+	b.child.SetBounds(geometry.FromPointSize(geometry.Point{}, size))
+	b.SetBounds(geometry.FromPointSize(b.Position(), size))
+	return size
+}
+
+func (b *characterInfoBody) Draw(ctx widget.Context, canvas widget.Canvas) {
+	if !b.IsVisible() {
+		return
+	}
+	canvas.PushTransform(b.Bounds().Min)
+	widget.StampScreenOrigin(b.child, canvas)
+	widget.DrawChild(b.child, ctx, canvas)
+	canvas.PopTransform()
+}
+
+func (b *characterInfoBody) Event(widget.Context, event.Event) bool { return false }
+
+func (b *characterInfoBody) Children() []widget.Widget {
+	return []widget.Widget{b.child}
 }
 
 func characterTextCell(text string, width float32, color widget.Color) widget.Widget {

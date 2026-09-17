@@ -3,15 +3,49 @@ package ui
 import (
 	"testing"
 
+	"github.com/gogpu/gpucontext"
+	uiapp "github.com/gogpu/ui/app"
 	"github.com/gogpu/ui/event"
 	"github.com/gogpu/ui/geometry"
 	"github.com/gogpu/ui/primitives"
+	"github.com/gogpu/ui/state"
 	"github.com/gogpu/ui/uitest"
 	"github.com/gogpu/ui/widget"
 	"github.com/kivutar/goro/client"
 	"github.com/kivutar/goro/input"
 	"github.com/kivutar/goro/ui/rotheme"
 )
+
+func TestWindowTitleSignalRelayoutKeepsHeader(t *testing.T) {
+	app := uiapp.New(uiapp.WithWindowProvider(gpucontext.NullWindowProvider{W: 800, H: 600}),
+		uiapp.WithRenderMode(uiapp.RenderModeFrameworkManaged))
+	title := state.NewSignal("A")
+	root := Win(TitleSignal(title), TitleButton(rotheme.IconButtonMinus, nil), CloseButton(false), Size(324, 80))
+	app.SetRoot(root)
+	// Match Manager's window overlays; MockCanvas does not record scene replay.
+	disableRootRepaintBoundary(root)
+	app.Frame()
+	app.Window().DrawTo(&uitest.MockCanvas{})
+	header := root.Children()[0].(*roTitleBarWidget)
+	label := header.child.Children()[0].(*windowTitleText)
+	initialWidth := label.Bounds().Width()
+	title.Set("A much longer title")
+	app.Frame()
+	if root.Children()[0] != header || header.child.Children()[0] != label {
+		t.Fatal("title update replaced the header")
+	}
+	if label.Bounds().Width() <= initialWidth {
+		t.Fatal("longer title retained the old layout width")
+	}
+	canvas := &uitest.MockCanvas{}
+	app.Window().DrawTo(canvas)
+	for _, text := range canvas.StyledTexts {
+		if text.Text == "A much longer title" {
+			return
+		}
+	}
+	t.Fatal("updated title was not drawn")
+}
 
 func TestFooterStretchesContent(t *testing.T) {
 	button := primitives.Box().Width(30).Height(10)
