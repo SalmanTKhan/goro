@@ -1796,6 +1796,7 @@ func absInt(value int) int {
 
 type sceneDrawEntry struct {
 	depth           float64
+	entityID        uint32
 	actorIndex      int
 	shadowIndex     int
 	itemIndex       int
@@ -1807,23 +1808,7 @@ func (m *WorldMode) drawSceneModelsAndActors(screen *render.Frame, ctx client.Co
 	m.drawSkillUnitRSMModels(screen, ctx, projection, now)
 	actors := m.collectSceneActorEntries(screen, ctx, projection)
 	items := m.collectSceneItemEntries(screen, ctx, projection, now)
-	entries := make([]sceneDrawEntry, 0, len(actors)*2+len(items)*2)
-	for i, item := range items {
-		entries = append(entries,
-			sceneDrawEntry{depth: item.shadowDepth, actorIndex: -1, shadowIndex: -1, itemIndex: -1, itemShadowIndex: i},
-			sceneDrawEntry{depth: item.depth, actorIndex: -1, shadowIndex: -1, itemIndex: i, itemShadowIndex: -1},
-		)
-	}
-	for i, actor := range actors {
-		if actor.castShadow {
-			entries = append(entries, sceneDrawEntry{depth: actor.shadowDepth, actorIndex: -1, shadowIndex: i, itemIndex: -1, itemShadowIndex: -1})
-		}
-		entries = append(entries, sceneDrawEntry{depth: actor.depth, actorIndex: i, shadowIndex: -1, itemIndex: -1, itemShadowIndex: -1})
-	}
-	sort.SliceStable(entries, func(i, j int) bool {
-		return entries[i].depth > entries[j].depth
-	})
-	for _, entry := range entries {
+	for _, entry := range sortedSceneDrawEntries(actors, items) {
 		if entry.itemShadowIndex >= 0 {
 			m.drawGroundItemShadowEntry3D(screen, projection, items[entry.itemShadowIndex])
 			continue
@@ -1840,6 +1825,31 @@ func (m *WorldMode) drawSceneModelsAndActors(screen *render.Frame, ctx client.Co
 	}
 	m.drawSceneActorFalcons(screen, ctx, projection, actors)
 	return actors
+}
+
+func sortedSceneDrawEntries(actors []sceneActorDrawEntry, items []sceneItemDrawEntry) []sceneDrawEntry {
+	entries := make([]sceneDrawEntry, 0, len(actors)*2+len(items)*2)
+	for i, item := range items {
+		entries = append(entries,
+			sceneDrawEntry{depth: item.shadowDepth, entityID: item.item.ID, actorIndex: -1, shadowIndex: -1, itemIndex: -1, itemShadowIndex: i},
+			sceneDrawEntry{depth: item.depth, entityID: item.item.ID, actorIndex: -1, shadowIndex: -1, itemIndex: i, itemShadowIndex: -1},
+		)
+	}
+	for i, actor := range actors {
+		if actor.castShadow {
+			entries = append(entries, sceneDrawEntry{depth: actor.shadowDepth, entityID: actor.actor.ID, actorIndex: -1, shadowIndex: i, itemIndex: -1, itemShadowIndex: -1})
+		}
+		entries = append(entries, sceneDrawEntry{depth: actor.depth, entityID: actor.actor.ID, actorIndex: i, shadowIndex: -1, itemIndex: -1, itemShadowIndex: -1})
+	}
+	sort.SliceStable(entries, func(i, j int) bool {
+		// A stable sort alone preserves the world's random map iteration order
+		// at equal depths, making overlapping loot flicker from frame to frame.
+		if entries[i].depth == entries[j].depth {
+			return entries[i].entityID < entries[j].entityID
+		}
+		return entries[i].depth > entries[j].depth
+	})
+	return entries
 }
 
 func loadGAT(manager *res.Manager, mapName string) (*res.GAT, string, error) {
