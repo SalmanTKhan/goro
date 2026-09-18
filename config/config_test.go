@@ -507,7 +507,3 @@ func TestSavedLoginIDRejectsLineBreaksWithoutChangingConfig(t *testing.T) {
 		t.Fatal("invalid ID changed the existing config")
 	}
 }
-
-
-	}
-}

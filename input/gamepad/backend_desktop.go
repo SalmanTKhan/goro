@@ -20,6 +20,7 @@ type Backend struct {
 	gamepadID    sdl.JoystickID
 	closed       bool
 	lastReconcil time.Time
+	noGamepadLog time.Time
 }
 
 // reconcileInterval is how often the backend re-enumerates devices as a
@@ -60,9 +61,13 @@ func Open() (*Backend, error) {
 		return nil, fmt.Errorf("initialize SDL gamepad subsystem: %w", err)
 	}
 	backend := &Backend{loaded: true}
-	if _, err := backend.refresh(); err != nil {
+	found, err := backend.refresh()
+	if err != nil {
 		backend.Close()
 		return nil, err
+	}
+	if !found {
+		glog.Warnf("SDL3 initialized but no standardized gamepad was found; controller input will remain unavailable until a gamepad is connected")
 	}
 	return backend, nil
 }
@@ -86,9 +91,17 @@ func (b *Backend) Poll() (input.ControllerSnapshot, error) {
 		}
 	}
 	if b.gamepad == nil {
+		if b.noGamepadLog.IsZero() || now.Sub(b.noGamepadLog) >= 10*time.Second {
+			glog.Debugf("SDL3 gamepad poll: no standardized gamepad available")
+			b.noGamepadLog = now
+		}
 		return input.ControllerSnapshot{}, nil
 	}
-	return b.snapshot(), nil
+	snapshot := b.snapshot()
+	if !snapshot.Connected {
+		glog.Debugf("SDL3 gamepad poll: selected device is no longer connected")
+	}
+	return snapshot, nil
 }
 
 // drainEvents consumes SDL's event queue, acting only on gamepad arrival and
@@ -101,6 +114,7 @@ func (b *Backend) drainEvents() error {
 	for sdl.PollEvent(&event) {
 		switch event.Type {
 		case sdl.EVENT_GAMEPAD_ADDED:
+			glog.Infof("SDL3 gamepad added event")
 			if b.gamepad == nil {
 				if _, err := b.refresh(); err != nil {
 					return err
@@ -108,6 +122,9 @@ func (b *Backend) drainEvents() error {
 			}
 		case sdl.EVENT_GAMEPAD_REMOVED:
 			device := event.GamepadDeviceEvent()
+			if device != nil {
+				glog.Warnf("SDL3 gamepad removed event id=%d", device.Which)
+			}
 			if device != nil && device.Which == b.gamepadID {
 				b.closeGamepad()
 			}
@@ -187,6 +204,9 @@ func (b *Backend) refresh() (bool, error) {
 		selected, found = ids[0], true
 	}
 	if !found {
+		if b.gamepad != nil {
+			glog.Warnf("SDL3 gamepad enumeration no longer contains id=%d", b.gamepadID)
+		}
 		b.closeGamepad()
 		return false, nil
 	}
@@ -204,6 +224,8 @@ func (b *Backend) refresh() (bool, error) {
 	}
 	b.gamepad = gamepad
 	b.gamepadID = selected
+	b.noGamepadLog = time.Time{}
+	glog.Infof("SDL3 gamepad opened id=%d name=%q type=%s", selected, gamepad.Name(), controllerKind(gamepad.Type()))
 	return true, nil
 }
 
@@ -229,8 +251,17 @@ func (b *Backend) snapshot() input.ControllerSnapshot {
 	set(input.ControllerButtonDPadRight, sdl.GAMEPAD_BUTTON_DPAD_RIGHT)
 	set(input.ControllerButtonTouchpad, sdl.GAMEPAD_BUTTON_TOUCHPAD)
 
+	// Keep the logical connection alive while the handle is open. SDL can
+	// briefly report Connected()==false for Steam Input's virtual Deck pad
+	// during focus/profile transitions; treating that transient value as a
+	// disconnect drops all actions until the next reconnect event. Removal is
+	// still authoritative through SDL's removal event and refresh enumeration.
+	connected := gamepad.Connected()
+	if !connected {
+		glog.Debugf("SDL3 gamepad handle reported disconnected; retaining it until removal reconciliation")
+	}
 	return input.ControllerSnapshot{
-		Connected:    gamepad.Connected(),
+		Connected:    true,
 		ID:           uint64(b.gamepadID),
 		Name:         gamepad.Name(),
 		Kind:         controllerKind(gamepad.Type()),

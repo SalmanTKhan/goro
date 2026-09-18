@@ -373,7 +373,7 @@ func (b *ShortcutBar) bounds(ctx Context) (int, int) {
 	// On a narrow/portrait viewport the centered bar intersects both top HUD
 	// columns. Keep the readable desktop scale and move it below the character
 	// + menu group and minimap instead of shrinking the entire interface.
-	_, menuHeight := basicMenuSize()
+	_, menuHeight := basicMenuSize(false)
 	topGroupBottom := maxInt(characterWindowY+characterWindowHeight+basicMenuFollowGap+menuHeight, minimapMargin+minimapHeight)
 	if width < height && (x < characterWindowX+characterWindowWidth+windowScreenMargin || x+shortcutBarWidth() > width-minimapWidth-minimapMargin-windowScreenMargin) {
 		y = topGroupBottom + windowScreenMargin

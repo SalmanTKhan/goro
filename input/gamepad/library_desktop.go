@@ -31,7 +31,7 @@ func loadSDL3() error {
 			attempts = append(attempts, fmt.Errorf("%s: %w", candidate, err))
 			continue
 		}
-		glog.Debugf("loaded SDL3 runtime from %s", candidate)
+		glog.Infof("loaded SDL3 runtime from %s", candidate)
 		return nil
 	}
 	if len(attempts) == 0 {

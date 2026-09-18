@@ -530,13 +530,18 @@ func (c *ChatConsole) submitCommand(ctx client.Context, text string) bool {
 	}
 }
 
-func (c *ChatConsole) submitScreenshot(ctx client.Context) {
-	if ctx.RequestScreenshot == nil {
-		c.AddErrorMessage("screenshot failed: unavailable")
-		return
-	}
-	format := capture.StillPNG
+// SubmitCommand executes a console command without requiring the input widget.
+// It is kept as the public entry point for controllers and integration tests.
+func (c *ChatConsole) SubmitCommand(ctx client.Context, text string) bool {
+	return c.submitCommand(ctx, text)
+}
 
+func (c *ChatConsole) submitScreenshot(ctx client.Context, text string) {
+	args := strings.Fields(strings.ToLower(text))
+	if len(args) > 3 || (len(args) == 3 && args[2] != "lossless") || (len(args) == 2 && args[1] != "webp" && args[1] != "png") {
+		c.AddErrorMessage("usage: /screenshot [webp [lossless]]")
+		c.setInput("")
+		c.setActive(false)
 		return
 	}
 	format := capture.StillPNG
@@ -644,8 +649,6 @@ func (c *ChatConsole) submitRecording(ctx client.Context, text string) {
 	} else {
 		c.AddSystemMessage("Recording: %s", path)
 	}
-	c.setInput("")
-	c.setActive(false)
 }
 
 func (c *ChatConsole) submitLessEffects(ctx client.Context) {

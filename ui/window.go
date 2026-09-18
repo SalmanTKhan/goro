@@ -684,10 +684,6 @@ func (w *Window) placeNew(ctx client.Context, x, y int) {
 	w.setPosition(ctx, x, y)
 }
 
-	w.positioned = true
-	w.setPosition(ctx, x, y)
-}
-
 func (w *Window) setOpacity(opacity float32) {
 	changed := w.opacity != opacity
 	w.opacity = opacity
@@ -985,8 +981,6 @@ type positionedOverlay struct {
 	owner                 *Window
 	controllerPassthrough bool
 	controllerEntryPoint  bool
-}
-
 }
 
 func (w *positionedOverlay) setFrame(x, y, width, height int) geometry.Rect {

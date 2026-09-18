@@ -15,7 +15,6 @@ import (
 	"github.com/gogpu/ui/widget"
 	"github.com/kivutar/goro/client"
 	"github.com/kivutar/goro/input"
-	"github.com/kivutar/goro/session"
 	"github.com/kivutar/goro/ui/rotheme"
 )
 
@@ -62,8 +61,6 @@ func TestWindowTitleSignalRelayoutKeepsHeader(t *testing.T) {
 		}
 	}
 	t.Fatal("updated title was not drawn")
-}
-
 }
 
 func TestFooterStretchesContent(t *testing.T) {

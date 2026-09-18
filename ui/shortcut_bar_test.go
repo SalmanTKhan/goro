@@ -674,7 +674,7 @@ func TestShortcutBarReflowsBelowTopHUDInPortrait(t *testing.T) {
 	bar := &ShortcutBar{}
 	portrait := Context{UIWidth: 640, UIHeight: 1280}
 	x, y := bar.bounds(portrait)
-	_, menuHeight := basicMenuSize()
+	_, menuHeight := basicMenuSize(false)
 	wantY := maxInt(characterWindowY+characterWindowHeight+basicMenuFollowGap+menuHeight, minimapMargin+minimapHeight) + windowScreenMargin
 	if x != (640-shortcutBarWidth())/2 || y != wantY {
 		t.Fatalf("portrait bounds = %d,%d, want %d,%d", x, y, (640-shortcutBarWidth())/2, wantY)

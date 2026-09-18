@@ -82,6 +82,25 @@ func (w *ServiceWindow) Update(ctx client.Context) bool {
 	return w.Window.Update(ctx)
 }
 
+// HandleControllerAction gives the service picker a semantic controller path.
+// This is important on gamepads where the renderer dispatches Confirm directly
+// instead of synthesizing a keyboard event for the focused footer button.
+func (w *ServiceWindow) HandleControllerAction(action input.UIAction) bool {
+	if w == nil {
+		return false
+	}
+	switch action {
+	case input.UIActionConfirm:
+		w.confirm()
+		return true
+	case input.UIActionCancel:
+		w.cancel()
+		return true
+	default:
+		return false
+	}
+}
+
 func (w *ServiceWindow) SelectedIndex() int {
 	if w == nil || w.selected == nil {
 		return -1

@@ -108,9 +108,6 @@ func (w *LoginWindow) restoreFocus(ctx client.Context) {
 	}
 }
 
-	}
-}
-
 func (w *LoginWindow) widgetTree() widget.Widget {
 	submit := func() {
 		if w.Offline && w.callbacks.OnOfflineSubmit != nil {
@@ -144,23 +141,20 @@ func (w *LoginWindow) widgetTree() widget.Widget {
 	password.SetFocused(passwordFocused)
 	w.user = user
 	w.password = password
-		w.keep = rotheme.Checkbox(
-			checkbox.LabelOpt("Keep"),
-			checkbox.Checked(w.KeepID),
-			checkbox.OnToggle(func(keep bool) { w.KeepID = keep }),
-		)
-		w.keep.SetFocused(keepFocused)
-		offline := rotheme.Checkbox(
-			checkbox.Checked(w.Offline),
-			checkbox.LabelOpt("Offline"),
-			checkbox.OnToggle(func(enabled bool) { w.Offline = enabled }),
-		)
-		w.offline = offline
-		labelW := float32(loginWindowLabelW)
-		fieldW := float32(w.layout.W - loginWindowFormLeftPad - loginWindowFormRightPad - loginWindowLabelW - loginWindowLabelGap - loginWindowKeepW - loginWindowKeepGap)
-		fieldH := float32(loginWindowFieldH)
-		return Win(
-
+	w.keep = rotheme.Checkbox(
+		checkbox.LabelOpt("Keep"),
+		checkbox.Checked(w.KeepID),
+		checkbox.OnToggle(func(keep bool) { w.KeepID = keep }),
+	)
+	w.keep.SetFocused(keepFocused)
+	offline := rotheme.Checkbox(
+		checkbox.Checked(w.Offline),
+		checkbox.LabelOpt("Offline"),
+		checkbox.OnToggle(func(enabled bool) { w.Offline = enabled }),
+	)
+	w.offline = offline
+	labelW := float32(loginWindowLabelW)
+	fieldW := float32(w.layout.W - loginWindowFormLeftPad - loginWindowFormRightPad - loginWindowLabelW - loginWindowLabelGap - loginWindowKeepW - loginWindowKeepGap)
 	fieldH := float32(loginWindowFieldH)
 	return Win(
 		Title("Login"),
@@ -175,7 +169,7 @@ func (w *LoginWindow) widgetTree() widget.Widget {
 							rotheme.Label("Account").
 								Align(widget.TextAlignRight).
 								LineHeight(fieldH/rotheme.Default.Typography.TextSize),
-							).
+						).
 							CrossAlign(primitives.CrossAxisStretch).
 							Width(labelW).
 							Height(fieldH),
@@ -190,7 +184,7 @@ func (w *LoginWindow) widgetTree() widget.Widget {
 							rotheme.Label("Password").
 								Align(widget.TextAlignRight).
 								LineHeight(fieldH/rotheme.Default.Typography.TextSize),
-							).
+						).
 							CrossAlign(primitives.CrossAxisStretch).
 							Width(labelW).
 							Height(fieldH),
@@ -202,9 +196,7 @@ func (w *LoginWindow) widgetTree() widget.Widget {
 						Gap(loginWindowLabelGap),
 				).Gap(loginWindowFieldGap),
 				primitives.Box(w.keep).Width(loginWindowKeepW).Height(fieldH),
-			),
-			primitives.Box(offline).Height(fieldH),
-
+				primitives.Box(offline).Width(loginWindowKeepW).Height(fieldH),
 			).
 				PaddingTop(loginWindowFormTopPad).
 				PaddingLeft(loginWindowFormLeftPad).

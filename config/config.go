@@ -38,8 +38,6 @@ type Config struct {
 	UI            input.UISettings
 	Mobile        input.MobileControls
 	MobileDisplay input.MobileDisplaySettings
-	// other fields remain
-
 }
 
 type WindowConfig struct {
@@ -171,6 +169,14 @@ type UserSettings struct {
 	Controller    *input.ControllerSettings
 }
 
+func UserConfigPath() (string, error) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "goro", "goro.ini"), nil
+}
+
 func UserDataDir() (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {
@@ -264,6 +270,13 @@ func (cfg Config) SaveUserSettings(settings UserSettings) (string, error) {
 	if settings.SFXVolume < 0 || settings.SFXVolume > 1 {
 		return "", fmt.Errorf("sfx volume must be between 0 and 1")
 	}
+	path, err := UserConfigPath()
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", err
+	}
 	values := map[string]map[string]string{
 		"ui": {
 			"scale": formatINIValueFloat(float64(input.UISettings{Scale: settings.UIScale}.Normalized().Scale)),
@@ -332,13 +345,6 @@ func (cfg Config) saveConfigValues(values map[string]map[string]string) (string,
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", err
-	}
-	existing, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		return "", err
-	}
-	// rest of implementation...
-
 	}
 	existing, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
@@ -535,6 +541,22 @@ func defaultConfig() Config {
 			Level: "info",
 		},
 	}
+}
+
+func configPathFromArgs(args []string) (string, bool) {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--config" && i+1 < len(args) {
+			return args[i+1], true
+		}
+		if strings.HasPrefix(arg, "--config=") {
+			return strings.TrimPrefix(arg, "--config="), true
+		}
+	}
+	if _, err := os.Stat("goro.ini"); err == nil {
+		return "goro.ini", false
+	}
+	return "", false
 }
 
 func applyINIFile(cfg *Config, path string, explicit bool) error {

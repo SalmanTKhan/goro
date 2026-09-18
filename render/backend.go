@@ -958,6 +958,28 @@ func Run(game Game, cfg config.WindowConfig, renderCfg config.RenderConfig, capt
 	widget.RegisterClipboardProvider(gg)
 	defer widget.RegisterClipboardProvider(nil)
 	events := newFanoutEventSource(gg.EventSource())
+	if pointers, ok := gg.EventSource().(gpucontext.PointerEventSource); ok {
+		pointers.OnPointer(func(event gpucontext.PointerEvent) {
+			if event.PointerType != gpucontext.PointerTypeTouch || !event.IsPrimary {
+				return
+			}
+			// Desktop Wayland exposes the Deck digitizer as unified pointer
+			// events rather than mouse callbacks. Feed the primary contact into
+			// the existing pointer/UI path so Desktop Mode matches Steam Input
+			// and Android touch behavior.
+			switch event.Type {
+			case gpucontext.PointerDown:
+				game.InputState().SetPointerSource(input.InputSourceTouch)
+				events.EmitMousePress(gpucontext.MouseButtonLeft, event.X, event.Y)
+			case gpucontext.PointerMove:
+				game.InputState().SetPointerSource(input.InputSourceTouch)
+				events.EmitMouseMove(event.X, event.Y)
+			case gpucontext.PointerUp, gpucontext.PointerCancel:
+				game.InputState().SetPointerSource(input.InputSourceTouch)
+				events.EmitMouseRelease(gpucontext.MouseButtonLeft, event.X, event.Y)
+			}
+		})
+	}
 	if preparer, ok := game.(keyboardInputPreparer); ok {
 		events.handleKeyPress = preparer.HandleKeyPress
 		events.prepareKeyInput = preparer.PrepareKeyInput
@@ -973,7 +995,6 @@ func Run(game Game, cfg config.WindowConfig, renderCfg config.RenderConfig, capt
 			return 1
 		},
 		width: func() int { return uiWidth }, height: func() int { return uiHeight },
-
 	}
 	uiTheme := rotheme.Default.AsTheme()
 	uiTheme.Colors.Background = widget.RGBA8(0, 0, 0, 0)
@@ -1315,14 +1336,41 @@ func (f *fanoutEventSource) OnIMECompositionEnd(fn func(string)) {
 	f.imeCompositionEnd = append(f.imeCompositionEnd, fn)
 }
 
-func wireInput(events gpucontext.EventSource, state *input.State, optional ...any) {
-	// If the fanoutEventSource is used, make sure its inputState is set so
-	// keyboard-prep hooks and other listeners can see the snapshot.
-	if fe, ok := events.(*fanoutEventSource); ok {
-		fe.inputState = state
+// The Emit* methods inject synthetic pointer events into the same fanout the
+// window delivers real ones to. Both pointer consumers - input.State for world
+// picking and the gogpu widget tree for windows, drag, and scrolling - are
+// downstream of this fork, so one emit reaches everything a real mouse would.
+
+func (f *fanoutEventSource) EmitMouseMove(x, y float64) {
+	for _, fn := range f.mouseMove {
+		fn(x, y)
 	}
-	// Keyboard snapshots are collected before default UI dispatch. Pointer
-	// events keep their existing listener order.
+}
+
+func (f *fanoutEventSource) EmitMousePress(button gpucontext.MouseButton, x, y float64) {
+	for _, fn := range f.mousePress {
+		fn(button, x, y)
+	}
+}
+
+func (f *fanoutEventSource) EmitMouseRelease(button gpucontext.MouseButton, x, y float64) {
+	for _, fn := range f.mouseRelease {
+		fn(button, x, y)
+	}
+}
+
+func (f *fanoutEventSource) EmitScroll(x, y float64) {
+	for _, fn := range f.scroll {
+		fn(x, y)
+	}
+}
+
+// wireInput copies window events into the shared input.State. synthetic reports
+// whether the event currently being delivered was injected by the controller's
+// virtual cursor; those must not be attributed to the mouse, or the pad would
+// switch controller mode off in the widget tree on every frame it moves the
+// pointer. A nil predicate means "everything is real".
+func wireInput(events gpucontext.EventSource, state *input.State, optional ...any) {
 	if state == nil {
 		return
 	}
