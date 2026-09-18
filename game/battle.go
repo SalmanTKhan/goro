@@ -254,6 +254,10 @@ func maxDuration(a, b time.Duration) time.Duration {
 }
 
 func (m *WorldMode) requestAttack(ctx client.Context, actor world.Actor, source string) {
+	if !localStealthAllowsSkill(ctx, 0) || actorHasStealth(actor) {
+		m.cancelAttackIntent()
+		return
+	}
 	if playerIsDead(ctx) {
 		return
 	}
@@ -474,6 +478,10 @@ func pendingAttackReadyAt(player world.Actor, now time.Time) time.Time {
 }
 
 func (m *WorldMode) sendAttackAction(ctx client.Context, actor world.Actor, source string) {
+	if !localStealthAllowsSkill(ctx, 0) || actorHasStealth(actor) {
+		m.cancelAttackIntent()
+		return
+	}
 	if err := ctx.Network.SendActionRequest(actor.ID, network.ActionAttack); err == nil {
 		m.lastAttackAt = time.Now()
 		m.setWalkCooldown(walkRequestCooldown)
@@ -792,6 +800,9 @@ func actionVisualHitCount(action network.ActorActionNotify) int {
 }
 
 func (m *WorldMode) addActionDamageFloaters(ctx client.Context, action network.ActorActionNotify, target world.Actor, targetOK, targetLocal, sourceLocal bool, x, y int, hitAt time.Time) {
+	if ctx.Config.Headless {
+		return
+	}
 	text, kind, floaterColor := actionDamageFloater(action, targetLocal, sourceLocal)
 	if text == "" {
 		return
@@ -1444,7 +1455,7 @@ func (m *WorldMode) applyRecovery(ctx client.Context, recovery network.Recovery)
 }
 
 func (m *WorldMode) addLocalRecoveryFloater(ctx client.Context, amount int, floaterColor color.RGBA, kind damageFloaterKind) {
-	if ctx.World == nil || amount <= 0 {
+	if ctx.Config.Headless || ctx.World == nil || amount <= 0 {
 		return
 	}
 	now := time.Now()

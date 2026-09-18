@@ -2,6 +2,7 @@ package game
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"image"
@@ -226,10 +227,8 @@ type worldUI struct {
 	itemPickup           gameui.ItemPickupNotification
 	shopWindow           gameui.ShopWindow
 	vendingWindow        gameui.VendingWindow
-	itemInfoWindow       gameui.ItemInfoWindow
-	cardIllustration     gameui.CardIllustrationWindow
+	itemWindows          gameui.ItemWindows
 	monsterInfoWindow    gameui.MonsterInfoWindow
-	bookWindow           gameui.BookWindow
 	identifyWindow       gameui.IdentifyWindow
 	cardWindow           gameui.CardCompositionWindow
 	makingArrow          gameui.MakingArrowWindow
@@ -250,11 +249,14 @@ type worldUI struct {
 	mercenaryConfirm     gameui.ConfirmModal
 	statsWindow          gameui.StatsWindow
 	skillWindow          gameui.SkillWindow
+	questWindow          gameui.QuestWindow
+	worldMap             gameui.WorldMapWindow
 	emoteWindow          gameui.EmoteWindow
+	chatShortcuts        gameui.ChatShortcutsWindow
 	friendsWindow        gameui.FriendsWindow
 	guildWindow          gameui.GuildWindow
 	friendSettings       gameui.FriendSettingsWindow
-	whisperWindow        gameui.WhisperWindow
+	whisperWindows       gameui.WhisperWindows
 	chatRoomCreate       gameui.ChatRoomCreateWindow
 	chatRoom             gameui.ChatRoomWindow
 	partySettings        gameui.PartySettingsWindow
@@ -294,6 +296,8 @@ func (u *worldUI) nonConsoleKeyboardInputBlocked(ctx client.Context) bool {
 		u.mercenaryConfirm.IsOpen() ||
 		u.starPlaceConfirm.IsOpen() ||
 		u.settingsWindow.IsOpen() ||
+		u.chatShortcuts.IsOpen() ||
+		u.worldMap.IsOpen() ||
 		u.autoSpellWindow.IsOpen() ||
 		u.monsterInfoWindow.IsOpen() ||
 		u.identifyWindow.IsOpen() ||
@@ -310,14 +314,14 @@ func (u *worldUI) nonConsoleKeyboardInputBlocked(ctx client.Context) bool {
 		u.mercenarySkill.IsOpen() ||
 		u.changeCartWindow.IsOpen() ||
 		u.inventoryBag.KeyboardShortcutsBlocked() ||
-		u.bookWindow.IsOpen() ||
+		u.itemWindows.KeyboardShortcutsBlocked() ||
 		u.shopWindow.KeyboardShortcutsBlocked() ||
 		u.vendingWindow.KeyboardShortcutsBlocked() ||
 		u.tradeWindow.IsOpen() ||
 		u.mailWindow.IsOpen() ||
 		u.guildWindow.KeyboardShortcutsBlocked() ||
 		u.friendSettings.IsOpen() ||
-		u.whisperWindow.IsOpen() ||
+		u.whisperWindows.IsOpen() ||
 		u.chatRoomCreate.IsOpen() ||
 		u.chatRoom.IsOpen() ||
 		u.partySettings.IsOpen() ||
@@ -441,7 +445,7 @@ func (m *WorldMode) Name() string {
 	return "world"
 }
 
-func (m *WorldMode) Enter(ctx client.Context) {
+func (m *WorldMode) Enter(ctx client.Context) Mode {
 	now := time.Now()
 	m.bindNPCDialogLifecycle()
 	m.startMapPrewarm()
@@ -451,6 +455,13 @@ func (m *WorldMode) Enter(ctx client.Context) {
 	ctx.World.RSW = nil
 	ctx.World.RSM = nil
 	ctx.World.RSMFail = 0
+	if ctx.World.MapName != "" {
+		gat, _, err := loadGAT(ctx.Resources, ctx.World.MapName)
+		if err != nil {
+			return newMapErrorMode(ctx, err, m.ui.console)
+		}
+		ctx.World.GAT = gat
+	}
 	m.textures = make(map[string]*render.Image)
 	m.textureMiss = make(map[string]struct{})
 	m.playerView = nil
@@ -527,6 +538,13 @@ func (m *WorldMode) Enter(ctx client.Context) {
 	m.ui.npcDialog.ResetPublished(ctx)
 	m.ui.npcCutin.Clear()
 	ctx.World.Items = make(map[uint32]worldstate.FloorItem)
+	// Bots need the collision grid and map acknowledgement, but no scene assets.
+	if ctx.Config.Headless {
+		if ctx.World.MapName != "" {
+			_ = ctx.Network.SendLoadEndAck()
+		}
+		return nil
+	}
 	playerStatus := ""
 	character := ctx.Session.SelectedCharacter()
 	visualCharacter := localPlayerVisualCharacter(ctx)
@@ -563,14 +581,9 @@ func (m *WorldMode) Enter(ctx client.Context) {
 	glog.Debugf("player sprite resources char_id=%d name=%s admin=%t job=%d visual_job=%d hair=%d weapon=%d shield=%d head_top=%d head_mid=%d head_low=%d body_pal=%d head_pal=%d hair_color=%d account_sex=%d %s", character.ID, character.Name, localPlayerIsAdmin(ctx), character.Job, visualCharacter.Job, character.Hair, character.Weapon, character.Shield, character.HeadTop, character.HeadMid, character.HeadLow, character.BodyPal, character.HeadPal, character.HairColor, ctx.Session.Sex, playerStatus)
 	m.rebindPersistentUI(ctx)
 	if ctx.World.MapName == "" {
-		return
+		return nil
 	}
 
-	gat, _, err := loadGAT(ctx.Resources, ctx.World.MapName)
-	if err != nil {
-		return
-	}
-	ctx.World.GAT = gat
 	if gnd, _, err := loadGND(ctx.Resources, ctx.World.MapName); err == nil {
 		ctx.World.GND = gnd
 	} else {
@@ -587,9 +600,11 @@ func (m *WorldMode) Enter(ctx client.Context) {
 		m.playMapBGM(ctx, ctx.World.MapName)
 	}
 	_ = ctx.Network.SendLoadEndAck()
+	return nil
 }
 
 func (m *WorldMode) rebindPersistentUI(ctx client.Context) {
+	m.ui.console.Rebind(ctx)
 	m.ui.console.OnGuildWindow = func() { m.toggleGuildWindow(ctx) }
 	m.ui.guildWindow.EmblemImage = func(ctx client.Context) image.Image {
 		if ctx.Session == nil || m.guildEmblems == nil {
@@ -613,17 +628,22 @@ func (m *WorldMode) rebindPersistentUI(ctx client.Context) {
 		return emblem.image.RGBA()
 	}
 	m.setGuildEmblemOptions(ctx)
+	m.ui.characterWindow.Rebind(ctx)
 	m.ui.basicMenu.Rebind(ctx, m.basicMenuCallbacks(ctx))
-	m.ui.inventoryBag.Rebind(ctx, &m.ui.itemInfoWindow)
-	m.ui.equipmentWindow.Rebind(ctx, &m.ui.itemInfoWindow, &m.ui.cartWindow, m)
-	m.ui.cartWindow.Rebind(ctx, &m.ui.itemInfoWindow)
-	m.ui.itemInfoWindow.Rebind(ctx, m)
-	m.ui.cardIllustration.Rebind(ctx)
-	m.ui.bookWindow.Rebind(ctx)
+	m.ui.inventoryBag.Rebind(ctx, &m.ui.itemWindows)
+	m.ui.equipmentWindow.Rebind(ctx, &m.ui.itemWindows, &m.ui.cartWindow, m)
+	m.ui.cartWindow.Rebind(ctx, &m.ui.itemWindows)
+	m.ui.itemWindows.Rebind(ctx, m)
 	m.ui.statsWindow.Rebind(ctx)
 	m.ui.skillWindow.Rebind(ctx, m)
+	m.ui.questWindow.Rebind(ctx, func(id uint32, active bool) { m.setQuestActive(ctx, id, active) })
+	m.ui.worldMap.Rebind(ctx)
 	m.ui.levelUpNotifications.Rebind(ctx)
+	m.ui.emoteWindow.OnSelect = m.ui.chatShortcuts.SelectEmotion
 	m.ui.emoteWindow.Rebind(ctx, &m.ui.console)
+	m.ui.chatShortcuts.Rebind(ctx, &m.ui.console, func() {
+		m.ui.emoteWindow.OpenWindow(ctx, &m.ui.console)
+	})
 	m.ui.homunculusSkill.Rebind(ctx, m)
 	m.ui.mercenarySkill.Rebind(ctx, m)
 	m.ui.friendsWindow.Rebind(ctx)
@@ -635,11 +655,10 @@ func (m *WorldMode) rebindPersistentUI(ctx client.Context) {
 	m.ui.partyInvite.Rebind(ctx)
 	m.ui.chatRoomCreate.Rebind(ctx)
 	m.ui.chatRoom.Rebind(ctx)
-	m.ui.skillTextPrompt.Rebind(ctx)
 	m.ui.settingsWindow.Rebind(ctx)
 	m.ui.homunculusInfo.Rebind(ctx)
 	m.ui.mercenaryInfo.Rebind(ctx)
-	m.ui.whisperWindow.Rebind(ctx)
+	m.ui.whisperWindows.Rebind(ctx)
 	m.ui.shortcutBar.ResetOverlay(ctx)
 }
 
@@ -695,15 +714,17 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 	}
 	// Status presentation must follow server updates even when a window or
 	// modal consumes input for the rest of the frame.
-	removeExpiredStatusEffects(ctx.Session, now)
-	m.ui.statusIcons.Update(ctx, now)
+	m.removeExpiredStatusEffects(ctx.Session, now)
 	m.updateMail(ctx, now)
-	m.ui.pvpCounter.Update(ctx)
 	progressBlocksActions := m.updateServerProgress(ctx, now)
-	if !progressBlocksActions && m.handleLevelUpNotificationAction(ctx, m.ui.levelUpNotifications.Update(ctx)) {
-		// The notification click belongs exclusively to the UI. Returning here
-		// prevents the same press from reaching the map after the icon closes.
-		return nil, nil
+	if !ctx.Config.Headless {
+		m.ui.statusIcons.Update(ctx, now)
+		m.ui.pvpCounter.Update(ctx)
+		if !progressBlocksActions && m.handleLevelUpNotificationAction(ctx, m.ui.levelUpNotifications.Update(ctx)) {
+			// The notification click belongs exclusively to the UI. Returning here
+			// prevents the same press from reaching the map after the icon closes.
+			return nil, nil
+		}
 	}
 	if !progressBlocksActions {
 		m.updatePendingAttack(ctx, "update", false)
@@ -719,6 +740,18 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 	m.cleanupVanishedActors(ctx, now)
 	m.processScheduledActorStops(ctx, now)
 	m.processScheduledWalkResumes(ctx, now)
+	if ctx.Config.Headless {
+		m.playDueScheduledSounds(ctx, now)
+		if !progressBlocksActions && m.mapFade.phase != mapFadeHold && m.mapFade.phase != mapFadePrewarm {
+			dead := playerIsDead(ctx)
+			m.updateBotInput(ctx, !dead)
+			if !dead {
+				m.updateCompanionAI(ctx, now)
+			}
+			m.updateBot(ctx, now)
+		}
+		return nil, nil
+	}
 	m.processActorMotionSounds(ctx, now)
 	m.processMapSounds(ctx, now)
 	m.playDueScheduledSounds(ctx, now)
@@ -728,6 +761,8 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 		return nil, nil
 	}
 	m.ui.console.UpdatePresentation(ctx)
+	m.ui.questWindow.UpdatePresentation(ctx, now)
+	m.ui.worldMap.UpdatePresentation(ctx)
 	if progressBlocksActions {
 		return nil, nil
 	}
@@ -746,6 +781,9 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 	if m.ui.guildWindow.UpdateKeyboardInput(ctx) {
 		return nil, nil
 	}
+	if m.ui.chatShortcuts.UpdateKeyboardInput(ctx) {
+		return nil, nil
+	}
 	dead := playerIsDead(ctx)
 	keyboardBlocked := m.ui.keyboardInputBlocked(ctx)
 	m.updateBotInput(ctx, !dead && !keyboardBlocked)
@@ -755,7 +793,10 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 	// Window.Update consumes pointer hover so that map input does not pass
 	// through the UI. Handle keyboard-only window shortcuts before pointer
 	// dispatch, otherwise their JustPressed event can be lost.
-	if m.toggleEmoteWindowFromInput(ctx) || m.toggleGuildWindowFromInput(ctx) {
+	if m.chatShortcutFromInput(ctx) || m.toggleEmoteWindowFromInput(ctx) || m.toggleGuildWindowFromInput(ctx) || m.toggleQuestWindowFromInput(ctx) || m.toggleWorldMapFromInput(ctx) {
+		return nil, nil
+	}
+	if !dead && !m.ui.nonConsoleKeyboardInputBlocked(ctx) && m.ui.shortcutBar.UpdateKeyboardInput(ctx, m, m.ui.console.Active()) {
 		return nil, nil
 	}
 	if dead {
@@ -956,7 +997,14 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 	if m.ui.weaponRefine.Update(ctx) {
 		return nil, nil
 	}
-	if !dead && m.ui.console.UpdateInput(ctx) {
+	// Let the atlas close on Escape before the console handles that key.
+	if m.ui.worldMap.Update(ctx) {
+		return nil, nil
+	}
+	if !dead && !m.ui.chatShortcuts.KeyboardShortcutsBlocked() && m.ui.console.UpdateInput(ctx) {
+		return nil, nil
+	}
+	if m.ui.chatShortcuts.Update(ctx) {
 		return nil, nil
 	}
 	if m.ui.settingsWindow.Update(ctx) {
@@ -966,32 +1014,15 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 		m.handleEscapeMenuAction(ctx)
 		return nil, nil
 	}
-	if m.ui.bookWindow.Update(ctx) {
-		return nil, nil
-	}
-	if m.ui.cardIllustration.Update(ctx) {
-		return nil, nil
-	}
 	characterWindowConsumed := m.ui.characterWindow.Update(ctx)
 	m.ui.basicMenu.FollowCharacterWindow(ctx, &m.ui.characterWindow)
 	if characterWindowConsumed {
 		return nil, nil
 	}
-	if m.ui.itemInfoWindow.Update(ctx, m) {
-		if request := m.ui.itemInfoWindow.PopCardIllustrationRequest(); request.ItemID != 0 {
-			if err := m.ui.cardIllustration.Open(ctx, request.ItemID, request.Title); err != nil {
-				m.ui.console.AddErrorMessage("Unable to display this card.")
-				glog.Warnf("card illustration open failed item=%d: %v", request.ItemID, err)
-			}
-		}
-		if request := m.ui.itemInfoWindow.PopReadBookRequest(); request.ItemID != 0 {
-			if err := m.ui.bookWindow.Open(ctx, request.ItemID, request.Title); err != nil {
-				m.ui.console.AddErrorMessage("Unable to read this book.")
-				glog.Warnf("book open failed item=%d: %v", request.ItemID, err)
-			} else {
-				m.ui.itemInfoWindow.Close()
-				m.ui.itemInfoWindow.Publish(ctx)
-			}
+	if consumed, err := m.ui.itemWindows.Update(ctx, m); consumed {
+		if err != nil {
+			m.ui.console.AddErrorMessage("Unable to display this item.")
+			glog.Warnf("item window: %v", err)
 		}
 		return nil, nil
 	}
@@ -1031,37 +1062,40 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 	if m.ui.shortcutBar.Update(ctx, m) {
 		return nil, nil
 	}
-	if m.ui.mailWindow.Update(ctx, &m.ui.itemInfoWindow) {
+	if m.ui.mailWindow.Update(ctx, &m.ui.itemWindows) {
 		return nil, nil
 	}
-	if m.ui.inventoryBag.Update(ctx, &m.ui.shortcutBar, &m.ui.storageWindow, &m.ui.cartWindow, &m.ui.tradeWindow, &m.ui.equipmentWindow, &m.ui.itemInfoWindow, &m.ui.mailWindow) {
+	if m.ui.inventoryBag.Update(ctx, &m.ui.shortcutBar, &m.ui.storageWindow, &m.ui.cartWindow, &m.ui.tradeWindow, &m.ui.equipmentWindow, &m.ui.itemWindows, &m.ui.mailWindow) {
 		return nil, nil
 	}
-	if m.ui.tradeWindow.Update(ctx, &m.ui.itemInfoWindow) {
+	if m.ui.tradeWindow.Update(ctx, &m.ui.itemWindows) {
 		return nil, nil
 	}
-	if m.ui.equipmentWindow.Update(ctx, &m.ui.itemInfoWindow, &m.ui.cartWindow, m) {
+	if m.ui.equipmentWindow.Update(ctx, &m.ui.itemWindows, &m.ui.cartWindow, m) {
 		return nil, nil
 	}
-	if m.ui.viewEquipWindow.Update(ctx, &m.ui.itemInfoWindow) {
+	if m.ui.viewEquipWindow.Update(ctx, &m.ui.itemWindows) {
 		return nil, nil
 	}
-	if m.ui.storageWindow.Update(ctx, &m.ui.inventoryBag, &m.ui.cartWindow, &m.ui.itemInfoWindow) {
+	if m.ui.storageWindow.Update(ctx, &m.ui.inventoryBag, &m.ui.cartWindow, &m.ui.itemWindows) {
 		return nil, nil
 	}
-	if m.ui.cartWindow.Update(ctx, &m.ui.inventoryBag, &m.ui.storageWindow, &m.ui.itemInfoWindow) {
+	if m.ui.cartWindow.Update(ctx, &m.ui.inventoryBag, &m.ui.storageWindow, &m.ui.itemWindows) {
 		return nil, nil
 	}
 	if m.ui.changeCartWindow.Update(ctx) {
 		return nil, nil
 	}
-	if m.ui.shopWindow.Update(ctx, &m.ui.itemInfoWindow) {
+	if m.ui.shopWindow.Update(ctx, &m.ui.itemWindows) {
 		return nil, nil
 	}
-	if m.ui.vendingWindow.Update(ctx, &m.ui.itemInfoWindow) {
+	if m.ui.vendingWindow.Update(ctx, &m.ui.itemWindows) {
 		return nil, nil
 	}
 	if m.ui.skillWindow.Update(ctx, &m.ui.shortcutBar, m) {
+		return nil, nil
+	}
+	if m.ui.questWindow.Update(ctx) {
 		return nil, nil
 	}
 	if m.ui.homunculusSkill.Update(ctx, &m.ui.shortcutBar, m) {
@@ -1089,7 +1123,7 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 				glog.Warnf("leave party failed: %v", err)
 			}
 		case gameui.FriendsWindowActionFriendWhisper:
-			m.ui.whisperWindow.Open(ctx, action.Friend.Name)
+			m.ui.whisperWindows.Open(ctx, action.Friend.Name)
 		case gameui.FriendsWindowActionFriendDelete:
 			m.openDeleteFriendConfirm(ctx, action.Friend)
 		case gameui.FriendsWindowActionFriendSettings:
@@ -1105,7 +1139,7 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 		case gameui.FriendsWindowActionPartyMemberInfo:
 			m.openPartyMemberInfo(ctx, action.PartyMember)
 		case gameui.FriendsWindowActionPartyMemberWhisper:
-			m.ui.whisperWindow.Open(ctx, action.PartyMember.Name)
+			m.ui.whisperWindows.Open(ctx, action.PartyMember.Name)
 		case gameui.FriendsWindowActionPartyMemberExpel:
 			m.openExpelPartyMemberConfirm(ctx, action.PartyMember)
 		}
@@ -1311,10 +1345,9 @@ func (m *WorldMode) toggleEmoteWindowFromInput(ctx client.Context) bool {
 	if ctx.Input == nil || m.ui.nonConsoleKeyboardInputBlocked(ctx) {
 		return false
 	}
-	if !ctx.Input.Pressed(input.KeyAlt) || !ctx.Input.JustPressed(input.KeyL) {
+	if !plainAltDown(ctx.Input) || !ctx.Input.JustPressed(input.KeyL) {
 		return false
 	}
-	m.discardConsoleShortcutText(ctx)
 	m.ui.emoteWindow.Toggle(ctx, &m.ui.console)
 	return true
 }
@@ -1323,18 +1356,11 @@ func (m *WorldMode) toggleGuildWindowFromInput(ctx client.Context) bool {
 	if ctx.Input == nil || m.ui.nonConsoleKeyboardInputBlocked(ctx) {
 		return false
 	}
-	if !ctx.Input.Pressed(input.KeyAlt) || !ctx.Input.JustPressed(input.KeyG) {
+	if !plainAltDown(ctx.Input) || !ctx.Input.JustPressed(input.KeyG) {
 		return false
 	}
-	m.discardConsoleShortcutText(ctx)
 	m.toggleGuildWindow(ctx)
 	return true
-}
-
-func (m *WorldMode) discardConsoleShortcutText(ctx client.Context) {
-	if ctx.Input != nil && m.ui.console.Active() {
-		m.ui.console.DiscardTextInput(ctx.Input.TextInput())
-	}
 }
 
 func (m *WorldMode) toggleGuildWindow(ctx client.Context) {
@@ -1486,9 +1512,7 @@ func (m *WorldMode) nextWorldMode() *WorldMode {
 	next.ui.inventoryBag = m.ui.inventoryBag
 	next.ui.equipmentWindow = m.ui.equipmentWindow
 	next.ui.cartWindow = m.ui.cartWindow
-	next.ui.itemInfoWindow = m.ui.itemInfoWindow
-	next.ui.cardIllustration = m.ui.cardIllustration
-	next.ui.bookWindow = m.ui.bookWindow
+	next.ui.itemWindows = m.ui.itemWindows
 	next.ui.cardWindow = m.ui.cardWindow
 	next.ui.petEggWindow = m.ui.petEggWindow
 	next.ui.petInfoWindow = m.ui.petInfoWindow
@@ -1502,11 +1526,14 @@ func (m *WorldMode) nextWorldMode() *WorldMode {
 	next.petLastTalk = m.petLastTalk
 	next.ui.statsWindow = m.ui.statsWindow
 	next.ui.skillWindow = m.ui.skillWindow
+	next.ui.questWindow = m.ui.questWindow
+	next.ui.worldMap = m.ui.worldMap
 	next.ui.emoteWindow = m.ui.emoteWindow
+	next.ui.chatShortcuts = m.ui.chatShortcuts
 	next.ui.friendsWindow = m.ui.friendsWindow
 	next.ui.guildWindow = m.ui.guildWindow
 	next.ui.friendSettings = m.ui.friendSettings
-	next.ui.whisperWindow = m.ui.whisperWindow
+	next.ui.whisperWindows = m.ui.whisperWindows
 	next.ui.chatRoomCreate = m.ui.chatRoomCreate
 	next.ui.chatRoom = m.ui.chatRoom
 	next.pendingChatRoom = m.pendingChatRoom
@@ -1514,7 +1541,6 @@ func (m *WorldMode) nextWorldMode() *WorldMode {
 	next.ui.settingsWindow = m.ui.settingsWindow
 	next.ui.partyCreate = m.ui.partyCreate
 	next.ui.partyInvite = m.ui.partyInvite
-	next.ui.skillTextPrompt = m.ui.skillTextPrompt
 	next.ui.shortcutBar = m.ui.shortcutBar
 	next.ui.minimap = m.ui.minimap
 	next.ui.statusIcons = m.ui.statusIcons
@@ -1649,7 +1675,7 @@ func (m *WorldMode) DrawUIOverlay(ctx client.Context, screen *render.Frame) {
 	m.ui.inventoryBag.DrawTooltip(ctx, screen)
 	m.ui.equipmentWindow.DrawTooltip(ctx, screen)
 	m.ui.cartWindow.DrawTooltip(ctx, screen)
-	m.ui.itemInfoWindow.DrawTooltip(ctx, screen)
+	m.ui.itemWindows.DrawTooltip(ctx, screen)
 	m.ui.skillWindow.DrawTooltip(ctx, screen)
 	m.ui.homunculusSkill.DrawTooltip(ctx, screen)
 	m.ui.mercenarySkill.DrawTooltip(ctx, screen)
@@ -1816,6 +1842,7 @@ func absInt(value int) int {
 
 type sceneDrawEntry struct {
 	depth           float64
+	entityID        uint32
 	actorIndex      int
 	shadowIndex     int
 	itemIndex       int
@@ -1827,23 +1854,7 @@ func (m *WorldMode) drawSceneModelsAndActors(screen *render.Frame, ctx client.Co
 	m.drawSkillUnitRSMModels(screen, ctx, projection, now)
 	actors := m.collectSceneActorEntries(screen, ctx, projection)
 	items := m.collectSceneItemEntries(screen, ctx, projection, now)
-	entries := make([]sceneDrawEntry, 0, len(actors)*2+len(items)*2)
-	for i, item := range items {
-		entries = append(entries,
-			sceneDrawEntry{depth: item.shadowDepth, actorIndex: -1, shadowIndex: -1, itemIndex: -1, itemShadowIndex: i},
-			sceneDrawEntry{depth: item.depth, actorIndex: -1, shadowIndex: -1, itemIndex: i, itemShadowIndex: -1},
-		)
-	}
-	for i, actor := range actors {
-		if actor.castShadow {
-			entries = append(entries, sceneDrawEntry{depth: actor.shadowDepth, actorIndex: -1, shadowIndex: i, itemIndex: -1, itemShadowIndex: -1})
-		}
-		entries = append(entries, sceneDrawEntry{depth: actor.depth, actorIndex: i, shadowIndex: -1, itemIndex: -1, itemShadowIndex: -1})
-	}
-	sort.SliceStable(entries, func(i, j int) bool {
-		return entries[i].depth > entries[j].depth
-	})
-	for _, entry := range entries {
+	for _, entry := range sortedSceneDrawEntries(actors, items) {
 		if entry.itemShadowIndex >= 0 {
 			m.drawGroundItemShadowEntry3D(screen, projection, items[entry.itemShadowIndex])
 			continue
@@ -1862,25 +1873,55 @@ func (m *WorldMode) drawSceneModelsAndActors(screen *render.Frame, ctx client.Co
 	return actors
 }
 
+func sortedSceneDrawEntries(actors []sceneActorDrawEntry, items []sceneItemDrawEntry) []sceneDrawEntry {
+	entries := make([]sceneDrawEntry, 0, len(actors)*2+len(items)*2)
+	for i, item := range items {
+		entries = append(entries,
+			sceneDrawEntry{depth: item.shadowDepth, entityID: item.item.ID, actorIndex: -1, shadowIndex: -1, itemIndex: -1, itemShadowIndex: i},
+			sceneDrawEntry{depth: item.depth, entityID: item.item.ID, actorIndex: -1, shadowIndex: -1, itemIndex: i, itemShadowIndex: -1},
+		)
+	}
+	for i, actor := range actors {
+		if actor.castShadow {
+			entries = append(entries, sceneDrawEntry{depth: actor.shadowDepth, entityID: actor.actor.ID, actorIndex: -1, shadowIndex: i, itemIndex: -1, itemShadowIndex: -1})
+		}
+		entries = append(entries, sceneDrawEntry{depth: actor.depth, entityID: actor.actor.ID, actorIndex: i, shadowIndex: -1, itemIndex: -1, itemShadowIndex: -1})
+	}
+	sort.SliceStable(entries, func(i, j int) bool {
+		// A stable sort alone preserves the world's random map iteration order
+		// at equal depths, making overlapping loot flicker from frame to frame.
+		if entries[i].depth == entries[j].depth {
+			return entries[i].entityID < entries[j].entityID
+		}
+		return entries[i].depth > entries[j].depth
+	})
+	return entries
+}
+
 func loadGAT(manager *res.Manager, mapName string) (*res.GAT, string, error) {
+	if manager == nil {
+		return nil, "", fmt.Errorf("no game resources available for map %s", mapName)
+	}
 	base := strings.TrimSuffix(strings.TrimSuffix(mapName, ".gat"), ".rsw")
 	candidates := []string{
 		"data\\" + base + ".gat",
 		"data/" + base + ".gat",
 		base + ".gat",
 	}
+	var readErrors []error
 	for _, candidate := range candidates {
 		data, err := manager.ReadFile(candidate)
 		if err != nil {
+			readErrors = append(readErrors, fmt.Errorf("read %s: %w", candidate, err))
 			continue
 		}
 		gat, err := res.ParseGAT(data)
 		if err != nil {
-			return nil, candidate, err
+			return nil, candidate, fmt.Errorf("parse %s: %w", candidate, err)
 		}
 		return gat, candidate, nil
 	}
-	return nil, "", fmt.Errorf("gat not found for map %s", mapName)
+	return nil, "", fmt.Errorf("cannot load GAT for map %s: %w", mapName, errors.Join(readErrors...))
 }
 
 func loadRSW(manager *res.Manager, mapName string) (*res.RSW, string, error) {

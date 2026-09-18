@@ -100,6 +100,12 @@ type uiAppReceiver interface {
 	SetUIApp(client.UIApp)
 }
 
+type keyboardInputPreparer interface {
+	HandleKeyPress(input.KeyCode)
+	PrepareKeyInput(input.KeyCode, gpucontext.Modifiers)
+	PrepareTextInput(input.KeyCode) bool
+}
+
 type uiAppBridge struct {
 	*uiapp.App
 	runner                 *runner
@@ -948,7 +954,15 @@ func Run(game Game, cfg config.WindowConfig, renderCfg config.RenderConfig, capt
 	gg := gogpu.NewApp(appConfig)
 	setCursorApp(gg)
 	defer setCursorApp(nil)
+	// Our custom runner supplies the clipboard bridge normally set up by ui/desktop.
+	widget.RegisterClipboardProvider(gg)
+	defer widget.RegisterClipboardProvider(nil)
 	events := newFanoutEventSource(gg.EventSource())
+	if preparer, ok := game.(keyboardInputPreparer); ok {
+		events.handleKeyPress = preparer.HandleKeyPress
+		events.prepareKeyInput = preparer.PrepareKeyInput
+		events.prepareTextInput = preparer.PrepareTextInput
+	}
 	uiWidth, uiHeight := cfg.Width, cfg.Height
 	uiEvents := scaledUIEventSource{
 		source: events,
@@ -959,6 +973,7 @@ func Run(game Game, cfg config.WindowConfig, renderCfg config.RenderConfig, capt
 			return 1
 		},
 		width: func() int { return uiWidth }, height: func() int { return uiHeight },
+
 	}
 	uiTheme := rotheme.Default.AsTheme()
 	uiTheme.Colors.Background = widget.RGBA8(0, 0, 0, 0)
@@ -1121,6 +1136,10 @@ func graphicsAPI(name string) (gogputypes.GraphicsAPI, error) {
 }
 
 type fanoutEventSource struct {
+	inputState           *input.State
+	handleKeyPress       func(input.KeyCode)
+	prepareKeyInput      func(input.KeyCode, gpucontext.Modifiers)
+	prepareTextInput     func(input.KeyCode) bool
 	keyPress             []func(gpucontext.Key, gpucontext.Modifiers)
 	keyRelease           []func(gpucontext.Key, gpucontext.Modifiers)
 	textInput            []func(string)
@@ -1137,17 +1156,55 @@ type fanoutEventSource struct {
 
 func newFanoutEventSource(source gpucontext.EventSource) *fanoutEventSource {
 	f := &fanoutEventSource{}
+	keyCode := gpucontext.KeyUnknown
 	source.OnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
+		keyCode = key
+		repeated := false
+		if f.inputState != nil {
+			repeated = f.inputState.KeyCodeDown(key)
+			f.inputState.SetKeyCode(key, true)
+		}
+		if !repeated && f.handleKeyPress != nil {
+			f.handleKeyPress(key)
+		}
+		if f.keyConsumed(key) {
+			return
+		}
+		// Editing keys do not generate text events. Restore their destination
+		// before UI dispatch so the first Delete/Backspace is not lost.
+		if f.prepareKeyInput != nil {
+			f.prepareKeyInput(key, mods)
+		}
+		if f.keyConsumed(key) {
+			return
+		}
 		for _, fn := range f.keyPress {
 			fn(key, mods)
 		}
 	})
 	source.OnKeyRelease(func(key gpucontext.Key, mods gpucontext.Modifiers) {
+		if f.inputState != nil {
+			f.inputState.SetKeyCode(key, false)
+		}
+		if key == keyCode {
+			keyCode = gpucontext.KeyUnknown
+		}
 		for _, fn := range f.keyRelease {
 			fn(key, mods)
 		}
 	})
 	source.OnTextInput(func(text string) {
+		if f.inputState != nil {
+			f.inputState.AddTextInput(text)
+		}
+		if f.keyConsumed(keyCode) {
+			return
+		}
+		// Keep the raw snapshot available to input handlers, but let the
+		// active mode focus an editor or suppress text before UI dispatch.
+		if f.prepareTextInput != nil && f.prepareTextInput(keyCode) {
+			return
+		}
 		for _, fn := range f.textInput {
 			fn(text)
 		}
@@ -1178,6 +1235,12 @@ func newFanoutEventSource(source gpucontext.EventSource) *fanoutEventSource {
 		}
 	})
 	source.OnFocus(func(focused bool) {
+		if !focused {
+			keyCode = gpucontext.KeyUnknown
+			if f.inputState != nil {
+				f.inputState.ResetKeyboard()
+			}
+		}
 		for _, fn := range f.focus {
 			fn(focused)
 		}
@@ -1198,6 +1261,10 @@ func newFanoutEventSource(source gpucontext.EventSource) *fanoutEventSource {
 		}
 	})
 	return f
+}
+
+func (f *fanoutEventSource) keyConsumed(code input.KeyCode) bool {
+	return f.inputState != nil && f.inputState.KeyCodeConsumed(code)
 }
 
 func (f *fanoutEventSource) OnKeyPress(fn func(gpucontext.Key, gpucontext.Modifiers)) {
@@ -1248,41 +1315,14 @@ func (f *fanoutEventSource) OnIMECompositionEnd(fn func(string)) {
 	f.imeCompositionEnd = append(f.imeCompositionEnd, fn)
 }
 
-// The Emit* methods inject synthetic pointer events into the same fanout the
-// window delivers real ones to. Both pointer consumers — input.State for world
-// picking and the gogpu widget tree for windows, drag, and scrolling — are
-// downstream of this fork, so one emit reaches everything a real mouse would.
-
-func (f *fanoutEventSource) EmitMouseMove(x, y float64) {
-	for _, fn := range f.mouseMove {
-		fn(x, y)
-	}
-}
-
-func (f *fanoutEventSource) EmitMousePress(button gpucontext.MouseButton, x, y float64) {
-	for _, fn := range f.mousePress {
-		fn(button, x, y)
-	}
-}
-
-func (f *fanoutEventSource) EmitMouseRelease(button gpucontext.MouseButton, x, y float64) {
-	for _, fn := range f.mouseRelease {
-		fn(button, x, y)
-	}
-}
-
-func (f *fanoutEventSource) EmitScroll(x, y float64) {
-	for _, fn := range f.scroll {
-		fn(x, y)
-	}
-}
-
-// wireInput copies window events into the shared input.State. synthetic reports
-// whether the event currently being delivered was injected by the controller's
-// virtual cursor; those must not be attributed to the mouse, or the pad would
-// switch controller mode off in the widget tree on every frame it moves the
-// pointer. A nil predicate means "everything is real".
 func wireInput(events gpucontext.EventSource, state *input.State, optional ...any) {
+	// If the fanoutEventSource is used, make sure its inputState is set so
+	// keyboard-prep hooks and other listeners can see the snapshot.
+	if fe, ok := events.(*fanoutEventSource); ok {
+		fe.inputState = state
+	}
+	// Keyboard snapshots are collected before default UI dispatch. Pointer
+	// events keep their existing listener order.
 	if state == nil {
 		return
 	}
@@ -1314,6 +1354,7 @@ func wireInput(events gpucontext.EventSource, state *input.State, optional ...an
 		state.SetKeyCode(key, false)
 		notifySource(input.InputSourceKeyboard)
 	})
+
 	events.OnMouseMove(func(x, y float64) {
 		state.SetMousePosition(int(x+0.5), int(y+0.5))
 		notifySource(input.InputSourceMouse)
@@ -1340,6 +1381,7 @@ func wireInput(events gpucontext.EventSource, state *input.State, optional ...an
 		state.AddTextInput(text)
 		notifySource(input.InputSourceKeyboard)
 	})
+
 }
 
 func mapMouseButton(button gpucontext.MouseButton) (input.MouseButton, bool) {

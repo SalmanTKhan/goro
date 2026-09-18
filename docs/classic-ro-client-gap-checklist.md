@@ -13,30 +13,43 @@ separate validation section and must not be implemented blindly.
 
 ### Stealth
 
-- [ ] Treat Hide, Cloaking, Invisible, and Chase Walk consistently when deciding how an actor is rendered.
-- [ ] Render the local player with the correct translucent/hidden-viewer appearance for every supported stealth state, not only `SC_HIDING`.
-- [ ] Apply the appropriate movement and input restrictions while the local player is hidden.
-- [ ] Exclude actors that should not be targetable or pickable while hidden.
-- [ ] Add focused tests for the local player, an allowed hidden viewer, an ordinary remote player, PvP, and WoE.
+- [x] Use server actor options for Hide, Cloaking, Invisible, and Chase Walk, independently of status-icon timers.
+- [x] Apply the 2008 hidden-viewer rendering rules to local and remote actors.
+- [x] Apply movement and action restrictions, including Tunnel Drive, the six skills usable while Hiding, and Chase Walk's own toggle.
+- [x] Exclude hidden actors from picking and targeting, and cancel queued actions when visibility changes.
+- [x] Suppress hidden actors' names, emblems, auras, carts, and falcons.
+- [x] Add focused rendering and packet tests for self, party, detection, GM, ordinary viewers, PvP, and WoE.
+- [ ] Compare the full flow visually against a running 2008 client and server.
 
-Current limitation: `localActorHidden` only checks `db.StatusHiding`, although
-the siege-emblem code already recognizes Hide, Cloak, Invisible, and Chase
-Walk as hidden states.
+The 2008 executable differs from classic-ro-client and the later dhxj source:
+Hiding keeps a shadow for self/GM, Cloaking hides even self and party bodies,
+Clairvoyance reveals a black body without a shadow, and Invisible remains
+unseen. The later translucent party view is deliberately not imported.
+Seeing a silhouette does not permit selecting a hidden target.
 
-### Quest journal and markers
+Verified against `~/src/ro-client-re`'s `2008-09-10aSakexe.exe`:
+`CGameActor::SetAttrState` at `0x00572b80`, `CPc::Render` at `0x005e4920`,
+`CSession::IsMasterAid` at `0x006711a0`, and `CPlayer::SendMsg` at `0x005ee950`.
+The Ninja skill exceptions and server option combinations were also checked
+against `~/src/eathena/src/map/status.c` and rAthena. No new packets or
+duplicated stealth state are needed.
 
-- [ ] Parse the 2008 quest list packets (`0x02B1` through `0x02B5` and relevant updates).
-- [ ] Store active quest state, descriptions, objectives, and hunt progress in the session.
-- [ ] Implement the quest list and quest detail UI.
-- [ ] Handle quest activation/state acknowledgement (`0x02B6`).
-- [ ] Handle quest removal and state updates (`0x02B7` where applicable).
-- [ ] Display quest NPC markers in the world.
-- [ ] Display quest markers and objective dots on the minimap.
-- [ ] Preserve the existing quest EXP console notifications.
-- [ ] Add packet, session-state, UI, and marker regression tests.
+### Quest journal
 
-See [the packet audit](packet-coverage-20080910.md), especially the currently
-untracked `0x02B1`-`0x02B7` family.
+- [x] Parse the 2008 quest list packets (`0x02B1` through `0x02B5` and relevant updates).
+- [x] Store character-owned quest state, objectives, and hunt progress; load descriptions from `questid2display.txt`.
+- [x] Implement the quest list and quest detail UI (`Alt+U`, Active/Inactive/All tabs).
+- [x] Send quest activation changes (`0x02B6`) and wait for server acknowledgement (`0x02B7`).
+- [x] Handle quest removal/completion (`0x02B4`) and state updates (`0x02B7`).
+- [x] Preserve the existing quest EXP console notifications.
+- [x] Add packet, resource, session-state, and journal UI regression tests.
+
+See [the quest journal notes](quest-journal.md) for scope, protocol references,
+and a manual test using the local rAthena server. Quest NPC markers and automatic
+quest/objective minimap overlays are outside our 2008 scope, not unfinished
+journal work. rAthena's `clif_quest_show_event` only sends the NPC marker packet
+(`0x0446`) for `PACKETVER >= 20090218`. Existing server compass markers remain
+supported independently.
 
 ### Legacy mail
 
@@ -111,26 +124,37 @@ individual game-window layout.
 
 ### Keyboard shortcuts
 
-- [ ] Add a shortcut configuration window instead of relying only on the hardcoded F1-F9, 1-9, and Q-O mapping.
+- [ ] Add a shortcut configuration window instead of relying only on the classic F1-F9 and Battle Mode mappings.
 - [ ] Persist physical-key bindings so layouts such as AZERTY remain correct.
-- [ ] Add the original Alt+M shortcut-list window for chat-command bindings.
-- [ ] Support editing and clearing all Alt+1 through Alt+0 command slots.
-- [ ] Verify original Battle Mode behavior for the 2008 client and expose it cleanly if it differs from Goro's always-available extra rows.
+- [x] Add the original Alt+M shortcut-list window for chat-command bindings.
+- [x] Support editing and clearing all Alt+1 through Alt+0 command slots, saved locally. The View button reuses the emote picker; shortcuts use physical keys (including AZERTY) and the console's command handling.
+- [x] Classic Battle Mode: `/bm` or `/battlemode` toggles physical Z-., Q-O, and A-L shortcut rows. With it off (the login default), typing goes directly to chat; with it on, Enter or Space opens chat temporarily. F1-F9 work while chatting, and F12 cycles the selected bar independently of the +/− row controls.
 - [ ] Keep server-side item/skill hotkey slots distinct from client-side physical key bindings.
 
 ### Missing-map recovery
 
-- [ ] Preserve and surface the missing/unreadable GAT error instead of silently returning from map initialization.
-- [ ] Show a fallback UI that does not depend on the missing GRF assets.
-- [ ] Display the missing map name and a useful explanation.
-- [ ] Offer return to character selection.
+- [x] Preserve and surface the missing/unreadable GAT error instead of silently returning from map initialization.
+- [x] Close the failed map connection and show the existing error alert on login, with its usual background and cursor fallbacks.
+- [x] Display the missing map name and a useful explanation.
+- [ ] Offer direct return to character selection.
 - [ ] Optionally offer a recovery warp to Prontera when the connected server permits it.
-- [ ] Avoid leaving the player connected on a black, unusable map.
-- [ ] Test the known `new_1-1`-missing scenario.
+- [x] Avoid leaving the player connected on a black, unusable map.
+- [x] Test the known `new_1-1`-missing scenario.
 
 This is a safety improvement from classic-ro-client rather than strict
 original-client behavior, but it directly addresses a failure already seen in
 Goro.
+
+The implementation deliberately returns to login and suppresses automatic
+reconnection/reselection. It reuses the existing alert and adds no recovery
+phase, cursor, text wrapper, or map-server handshake. Direct character selection
+and the optional Prontera warp are outside this minimal scope.
+
+References checked in the local clones: classic-ro-client's
+`map_missing_window.rs`, robr's `MapRenderer.js`/`MapEngine.js`, open-midgard's
+`GameMode.cpp`/`GameModePacket.cpp`, and rAthena's `clif.cpp`. The richer recovery
+flows keep the map session alive; Goro simply closes it. Tests cover missing and
+invalid maps, entry/warp redirects, the error dialog, and explicit login retry.
 
 ### Inventory and item presentation
 
@@ -168,7 +192,7 @@ Goro.
 
 ### Minimap details
 
-- [ ] Add quest and guide-direction markers as part of the quest implementation.
+- [ ] Verify guide-direction marker parity against the 2008 client using the existing server compass support.
 - [x] Party-member minimap markers already exist.
 - [x] Same-map guild-member markers already exist.
 - [x] Server compass markers already exist.
@@ -176,6 +200,19 @@ Goro.
 Party-name hover belongs to the 2007 world-map feature, not to the small HUD
 minimap. The latter only needs the existing coloured party markers for 2008
 parity.
+
+### World map (2008)
+
+- [x] Load the original `worldmap.bmp` and `mapPosTable.txt` from client data.
+- [x] Open with Ctrl + the physical key left of 1, and close with the same shortcut or Escape.
+- [x] Mark the current map with a star and highlight maps containing online party members.
+- [x] Show a hovered map's minimap and party-member names; show known same-map positions in the preview.
+- [x] Toggle map names using the title-bar magnifying glass.
+- [x] Add resource, shortcut, scaling, input, lifecycle, and idle-redraw regression tests.
+- [ ] Verify the full interaction visually in game, including party members on other maps.
+
+The 2008-09-10 Sakray executable references both original assets, and OldRO
+contains them. See [world map notes](world-map.md) for references and scope.
 
 ### Graphics options and small rendering details
 
@@ -205,8 +242,6 @@ These are intentionally unchecked, but they are not yet approved implementation
 work. First establish that the feature belongs to the 2008 client and that the
 OldRO data contains the required assets/tables.
 
-- [ ] Validate whether the world map UI and its map-position tables belong in the selected 2008 client profile.
-- [ ] If valid, implement the world map, current-map/player indicator, party markers with names on hover, and per-map minimap inset.
 - [ ] Validate skill/global cooldown packets for `20080910` before adding cooldown gating or shortcut overlays.
 - [ ] Validate whether the status-icon clock-wedge display is appropriate for 2008; Goro already has tooltips and a duration bar.
 - [ ] Validate party-booking packets `0x0802` and `0x0806`; they appear newer and should not be pulled into the 2008 backlog by default.

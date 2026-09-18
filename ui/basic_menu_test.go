@@ -101,11 +101,11 @@ func TestBasicMenuRowsUsePointerCursor(t *testing.T) {
 
 	firstRow := geometry.Pt(
 		float32(basicMenuX+basicMenuPad+basicMenuButtonW/2),
-		float32(basicMenuY+basicMenuPad+basicMenuButtonH/2),
+		float32(basicMenuY+basicMenuToggleH+basicMenuToggleGap+basicMenuPad+basicMenuButtonH/2),
 	)
 	secondRow := geometry.Pt(
 		firstRow.X,
-		float32(basicMenuY+basicMenuPad+basicMenuButtonH+basicMenuGapY+basicMenuButtonH/2),
+		float32(basicMenuY+basicMenuToggleH+basicMenuToggleGap+basicMenuPad+basicMenuButtonH+basicMenuGapY+basicMenuButtonH/2),
 	)
 
 	app.Window().HandleEvent(event.NewMouseEvent(event.MouseMove, event.ButtonNone, 0, firstRow, firstRow, event.ModNone))
@@ -144,6 +144,14 @@ func TestBasicMenuFollowsCharacterWindow(t *testing.T) {
 }
 
 func TestCharacterDragKeepsAttachedBasicMenuOnScreen(t *testing.T) {
+	t.Run("expanded", func(t *testing.T) { testCharacterDragKeepsAttachedBasicMenuOnScreen(t, false, false) })
+	t.Run("collapsed", func(t *testing.T) { testCharacterDragKeepsAttachedBasicMenuOnScreen(t, true, false) })
+	t.Run("compact expanded", func(t *testing.T) { testCharacterDragKeepsAttachedBasicMenuOnScreen(t, false, true) })
+	t.Run("compact collapsed", func(t *testing.T) { testCharacterDragKeepsAttachedBasicMenuOnScreen(t, true, true) })
+}
+
+func testCharacterDragKeepsAttachedBasicMenuOnScreen(t *testing.T, collapsed, compact bool) {
+	t.Helper()
 	inputState := input.NewState()
 	app := &windowDragTestApp{}
 	manager := &escapeMenuTestUIManager{}
@@ -161,6 +169,13 @@ func TestCharacterDragKeepsAttachedBasicMenuOnScreen(t *testing.T) {
 	menu.FollowCharacterWindow(ctx, &character)
 	menu.Update(ctx, BasicMenuCallbacks{})
 
+	if compact {
+		character.toggleCompact()
+	}
+	if collapsed {
+		menu.toggleCollapsed()
+	}
+	menu.FollowCharacterWindow(ctx, &character)
 	inputState.SetMousePosition(character.x+10, character.y+5)
 	inputState.SetMouseButton(input.MouseButtonLeft, true)
 	if !character.Update(ctx) {
@@ -170,7 +185,7 @@ func TestCharacterDragKeepsAttachedBasicMenuOnScreen(t *testing.T) {
 	if !character.dragLayer || app.beginToken != character.positionedOverlay() {
 		t.Fatal("character and basic menu did not enter the shared immediate drag layer")
 	}
-	_, menuHeight := basicMenuSize()
+	_, menuHeight := basicMenuSize(collapsed)
 	wantStartRect := geometry.NewRect(
 		float32(character.x),
 		float32(character.y),
@@ -261,7 +276,7 @@ func TestBasicMenuRebindRefreshesButtonCallbacks(t *testing.T) {
 	app.Window().DrawTo(&uitest.MockCanvas{})
 	point := geometry.Pt(
 		float32(basicMenuX+basicMenuPad+basicMenuButtonW/2),
-		float32(basicMenuY+basicMenuPad+basicMenuButtonH/2),
+		float32(basicMenuY+basicMenuToggleH+basicMenuToggleGap+basicMenuPad+basicMenuButtonH/2),
 	)
 	app.Window().HandleEvent(uitest.Click(point.X, point.Y))
 	app.Window().HandleEvent(uitest.Release(point.X, point.Y))
@@ -294,7 +309,7 @@ func TestBasicMenuButtonDoesNotReinvokeFromEnterKey(t *testing.T) {
 	app.Window().DrawTo(&uitest.MockCanvas{})
 	point := geometry.Pt(
 		float32(basicMenuX+basicMenuPad+2*(basicMenuButtonW+basicMenuGapX)+basicMenuButtonW/2),
-		float32(basicMenuY+basicMenuPad+basicMenuButtonH/2),
+		float32(basicMenuY+basicMenuToggleH+basicMenuToggleGap+basicMenuPad+basicMenuButtonH/2),
 	)
 	app.Window().HandleEvent(uitest.Click(point.X, point.Y))
 	app.Window().HandleEvent(uitest.Release(point.X, point.Y))
@@ -309,5 +324,126 @@ func TestBasicMenuButtonDoesNotReinvokeFromEnterKey(t *testing.T) {
 	app.Window().HandleEvent(event.NewKeyEvent(event.KeyRelease, event.KeyEnter, 0, event.ModNone))
 	if itemCalls != 1 {
 		t.Fatalf("item calls after enter = %d, want 1", itemCalls)
+	}
+}
+
+func TestBasicMenuCollapseToggleAndClickBounds(t *testing.T) {
+	app := uiapp.New()
+	bridge := basicMenuTestApp{app: app}
+	manager := NewManager()
+	manager.SetUIApp(bridge)
+	ctx := client.Context{Input: input.NewState(), UIApp: bridge, UIManager: manager,
+		Session: &session.Session{Selected: session.Character{Name: "Kivutar"}}, ScreenW: 800, ScreenH: 600}
+	var character CharacterWindow
+	var menu BasicMenu
+	statusCalls := 0
+	callbacks := BasicMenuCallbacks{OnStatus: func() { statusCalls++ }}
+	character.Update(ctx)
+	menu.FollowCharacterWindow(ctx, &character)
+	menu.Update(ctx, callbacks)
+	draw := func() {
+		app.Frame()
+		app.Window().DrawTo(&uitest.MockCanvas{})
+	}
+	click := func(x, y int) {
+		app.Window().HandleEvent(uitest.Click(float32(x), float32(y)))
+		app.Window().HandleEvent(uitest.Release(float32(x), float32(y)))
+	}
+	draw()
+	if menu.width != character.width {
+		t.Fatalf("menu width = %d, want character width %d", menu.width, character.width)
+	}
+	toggleX, toggleY := menu.x+menu.width/2, menu.y+basicMenuToggleH/2
+	rowX, rowY := menu.x+basicMenuPad+basicMenuButtonW/2, menu.y+basicMenuToggleH+basicMenuToggleGap+basicMenuPad+basicMenuButtonH/2
+	click(toggleX, toggleY)
+	menu.FollowCharacterWindow(ctx, &character)
+	draw()
+	if !menu.collapsed || menu.height != basicMenuToggleH || character.dragBottom != basicMenuFollowGap+basicMenuToggleH {
+		t.Fatalf("collapsed state: collapsed=%v height=%d dragBottom=%d", menu.collapsed, menu.height, character.dragBottom)
+	}
+	ctx.Input.SetMousePosition(toggleX, toggleY)
+	ctx.Input.SetMouseButton(input.MouseButtonLeft, true)
+	if !menu.Update(ctx, callbacks) || menu.dragging || character.dragging {
+		t.Fatal("toggle click leaked to the map or started dragging")
+	}
+	ctx.Input.EndFrame()
+	ctx.Input.SetMouseButton(input.MouseButtonLeft, false)
+	if manager.OverlayAt(rowX, rowY) != nil {
+		t.Fatal("hidden button area still catches map clicks")
+	}
+	click(rowX, rowY)
+	if statusCalls != 0 {
+		t.Fatal("hidden Status button remained clickable")
+	}
+	if app.Window().Context().FocusedWidget() != nil {
+		t.Fatal("toggle kept keyboard focus")
+	}
+	app.Window().HandleEvent(event.NewKeyEvent(event.KeyPress, event.KeyEnter, 0, event.ModNone))
+	if !menu.collapsed {
+		t.Fatal("Enter toggled the menu again")
+	}
+	content, published := menu.content, menu.published
+	menu.Update(ctx, callbacks)
+	menu.FollowCharacterWindow(ctx, &character)
+	if menu.content != content || menu.published != published {
+		t.Fatal("idle collapsed menu rebuilt its widgets")
+	}
+	click(toggleX, toggleY)
+	menu.FollowCharacterWindow(ctx, &character)
+	draw()
+	_, expandedHeight := basicMenuSize(false)
+	if menu.collapsed || menu.height != expandedHeight {
+		t.Fatal("toggle did not restore the expanded menu")
+	}
+	click(rowX, rowY)
+	if statusCalls != 1 {
+		t.Fatal("restored Status button did not work")
+	}
+}
+
+func TestBasicMenuExpandingKeepsGroupOnScreen(t *testing.T) {
+	ctx := client.Context{Input: input.NewState(), UIManager: NewManager(),
+		Session: &session.Session{}, ScreenW: 800, ScreenH: 300}
+	var character CharacterWindow
+	var menu BasicMenu
+	character.Update(ctx)
+	menu.FollowCharacterWindow(ctx, &character)
+	menu.Update(ctx, BasicMenuCallbacks{})
+	menu.toggleCollapsed()
+	menu.FollowCharacterWindow(ctx, &character)
+	bottomY := ctx.ScreenH - windowScreenMargin - character.height - character.dragBottom
+	character.setPosition(ctx, character.x, bottomY)
+	menu.FollowCharacterWindow(ctx, &character)
+	menu.toggleCollapsed()
+	menu.FollowCharacterWindow(ctx, &character)
+	if character.y >= bottomY || menu.y+menu.height != ctx.ScreenH-windowScreenMargin {
+		t.Fatalf("expanded group not clamped: character y=%d, menu bottom=%d", character.y, menu.y+menu.height)
+	}
+	if menu.y != character.y+character.height+basicMenuFollowGap {
+		t.Fatal("expanding separated the two windows")
+	}
+}
+
+func TestBasicMenuRebindKeepsCollapsedStateAndOwnsToggle(t *testing.T) {
+	app := uiapp.New()
+	bridge := basicMenuTestApp{app: app}
+	manager := NewManager()
+	manager.SetUIApp(bridge)
+	ctx := client.Context{Input: input.NewState(), UIApp: bridge, UIManager: manager, ScreenW: 800, ScreenH: 600}
+	var original BasicMenu
+	original.Update(ctx, BasicMenuCallbacks{})
+	original.toggleCollapsed()
+	carried := original
+	carried.Rebind(ctx, BasicMenuCallbacks{})
+	app.Frame()
+	app.Window().DrawTo(&uitest.MockCanvas{})
+	if !carried.collapsed || carried.height != basicMenuToggleH {
+		t.Fatal("map transition expanded the collapsed menu")
+	}
+	x, y := float32(carried.x+carried.width/2), float32(carried.y+basicMenuToggleH/2)
+	app.Window().HandleEvent(uitest.Click(x, y))
+	app.Window().HandleEvent(uitest.Release(x, y))
+	if carried.collapsed || !original.collapsed {
+		t.Fatal("carried toggle still affected the original mode")
 	}
 }

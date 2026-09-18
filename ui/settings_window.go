@@ -396,7 +396,8 @@ func (w *SettingsWindow) saveSettings(ctx client.Context) {
 	}
 	controller := settingsController(ctx)
 	settings.Controller = &controller
-	path, err := config.SaveUserSettings(settings)
+	path, err := ctx.Config.SaveUserSettings(settings)
+
 	if err != nil {
 		glog.Warnf("settings save failed: %v", err)
 		return

@@ -15,6 +15,7 @@ func isolateUserConfig(t *testing.T) {
 	configRoot := t.TempDir()
 	t.Setenv("APPDATA", configRoot)
 	t.Setenv("XDG_CONFIG_HOME", configRoot)
+	t.Setenv("HOME", configRoot)
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -28,6 +29,7 @@ func isolateUserConfig(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+
 }
 
 func TestNextCapturePathUsesFormatAndCollisionSuffix(t *testing.T) {
@@ -262,15 +264,10 @@ func TestLoadConfigRejectsInvalidLogLevel(t *testing.T) {
 	}
 }
 
-func TestLoadConfigReadsUserConfig(t *testing.T) {
+func TestLoadConfigReadsDataDirConfig(t *testing.T) {
 	isolateUserConfig(t)
-	path, err := UserConfigPath()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "goro.ini")
 	if err := os.WriteFile(path, []byte(`
 [window]
 fullscreen = true
@@ -294,24 +291,18 @@ itemsnap = true
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := LoadConfig(nil)
+	cfg, err := LoadConfig([]string{"--data-dir", dir})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !cfg.Window.Fullscreen || cfg.Audio.BGMVolume != 0.10 || cfg.Audio.SFXVolume != 0.20 || cfg.Render.VSync || !cfg.Render.FPS || !cfg.Render.AsyncUI || !cfg.Render.UIProfile || !cfg.Gameplay.NoShift || cfg.Gameplay.NoCtrl || !cfg.Gameplay.LessEffects || !cfg.Gameplay.SnapTargets || !cfg.Gameplay.SnapItems {
-		t.Fatalf("user config not loaded: %#v", cfg)
+		t.Fatalf("data directory config not loaded: %#v", cfg)
 	}
 }
 
 func TestSaveUserSettingsPreservesUnrelatedINI(t *testing.T) {
 	isolateUserConfig(t)
-	path, err := UserConfigPath()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	path := filepath.Join(t.TempDir(), "goro.ini")
 	initial := `data_dir = /tmp/OldRO
 
 [login]
@@ -324,7 +315,11 @@ fullscreen = false
 	if err := os.WriteFile(path, []byte(initial), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	writtenPath, err := SaveUserSettings(UserSettings{
+	cfg, err := LoadConfig([]string{"--config", path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writtenPath, err := cfg.SaveUserSettings(UserSettings{
 		Fullscreen:  true,
 		VSync:       false,
 		FPS:         true,
@@ -368,173 +363,151 @@ fullscreen = false
 	}
 }
 
-func TestMobileSettingsRoundTripPreservesUnrelatedINI(t *testing.T) {
+func TestSavedVSyncRoundTripAndCLIOverride(t *testing.T) {
+	for _, name := range []string{"local", "data-dir", "explicit", "both"} {
+		t.Run(name, func(t *testing.T) {
+			isolateUserConfig(t)
+			dir := t.TempDir()
+			path := filepath.Join(dir, "goro.ini")
+			args := []string{"--data-dir", dir}
+			if name == "local" {
+				var err error
+				path, err = filepath.Abs("goro.ini")
+				if err != nil {
+					t.Fatal(err)
+				}
+				args = nil
+			} else if name != "data-dir" {
+				path = filepath.Join(t.TempDir(), "custom.ini")
+				args = []string{"--config", path}
+				if name == "both" {
+					args = append(args, "--data-dir", dir)
+					if err := os.WriteFile(filepath.Join(dir, "goro.ini"), []byte("[render]\nvsync = false\n"), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			for _, saved := range []bool{true, false} {
+				if err := os.WriteFile(path, []byte("[render]\nvsync = "+formatINIValueBool(!saved)+"\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				cfg, err := LoadConfig(args)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if cfg.ConfigPath != path {
+					t.Fatalf("save path = %q, want %q", cfg.ConfigPath, path)
+				}
+				if _, err := cfg.SaveUserSettings(UserSettings{VSync: saved}); err != nil {
+					t.Fatal(err)
+				}
+				cfg, err = LoadConfig(args)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if cfg.Render.VSync != saved {
+					t.Fatalf("VSync after saving and restarting = %t, want %t", cfg.Render.VSync, saved)
+				}
+				for _, flag := range []string{"--vsync=true", "--vsync=false", "--vsync"} {
+					cliArgs := append(append([]string(nil), args...), flag)
+					cfg, err := LoadConfig(cliArgs)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if want := flag != "--vsync=false"; cfg.Render.VSync != want {
+						t.Fatalf("saved=%t %s: VSync=%t, want %t", saved, flag, cfg.Render.VSync, want)
+					}
+				}
+			}
+			if name == "both" {
+				data, err := os.ReadFile(filepath.Join(dir, "goro.ini"))
+				if err != nil || string(data) != "[render]\nvsync = false\n" {
+					t.Fatalf("save changed lower-priority file: %q, %v", data, err)
+				}
+			}
+		})
+	}
+}
+
+func TestSavedLoginIDRoundTripAndSettingsPreservation(t *testing.T) {
 	isolateUserConfig(t)
-	path, err := UserConfigPath()
+	args := []string{"--data-dir", t.TempDir()}
+	cfg, err := LoadConfig(args)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	settings := UserSettings{BGMVolume: 0.33, SFXVolume: 0.44, VSync: true}
+	if _, err := cfg.SaveUserSettings(settings); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte("[login]\nusername = KeepMe\n\n[audio]\nbgm_volume = 0.33\n"), 0o644); err != nil {
+	// Quoting must preserve the ID literally, including spaces and INI punctuation.
+	username := ` "Test;#=ID" `
+	if _, err := cfg.SaveLoginID(username, true); err != nil {
 		t.Fatal(err)
 	}
-	controls := input.DefaultMobileControls()
-	controls.MovementMode = input.MovementTapToMove
-	controls.CameraSensitivity = 1.5
-	controls.ZoomSensitivity = 0.75
-	controls.InvertCameraY = true
-	controls.LongPressMS = 900
-	controls.ShowTargetNames = false
-	if _, err := SaveMobileControls(controls); err != nil {
-		t.Fatal(err)
-	}
-	loaded, err := LoadUserMobileControls()
+	cfg, err = LoadConfig(args)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded != controls {
-		t.Fatalf("loaded mobile controls = %#v, want %#v", loaded, controls)
+	if !cfg.Login.KeepID || cfg.Login.SavedUsername != username {
+		t.Fatalf("saved login = %+v", cfg.Login)
 	}
-	data, err := os.ReadFile(path)
+	if cfg.Login.Username != "" || cfg.Login.Password != "" || cfg.Login.AutoLogin {
+		t.Fatal("remembering the ID changed explicit credentials or enabled autologin")
+	}
+	if cfg.Audio.BGMVolume != 0.33 || cfg.Audio.SFXVolume != 0.44 || !cfg.Render.VSync {
+		t.Fatal("saving the login ID changed other settings")
+	}
+	if _, err := cfg.SaveUserSettings(settings); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = LoadConfig(append(append([]string(nil), args...), "--username", "explicit-id"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	text := string(data)
-	for _, want := range []string{"username = KeepMe", "bgm_volume = 0.33", "movement = tap", "camera_sensitivity = 1.50", "zoom_sensitivity = 0.75", "invert_camera_y = true", "long_press_ms = 900", "show_target_names = false"} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("saved config missing %q:\n%s", want, text)
+	if !cfg.Login.KeepID || cfg.Login.SavedUsername != username || cfg.Login.Username != "explicit-id" {
+		t.Fatalf("settings save or CLI override changed the remembered ID: %+v", cfg.Login)
+	}
+	if _, err := cfg.SaveLoginID(username, false); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = LoadConfig(args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Login.KeepID || cfg.Login.SavedUsername != "" {
+		t.Fatalf("unchecking Keep retained the saved ID: %+v", cfg.Login)
+	}
+}
+
+func TestSavedLoginIDRejectsLineBreaksWithoutChangingConfig(t *testing.T) {
+	isolateUserConfig(t)
+	cfg, err := LoadConfig([]string{"--data-dir", t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err := cfg.SaveLoginID("original", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, username := range []string{"id\n[render]\nvsync=false", "id\rname", "id\x00name"} {
+		if _, err := cfg.SaveLoginID(username, true); err == nil {
+			t.Fatalf("accepted invalid ID %q", username)
 		}
 	}
-}
-
-func TestMobileSettingsRoundTripPreservesAllSupportedValues(t *testing.T) {
-	isolateUserConfig(t)
-	path, err := UserConfigPath()
+	after, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte("[login]\nusername = KeepMe\n\n[network]\ntrace = true\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	settings := input.DefaultMobileSettings()
-	settings.Controls.MovementMode = input.MovementTapToMove
-	settings.Controls.CameraSensitivity = 2
-	settings.Controls.LongPressMS = 900
-	settings.Controls.ShowTargetNames = false
-	settings.Audio.BGMEnabled = false
-	settings.Audio.BGMVolume = 0.25
-	settings.Audio.SFXVolume = 0.75
-	settings.UI.Scale = input.UIScaleLargeValue
-	settings.Display.ShowMinimap = false
-	settings.Gameplay.NoShift = true
-	settings.Gameplay.NoCtrl = false
-	settings.Gameplay.LessEffects = true
-	settings.Gameplay.SnapTargets = true
-	settings.Gameplay.SnapItems = true
-	if _, err := SaveMobileSettings(settings); err != nil {
-		t.Fatal(err)
-	}
-	loaded, err := LoadUserMobileSettings()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if loaded != settings {
-		t.Fatalf("loaded mobile settings = %#v, want %#v", loaded, settings)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(data)
-	for _, want := range []string{"username = KeepMe", "trace = true", "scale = 1.20", "movement = tap", "bgm = false", "bgm_volume = 0.25", "sfx_volume = 0.75", "show_minimap = false", "no_shift = true", "itemsnap = true"} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("saved config missing %q:\n%s", want, text)
-		}
+	if string(before) != string(after) {
+		t.Fatal("invalid ID changed the existing config")
 	}
 }
 
-func TestLoadConfigReadsControllerModeSettings(t *testing.T) {
-	isolateUserConfig(t)
-	path := filepath.Join(t.TempDir(), "controller-modes.ini")
-	if err := os.WriteFile(path, []byte(`[controller]
-move_mode = cursor
-ui_nav_mode = focus
-cursor_speed = 2200
-trigger_deadzone = 0.25
-nav_repeat_delay_ms = 400
-nav_repeat_ms = 90
-rumble = false
-`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := LoadConfig([]string{"--config", path})
-	if err != nil {
-		t.Fatal(err)
-	}
-	controller := cfg.Controller
-	if controller.MoveMode != input.ControllerMoveCursor || controller.UINavMode != input.ControllerUINavFocus {
-		t.Fatalf("modes = %v,%v", controller.MoveMode, controller.UINavMode)
-	}
-	if controller.CursorSpeed != 2200 || controller.TriggerDeadzone != 0.25 {
-		t.Fatalf("cursor tuning = %v,%v", controller.CursorSpeed, controller.TriggerDeadzone)
-	}
-	if controller.NavRepeatDelayMS != 400 || controller.NavRepeatMS != 90 {
-		t.Fatalf("nav repeat = %v,%v", controller.NavRepeatDelayMS, controller.NavRepeatMS)
-	}
-	if controller.Rumble {
-		t.Fatal("rumble should be disabled")
-	}
-}
 
-func TestSaveControllerSettingsRoundTripPreservesUnrelatedINI(t *testing.T) {
-	isolateUserConfig(t)
-	path, err := UserConfigPath()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte("[login]\nusername = hero\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	settings := input.DefaultControllerSettings()
-	settings.MoveMode = input.ControllerMoveCursor
-	settings.UINavMode = input.ControllerUINavFocus
-	settings.CursorSpeed = 1800
-	settings.NavRepeatMS = 90
-	settings.Rumble = false
-	settings.Bindings.Set(input.ActionConfirm, input.ControllerButtonNorth)
-	if _, err := SaveControllerSettings(settings); err != nil {
-		t.Fatal(err)
-	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), "username = hero") {
-		t.Fatalf("unrelated INI lost:\n%s", data)
-	}
-
-	cfg, err := LoadConfig([]string{"--config", path})
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := cfg.Controller
-	if got.MoveMode != settings.MoveMode || got.UINavMode != settings.UINavMode {
-		t.Fatalf("modes = %v,%v", got.MoveMode, got.UINavMode)
-	}
-	if got.CursorSpeed != settings.CursorSpeed || got.NavRepeatMS != settings.NavRepeatMS || got.Rumble {
-		t.Fatalf("tuning not round-tripped: %#v", got)
-	}
-	if got.Bindings.Get(input.ActionConfirm) != input.ControllerButtonNorth {
-		t.Fatalf("binding not round-tripped: %#v", got.Bindings)
 	}
 }

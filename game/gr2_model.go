@@ -50,7 +50,7 @@ func (m *WorldMode) drawNonPCGR2Model3D(screen *render.Frame, ctx client.Context
 	if ctx.World != nil {
 		lighting = m.sceneLighting(ctx.World.RSW)
 	}
-	tint := m.actorRenderTint(actor, now)
+	tint := entry.stealth.tint(m.actorRenderTint(actor, now))
 	alpha := m.actorVisualAlpha(actor.ID, now)
 	if alpha <= 0 {
 		return true
@@ -119,6 +119,9 @@ func (m *WorldMode) gr2ActorGuildEmblemTexture(ctx client.Context, actor worldst
 }
 
 func (m *WorldMode) nonPCGR2ModelView(ctx client.Context, actor worldstate.Actor) *gr2ModelView {
+	if ctx.Config.Headless {
+		return nil
+	}
 	job := int(actor.Job)
 	if _, ok := m.gr2ModelMiss[job]; ok {
 		return nil

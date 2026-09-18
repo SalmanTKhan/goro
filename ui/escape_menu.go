@@ -117,6 +117,9 @@ func (m *EscapeMenu) Update(ctx client.Context) bool {
 		return false
 	}
 	if ctx.Input.JustPressed(input.KeyEscape) {
+		if top := topEscapeOverlay(ctx); top != nil && top != m.published {
+			return false
+		}
 		m.Toggle(ctx)
 		return true
 	}

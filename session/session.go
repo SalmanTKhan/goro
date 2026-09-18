@@ -11,8 +11,11 @@ type Session struct {
 	AdminList            []uint32
 	Playing              bool
 	Dead                 bool
+	KeepLoginID          bool
+	SavedUsername        string
 	NoShift              bool
 	NoCtrl               bool
+	BattleMode           bool
 	LessEffects          bool
 	HomunculusCustomAI   bool
 	HomunculusAggressive bool
@@ -45,6 +48,7 @@ type Session struct {
 	Stats                Stats
 	Skills               Skills
 	Hotkeys              Hotkeys
+	Quests               Quests
 	Statuses             Statuses
 	Friends              Friends
 	PendingFriendRequest *PendingFriendRequest
@@ -88,6 +92,7 @@ func (s *Session) SelectCharacter(character Character) {
 	s.Stats = StatsFromCharacter(character)
 	s.Skills = Skills{}
 	s.Hotkeys = Hotkeys{}
+	s.Quests = Quests{}
 	s.Statuses = Statuses{}
 	s.Friends = Friends{}
 	s.PendingFriendRequest = nil

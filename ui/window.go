@@ -6,6 +6,7 @@ import (
 	"github.com/gogpu/ui/event"
 	"github.com/gogpu/ui/geometry"
 	"github.com/gogpu/ui/primitives"
+	"github.com/gogpu/ui/state"
 	"github.com/gogpu/ui/widget"
 	"github.com/kivutar/goro/client"
 	"github.com/kivutar/goro/input"
@@ -16,6 +17,7 @@ type WindowOption func(*windowConfig)
 
 type windowConfig struct {
 	title        string
+	titleSignal  state.ReadonlySignal[string]
 	closeButton  bool
 	titleButtons []windowTitleButton
 	content      widget.Widget
@@ -31,6 +33,13 @@ type windowConfig struct {
 type windowTitleButton struct {
 	kind    rotheme.IconButtonKind
 	onClick func()
+}
+
+// windowFrame retains the title-bar close action for keyboard closing too.
+// This preserves each window's cleanup and server cancellation behavior.
+type windowFrame struct {
+	*primitives.BoxWidget
+	onClose func()
 }
 
 const (
@@ -58,8 +67,15 @@ func Win(options ...WindowOption) widget.Widget {
 
 	children := make([]widget.Widget, 0, 3)
 	if cfg.titleBar {
+		var title widget.Widget = rotheme.Title(cfg.title)
+		if cfg.titleSignal != nil {
+			title = &windowTitleText{
+				TextWidget: rotheme.Title("").ContentSignal(cfg.titleSignal),
+				signal:     cfg.titleSignal,
+			}
+		}
 		titleContent := primitives.HBox(
-			rotheme.Title(cfg.title),
+			title,
 			primitives.Expanded(primitives.Box()),
 			windowTitleButtons(cfg.titleButtons, cfg.closeButton, cfg.onClose),
 		).
@@ -102,13 +118,29 @@ func Win(options ...WindowOption) widget.Widget {
 	if cfg.background != nil {
 		background = *cfg.background
 	}
-	return primitives.Box(children...).
+	box := primitives.Box(children...).
 		CrossAlign(primitives.CrossAxisStretch).
 		Width(cfg.width).
 		Height(cfg.height).
 		Background(background).
 		BorderStyle(1, rotheme.Default.Colors.WindowBorder).
 		Rounded(cfg.radius)
+	if cfg.onClose == nil {
+		return box
+	}
+	return &windowFrame{BoxWidget: box, onClose: cfg.onClose}
+}
+
+// Unlike a paint-only text binding, a title change also affects header layout.
+type windowTitleText struct {
+	*primitives.TextWidget
+	signal state.ReadonlySignal[string]
+}
+
+func (t *windowTitleText) Mount(ctx widget.Context) {
+	if scheduler := ctx.Scheduler(); scheduler != nil {
+		t.AddBinding(state.BindToSchedulerLayout(t.signal, t, scheduler))
+	}
 }
 
 func windowBodyColor(opacity float32) widget.Color {
@@ -120,6 +152,13 @@ func windowBodyColor(opacity float32) widget.Color {
 func Title(title string) WindowOption {
 	return func(cfg *windowConfig) {
 		cfg.title = title
+	}
+}
+
+// TitleSignal updates the title without rebuilding the header's controls.
+func TitleSignal(title state.ReadonlySignal[string]) WindowOption {
+	return func(cfg *windowConfig) {
+		cfg.titleSignal = title
 	}
 }
 
@@ -200,7 +239,9 @@ func windowTitleButtons(buttons []windowTitleButton, closeButton bool, onClose f
 	for _, button := range buttons {
 		children = append(children, windowTitleIconButton(button.kind, button.onClick))
 	}
-	children = append(children, windowCloseButton(closeButton, onClose))
+	if closeButton || len(buttons) == 0 {
+		children = append(children, windowCloseButton(closeButton, onClose))
+	}
 	return primitives.HBox(children...).
 		Gap(windowTitleButtonGap).
 		CrossAlign(primitives.CrossAxisCenter)
@@ -329,6 +370,7 @@ func (w *Window) EnsureWindow(width, height int) bool {
 
 func (w *Window) Close() {
 	w.cancelDragLayer(w.ctx)
+	releaseWindowFocus(w.ctx, w.content)
 	w.setOpacity(1)
 	w.open = false
 	w.dragging = false
@@ -563,17 +605,28 @@ func (w *Window) Update(ctx client.Context) bool {
 		w.endDragLayer(ctx)
 		return true
 	}
-	if w.CloseOnEsc && ctx.Input.JustPressed(input.KeyEscape) {
-		w.Close()
+	if ctx.Input.JustPressed(input.KeyEscape) {
+		if !w.CloseOnEsc || !w.escapePressed(ctx) {
+			return false
+		}
+		if frame, ok := w.content.(*windowFrame); ok && frame.onClose != nil {
+			frame.onClose()
+		} else {
+			w.Close()
+		}
 		return true
 	}
 	inside := pointInRect(ctx.Input.MouseX, ctx.Input.MouseY, w.x, w.y, w.width, w.height)
+	if manager, ok := ctx.UIManager.(interface{ OverlayAt(int, int) widget.Widget }); ok && w.published != nil {
+		inside = manager.OverlayAt(ctx.Input.MouseX, ctx.Input.MouseY) == w.published
+	}
 	if !ctx.Input.MouseJustPressed(input.MouseButtonLeft) {
 		return inside
 	}
 	if !inside {
 		return false
 	}
+	w.Raise(ctx)
 	if pointInRect(ctx.Input.MouseX, ctx.Input.MouseY, w.x, w.y, w.width, w.titleHeight) {
 		if w.titleButtonHit(ctx.Input.MouseX, ctx.Input.MouseY) {
 			return true
@@ -592,11 +645,47 @@ func (w *Window) ensurePosition(ctx client.Context) {
 	if w.positioned {
 		return
 	}
-	screenW, screenH := ctx.UIScreenSize()
-	w.x = maxInt(windowScreenMargin, (screenW-w.width)/2)
-	w.y = maxInt(windowScreenMargin, (screenH-w.height)/2)
+	screenW, screenH := ctx.ScreenSize()
+	w.placeNew(ctx, (screenW-w.width)/2, (screenH-w.height)/2)
+}
+
+// placeNew keeps a new window on screen and offsets coincident title bars so
+// opening another instance leaves the previous instance accessible.
+func (w *Window) placeNew(ctx client.Context, x, y int) {
+	screenW, screenH := ctx.ScreenSize()
+	maxX := maxInt(windowScreenMargin, screenW-w.width-windowScreenMargin)
+	maxY := maxInt(windowScreenMargin, screenH-w.height-windowScreenMargin)
+	x = clampWindowInt(x, windowScreenMargin, maxX)
+	y = clampWindowInt(y, windowScreenMargin, maxY)
+	if manager, ok := ctx.UIManager.(*Manager); ok {
+		for attempts := 0; attempts < len(manager.overlays); attempts++ {
+			occupied := false
+			for _, root := range manager.overlays {
+				other, ok := root.(*positionedOverlay)
+				if ok && root != w.placed && other.raiseOnPress && other.x == x && other.y == y {
+					occupied = true
+					break
+				}
+			}
+			if !occupied {
+				break
+			}
+			x += ROWindowTitleHeight
+			y += ROWindowTitleHeight
+			if x > maxX {
+				x = windowScreenMargin
+			}
+			if y > maxY {
+				y = windowScreenMargin
+			}
+		}
+	}
 	w.positioned = true
-	w.placed = nil
+	w.setPosition(ctx, x, y)
+}
+
+	w.positioned = true
+	w.setPosition(ctx, x, y)
 }
 
 func (w *Window) setOpacity(opacity float32) {
@@ -605,7 +694,11 @@ func (w *Window) setOpacity(opacity float32) {
 	if w.titleHeight <= 0 {
 		return
 	}
-	if box, ok := w.content.(*primitives.BoxWidget); ok {
+	box, _ := w.content.(*primitives.BoxWidget)
+	if frame, ok := w.content.(*windowFrame); ok {
+		box = frame.BoxWidget
+	}
+	if box != nil {
 		background := windowBodyColor(opacity)
 		if w.background != nil {
 			background = *w.background
@@ -640,7 +733,38 @@ func (w *Window) Widget() widget.Widget {
 	} else if overlay, ok := w.placed.(*positionedOverlay); ok {
 		overlay.setFrame(w.x, w.y, w.width, w.height)
 	}
+	w.positionedOverlay().closeOnEsc = w.CloseOnEsc
 	return w.placed
+}
+
+func topEscapeOverlay(ctx client.Context) widget.Widget {
+	if manager, ok := ctx.UIManager.(interface{ TopEscapeOverlay() widget.Widget }); ok {
+		return manager.TopEscapeOverlay()
+	}
+	return nil
+}
+
+func (w *Window) escapePressed(ctx client.Context) bool {
+	if ctx.Input == nil || !ctx.Input.JustPressed(input.KeyEscape) {
+		return false
+	}
+	top := topEscapeOverlay(ctx)
+	return top == nil || top == w.published
+}
+
+func releaseWindowFocus(ctx client.Context, root widget.Widget) {
+	if root == nil {
+		return
+	}
+	if focus, ok := root.(interface{ SetFocused(bool) }); ok {
+		if wc := windowWidgetContext(ctx); wc != nil {
+			wc.ReleaseFocus(root)
+		}
+		focus.SetFocused(false)
+	}
+	for _, child := range root.Children() {
+		releaseWindowFocus(ctx, child)
+	}
 }
 
 func (w *Window) setPosition(ctx client.Context, x, y int) {
@@ -857,15 +981,12 @@ type positionedOverlay struct {
 	hasDamage             bool
 	hidden                bool
 	raiseOnPress          bool
+	closeOnEsc            bool
 	owner                 *Window
 	controllerPassthrough bool
 	controllerEntryPoint  bool
 }
 
-func (w *positionedOverlay) viewportChanged(oldWidth, oldHeight, width, height int) {
-	if w != nil && w.owner != nil {
-		w.owner.viewportChanged(oldWidth, oldHeight, width, height)
-	}
 }
 
 func (w *positionedOverlay) setFrame(x, y, width, height int) geometry.Rect {

@@ -3,16 +3,19 @@ package game
 import (
 	"image"
 
+	"github.com/gogpu/gpucontext"
 	"github.com/kivutar/goro/client"
 	"github.com/kivutar/goro/input"
 	"github.com/kivutar/goro/mobileui"
+
 	"github.com/kivutar/goro/render"
 	"github.com/kivutar/goro/session"
 )
 
 type Mode interface {
 	Name() string
-	Enter(client.Context)
+	// Enter may redirect to another mode if this one cannot be entered.
+	Enter(client.Context) Mode
 	Update(client.Context) (Mode, error)
 	Draw(client.Context, *render.Frame)
 }
@@ -35,15 +38,45 @@ type Manager struct {
 }
 
 func NewManager(ctx client.Context, mode Mode) *Manager {
-	m := &Manager{ctx: ctx, mode: mode}
-	if m.mode != nil {
-		m.mode.Enter(ctx)
-	}
+	m := &Manager{ctx: ctx}
+	m.enter(mode)
 	return m
+}
+
+func (m *Manager) enter(mode Mode) {
+	for mode != nil {
+		m.mode = mode
+		mode = mode.Enter(m.ctx)
+	}
 }
 
 func (m *Manager) UpdateContext(ctx client.Context) {
 	m.ctx = ctx
+}
+
+func (m *Manager) HandleKeyPress(ctx client.Context, code input.KeyCode) {
+	if handler, ok := m.mode.(interface {
+		HandleKeyPress(client.Context, input.KeyCode)
+	}); ok {
+		handler.HandleKeyPress(ctx, code)
+	}
+}
+
+func (m *Manager) PrepareTextInput(ctx client.Context, code input.KeyCode) bool {
+	if filter, ok := m.mode.(interface {
+		PrepareTextInput(client.Context, input.KeyCode) bool
+	}); ok {
+		return filter.PrepareTextInput(ctx, code)
+	}
+	return false
+}
+
+func (m *Manager) PrepareKeyInput(ctx client.Context, code input.KeyCode, mods gpucontext.Modifiers) {
+	if preparer, ok := m.mode.(interface {
+		PrepareKeyInput(client.Context, input.KeyCode, gpucontext.Modifiers)
+	}); ok {
+		preparer.PrepareKeyInput(ctx, code, mods)
+	}
 }
 
 func (m *Manager) Update() error {
@@ -56,8 +89,7 @@ func (m *Manager) Update() error {
 		return err
 	}
 	if next != nil {
-		m.mode = next
-		m.mode.Enter(m.ctx)
+		m.enter(next)
 	}
 	return nil
 }

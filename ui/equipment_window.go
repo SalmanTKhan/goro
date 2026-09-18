@@ -35,7 +35,7 @@ const (
 type EquipmentWindow struct {
 	Window
 	snapshot      string
-	itemInfo      *ItemInfoWindow
+	itemInfo      *ItemWindows
 	cart          *CartWindow
 	hasCart       bool
 	hasPeco       bool
@@ -112,7 +112,7 @@ func (w *EquipmentWindow) Toggle(ctx Context) {
 	w.Publish(ctx)
 }
 
-func (w *EquipmentWindow) Update(ctx Context, itemInfo *ItemInfoWindow, cart *CartWindow, assets AssetProvider) bool {
+func (w *EquipmentWindow) Update(ctx Context, itemInfo *ItemWindows, cart *CartWindow, assets AssetProvider) bool {
 	w.EnsureWindow(equipmentWindowWidth, equipmentWindowHeight)
 	w.configureControllerNavigation()
 	if !w.IsOpen() {
@@ -145,7 +145,7 @@ func (w *EquipmentWindow) Update(ctx Context, itemInfo *ItemInfoWindow, cart *Ca
 	return consumed
 }
 
-func (w *EquipmentWindow) Rebind(ctx Context, itemInfo *ItemInfoWindow, cart *CartWindow, assets AssetProvider) {
+func (w *EquipmentWindow) Rebind(ctx Context, itemInfo *ItemWindows, cart *CartWindow, assets AssetProvider) {
 	w.EnsureWindow(equipmentWindowWidth, equipmentWindowHeight)
 	if !w.IsOpen() {
 		return
@@ -162,7 +162,7 @@ func (w *EquipmentWindow) Rebind(ctx Context, itemInfo *ItemInfoWindow, cart *Ca
 	w.Publish(ctx)
 }
 
-func (w *EquipmentWindow) widgetTree(ctx Context, itemInfo *ItemInfoWindow, cart *CartWindow) widget.Widget {
+func (w *EquipmentWindow) widgetTree(ctx Context, itemInfo *ItemWindows, cart *CartWindow) widget.Widget {
 	return Win(
 		Title("Equipment"),
 		CloseButton(true),
@@ -210,7 +210,7 @@ func (w *EquipmentWindow) widgetTree(ctx Context, itemInfo *ItemInfoWindow, cart
 	)
 }
 
-func (w *EquipmentWindow) footerWidgets(ctx Context, itemInfo *ItemInfoWindow, cart *CartWindow) []widget.Widget {
+func (w *EquipmentWindow) footerWidgets(ctx Context, itemInfo *ItemWindows, cart *CartWindow) []widget.Widget {
 	children := []widget.Widget{
 		primitives.Box(
 			rotheme.Checkbox(
@@ -247,7 +247,7 @@ func (w *EquipmentWindow) footerWidgets(ctx Context, itemInfo *ItemInfoWindow, c
 	return children
 }
 
-func (w *EquipmentWindow) slotWidget(ctx Context, itemInfo *ItemInfoWindow, slot equipmentSlotDef, width int) widget.Widget {
+func (w *EquipmentWindow) slotWidget(ctx Context, itemInfo *ItemWindows, slot equipmentSlotDef, width int) widget.Widget {
 	if !equipmentSlotVisible(ctx.Session, slot) {
 		return primitives.Box().
 			Width(float32(width)).

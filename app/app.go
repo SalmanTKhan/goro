@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gogpu/gpucontext"
 	gameaudio "github.com/kivutar/goro/audio"
 	"github.com/kivutar/goro/capture"
 	"github.com/kivutar/goro/client"
@@ -67,23 +68,26 @@ func New(cfg config.Config) (*Game, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resource manager: %w", err)
 	}
+if !cfg.Headless {
 	loadClientUIFont(resource)
-	server := cfg.MobileSession.Server.Normalized()
-	packetDate := cfg.Packet.ClientDate
-	if cfg.MobileSession.Mode == config.SessionModeOnline && server.ClientDate != 0 {
-		packetDate = server.ClientDate
-	}
-	if cfg.MobileSession.Mode == config.SessionModeOnline && server.Host != "" {
-		// A mobile build may not ship clientinfo.xml. Inject the explicitly
-		// selected server while retaining the existing resource-driven desktop
-		// discovery path when no mobile server is configured.
-		resource.ClientInfo.Connections = []res.Connection{{
-			Display: server.Name, Address: server.Host, Port: server.AuthPort,
-			// The version field is the client date written into CA_LOGIN. The
-			// packet profile is a local selection for packet builders and is not
-			// the value expected by the account server in this field.
-			Version: server.ClientDate,
-		}}
+}
+server := cfg.MobileSession.Server.Normalized()
+packetDate := cfg.Packet.ClientDate
+if cfg.MobileSession.Mode == config.SessionModeOnline && server.ClientDate != 0 {
+	packetDate = server.ClientDate
+}
+if cfg.MobileSession.Mode == config.SessionModeOnline && server.Host != "" {
+	// A mobile build may not ship clientinfo.xml. Inject the explicitly
+	// selected server while retaining the existing resource-driven desktop
+	// discovery path when no mobile server is configured.
+	resource.ClientInfo.Connections = []res.Connection{{
+		Display: server.Name, Address: server.Host, Port: server.AuthPort,
+		// The version field is the client date written into CA_LOGIN. The
+		// packet profile is a local selection for packet builders and is not
+		// the value expected by the account server in this field.
+		Version: server.ClientDate,
+	}}
+}
 	}
 
 	g := &Game{
@@ -102,6 +106,8 @@ func New(cfg config.Config) (*Game, error) {
 		screenW:    cfg.Window.Width,
 		screenH:    cfg.Window.Height,
 	}
+	g.session.KeepLoginID = cfg.Login.KeepID
+	g.session.SavedUsername = cfg.Login.SavedUsername
 	g.session.NoShift = cfg.Gameplay.NoShift
 	g.session.NoCtrl = cfg.Gameplay.NoCtrl
 	g.session.LessEffects = cfg.Gameplay.LessEffects
@@ -233,14 +239,23 @@ func (g *Game) Update() error {
 }
 
 func (g *Game) Draw(screen *render.Frame) {
+	if g.cfg.Headless {
+		return
+	}
 	g.modes.Draw(screen)
 }
 
 func (g *Game) DrawOverlay(screen *render.Frame) {
+	if g.cfg.Headless {
+		return
+	}
 	g.modes.DrawOverlay(screen)
 }
 
 func (g *Game) DrawUIOverlay(screen *render.Frame) {
+	if g.cfg.Headless {
+		return
+	}
 	g.modes.DrawUIOverlay(screen)
 }
 
@@ -403,349 +418,20 @@ func (g *Game) MobileHUDModel() mobileui.MobileHUDModel {
 	return model
 }
 
-func mobileLootDistance(playerX, playerY, itemX, itemY int) int {
-	dx, dy := playerX-itemX, playerY-itemY
-	if dx < 0 {
-		dx = -dx
-	}
-	if dy < 0 {
-		dy = -dy
-	}
-	if dx > dy {
-		return dx
-	}
-	return dy
-}
-
-// MobileMapModel projects the current map raster and the offline authority's
-// real warp declarations. The map screen never owns map changes; it only
-// supplies the existing movement command after the player confirms a warp.
-func (g *Game) MobileMapModel() mobileui.MobileMapModel {
-	if g == nil {
-		return mobileui.MobileMapModel{}
-	}
-	hud := g.MobileHUDModel()
-	source := mobileui.MapSource{
-		MapName: hud.Minimap.MapName,
-		PlayerX: hud.Minimap.PlayerX,
-		PlayerY: hud.Minimap.PlayerY,
-		Raster:  hud.Minimap.Raster,
-		Markers: hud.Minimap.Markers,
-	}
-	if g.offline != nil {
-		for _, warp := range g.offline.Warps() {
-			source.Warps = append(source.Warps, mobileui.MobileMapWarpModel{
-				ID: warp.ID, Name: warp.Name, X: warp.X, Y: warp.Y, Width: warp.Width, Height: warp.Height,
-				DestinationMap: warp.Map, DestinationX: warp.DestX, DestinationY: warp.DestY,
-			})
-		}
-	}
-	return mobileui.ProjectMap(source)
-}
-
-func (g *Game) MobileInventoryModel() mobileui.MobileInventoryModel {
-	if g == nil {
-		return mobileui.MobileInventoryModel{}
-	}
-	return mobileui.ProjectInventory(g.session, g.resource)
-}
-
-// DrawMobileInventoryItemIcon reuses the production item icon/sprite lookup
-// for the renderer-owned Android presentation surface.
-func (g *Game) DrawMobileInventoryItemIcon(screen *render.Frame, item mobileui.InventoryItemModel, x, y, size int) {
-	if g == nil || g.modes == nil {
-		return
-	}
-	g.modes.DrawMobileInventoryItemIcon(screen, item.ItemID, item.Identified, x, y, size)
-}
-
-func (g *Game) DrawMobileSkillIcon(screen *render.Frame, skill mobileui.MobileSkillModel, x, y, size int) {
-	if g == nil || g.modes == nil {
-		return
-	}
-	g.modes.DrawMobileSkillIcon(screen, skill.SkillID, x, y, size)
-}
-
-// DrawMobileProfilePreview renders a draft appearance through the production
-// humanoid sprite path while keeping draft state outside the renderer.
-func (g *Game) DrawMobileProfilePreview(screen *render.Frame, profile mobileui.MobileProfileModel, x, y, width, height int) {
-	if g == nil || g.modes == nil {
-		return
-	}
-	character := session.Character{Name: profile.Name, Job: 0, Hair: int16(profile.HairStyle), HairColor: uint8(profile.HairColor)}
-	g.modes.DrawMobileProfilePreview(screen, character, profile.Sex, x, y, width, height)
-}
-
-// MobileProfilePreviewImage bakes the profile's appearance into an image for
-// the desktop character windows, which take their preview as image data.
-func (g *Game) MobileProfilePreviewImage(profile mobileui.MobileProfileModel, width, height int) image.Image {
-	if g == nil || g.modes == nil {
-		return nil
-	}
-	character := session.Character{Name: profile.Name, Job: 0, Hair: int16(profile.HairStyle), HairColor: uint8(profile.HairColor)}
-	return g.modes.MobileProfilePreviewImage(character, profile.Sex, width, height)
-}
-
-func (g *Game) DrawMobileEquipmentPreview(screen *render.Frame, x, y, width, height int) {
-	if g == nil || g.modes == nil {
-		return
-	}
-	g.modes.DrawMobileEquipmentPreview(screen, x, y, width, height)
-}
-
-func (g *Game) MobileCharacterModel() mobileui.MobileCharacterModel {
-	if g == nil {
-		return mobileui.MobileCharacterModel{}
-	}
-	return mobileui.ProjectCharacter(g.session)
-}
-
-func (g *Game) MobileSkillsModel() mobileui.MobileSkillsModel {
-	if g == nil {
-		return mobileui.MobileSkillsModel{}
-	}
-	return mobileui.ProjectSkills(g.session)
-}
-
-func (g *Game) MobileShopModel(npcID uint32) mobileui.MobileShopModel {
-	if g == nil || g.modes == nil {
-		return mobileui.MobileShopModel{}
-	}
-	if g.offline != nil {
-		return mobileui.ProjectShopWithMetadata(g.session, g.offline.Shops(), npcID, g.resource)
-	}
-	return g.modes.MobileShopModel(g.modeContext())
-}
-
-func (g *Game) MobileStorageModel() mobileui.MobileStorageModel {
-	if g == nil {
-		return mobileui.MobileStorageModel{}
-	}
-	return mobileui.ProjectStorage(g.session, g.resource)
-}
-
-// MobileSocialModel projects the authoritative online Friends/Party state.
-// Offline mode exposes the same shape but keeps all network mutations
-// disabled until an OnlineSession exists.
-func (g *Game) MobileSocialModel() mobileui.MobileSocialModel {
-	if g == nil {
-		return mobileui.MobileSocialModel{}
-	}
-	return mobileui.ProjectSocial(g.session, g.network != nil)
-}
-
-// MobileTradeModel projects the transient online exchange. Offline mode is
-// intentionally read-only and does not invent local trade authority.
-func (g *Game) MobileTradeModel() mobileui.MobileTradeModel {
-	if g == nil || g.modes == nil {
-		return mobileui.MobileTradeModel{}
-	}
-	model := g.modes.MobileTradeModel()
-	if g.network == nil {
-		model.OnlineSession = false
-		model.Open = false
-		model.PendingRequest = nil
-		model.Notice = "Trade is available in an online session."
-	}
-	return model
-}
-
-// MobileVendingModel projects the current online player-shop request. The
-// offline host intentionally exposes a closed model with an explicit notice.
-func (g *Game) MobileVendingModel() mobileui.MobileVendingModel {
-	if g == nil || g.modes == nil {
-		return mobileui.MobileVendingModel{}
-	}
-	model := g.modes.MobileVendingModel()
-	if g.network == nil {
-		model = mobileui.ProjectVending(false, false, 0, "", 0, nil, "Vending is available in an online session.")
-	}
-	return model
-}
-
-// MobileProfileModel exposes the local offline identity without leaking the
-// save representation into the mobile presentation layer.
-func (g *Game) MobileProfileModel() mobileui.MobileProfileModel {
-	if g == nil || g.offline == nil {
-		return mobileui.MobileProfileModel{Notice: "Profiles are available in offline mode."}
-	}
-	profile, ok := g.offline.ProfileSnapshot(g.session)
-	if !ok {
-		return mobileui.MobileProfileModel{Available: true, Editable: true}
-	}
-	return mobileui.ProjectOfflineProfile(profile, true, true, "")
-}
-
-// MobileChatModel exposes the current transcript without moving chat
-// authority into the mobile layer. Sending remains an existing network
-// command; offline mode is intentionally read-only until an offline chat
-// authority exists.
-func (g *Game) MobileChatModel() mobileui.MobileChatModel {
-	if g == nil {
-		return mobileui.MobileChatModel{}
-	}
-	model := g.modes.MobileChatModel()
-	model.CanSend = g.network != nil
-	if model.Channel == "" {
-		model.Channel = "WORLD"
-	}
-	if g.offline != nil {
-		model.Notice = "Chat is unavailable in offline mode."
-		if len(model.Messages) == 0 {
-			model.Messages = []mobileui.MobileChatMessage{{Sender: "SYSTEM", Text: "Offline mode is active. Chat becomes available in an online session."}}
-		}
-	}
-	return model
-}
-
-func (g *Game) Offline() *session.OfflineSession { return g.offline }
-
-// Online reports whether this game retains a network authority. A failed
-// connection does not turn the game into an offline session.
-func (g *Game) Online() bool {
-	return g != nil && g.offline == nil && g.network != nil
-}
-
-func (g *Game) NetworkStatus() string {
-	if g == nil || g.network == nil {
-		return "offline"
-	}
-	return g.network.Status()
-}
-
-// MobileServerName exposes only the selected server label to the mobile
-// presentation. Credentials and endpoint details remain inside config and
-// the network/login authority.
-func (g *Game) MobileServerName() string {
-	if g == nil {
-		return ""
-	}
-	return g.cfg.MobileSession.Server.Name
-}
-
-// Disconnect closes the online authority without constructing an offline
-// session. Mobile mode changes use this before replacing the shared Game so
-// the old network goroutines cannot outlive the selected authority.
-func (g *Game) Disconnect() {
-	if g == nil || g.network == nil {
-		return
-	}
-	_ = g.network.SendQuitGameAndClose()
-	if g.session != nil {
-		g.session.Playing = false
+func (g *Game) HandleKeyPress(code input.KeyCode) {
+	if g.modes != nil {
+		g.modes.HandleKeyPress(g.modeContext(), code)
 	}
 }
 
-func (g *Game) SessionPlaying() bool {
-	return g != nil && g.session != nil && g.session.Playing
+func (g *Game) PrepareTextInput(code input.KeyCode) bool {
+	return g.modes != nil && g.modes.PrepareTextInput(g.modeContext(), code)
 }
 
-func (g *Game) LoginStatus() string {
-	if g == nil || g.modes == nil {
-		return "starting"
+func (g *Game) PrepareKeyInput(code input.KeyCode, mods gpucontext.Modifiers) {
+	if g.modes != nil {
+		g.modes.PrepareKeyInput(g.modeContext(), code, mods)
 	}
-	return g.modes.LoginStatus()
-}
-
-func (g *Game) MobileLoginModel() mobileui.MobileOnlineLoginModel {
-	if g == nil || g.modes == nil {
-		return mobileui.MobileOnlineLoginModel{}
-	}
-	return g.modes.MobileLoginModel(g.modeContext())
-}
-
-func (g *Game) MobileDialogModel() mobileui.MobileDialogModel {
-	if g == nil || g.modes == nil {
-		return mobileui.MobileDialogModel{}
-	}
-	return g.modes.MobileDialogModel()
-}
-
-// AudioEnabled reports whether this game was built with an active audio
-// backend and configuration. The Android host uses it for startup
-// diagnostics; playback remains owned by the existing audio package.
-func (g *Game) AudioEnabled() bool {
-	return g != nil && g.audio != nil && g.audio.Enabled()
-}
-
-// PauseAudio stops active BGM/SFX when Android releases its surface.
-func (g *Game) PauseAudio() {
-	if g != nil && g.audio != nil {
-		g.audio.Stop()
-	}
-}
-
-// ResumeAudio restarts the current map BGM after Android recreates its
-// surface. Map and sound selection remain in the normal game/audio layers.
-func (g *Game) ResumeAudio() {
-	if g == nil || g.audio == nil || g.world == nil || !g.audio.Enabled() {
-		return
-	}
-	if _, err := g.audio.PlayMap(g.world.MapName); err != nil {
-		glog.Warnf("audio resume failed map=%s: %v", g.world.MapName, err)
-	}
-}
-
-func (g *Game) RenderMetrics() game.RenderMetrics {
-	if g == nil || g.modes == nil {
-		return game.RenderMetrics{}
-	}
-	return g.modes.RenderMetrics()
-}
-
-func (g *Game) LoadOfflineState(path string) error {
-	if g == nil || g.offline == nil {
-		return fmt.Errorf("offline mode is not active")
-	}
-	if err := g.offline.Load(path, g.session); err != nil {
-		return err
-	}
-	g.world.MapName = g.offline.MapName
-	g.session.Zone.MapName = g.offline.MapName
-	g.world.SetPlayerPosition(g.session.PlayerX, g.session.PlayerY, g.session.PlayerDir)
-	return nil
-}
-
-func mobileMinimapRaster(gnd *res.GND) mobileui.MinimapRaster {
-	if gnd == nil || gnd.Width <= 0 || gnd.Height <= 0 || len(gnd.Cells) < gnd.Width*gnd.Height {
-		return mobileui.MinimapRaster{}
-	}
-	cells := make([]uint8, gnd.Width*gnd.Height)
-	for y := 0; y < gnd.Height; y++ {
-		for x := 0; x < gnd.Width; x++ {
-			cell, ok := gnd.Cell(x, y)
-			if !ok {
-				continue
-			}
-			index := x + y*gnd.Width
-			switch {
-			case cell.Top >= 0:
-				cells[index] = 1
-			case cell.Front >= 0 || cell.Right >= 0:
-				cells[index] = 2
-			}
-		}
-	}
-	return mobileui.MinimapRaster{Width: gnd.Width, Height: gnd.Height, Cells: cells}
-}
-
-func (g *Game) SaveOfflineState(path string) error {
-	if g == nil || g.offline == nil {
-		return fmt.Errorf("offline mode is not active")
-	}
-	g.session.PlayerX, g.session.PlayerY, g.session.PlayerDir = g.world.Player.X, g.world.Player.Y, g.world.Player.Dir
-	return g.offline.Save(path, g.session)
-}
-
-func inputTargetHUD(offline *session.OfflineSession) mobileui.TargetHUDModel {
-	if offline == nil || offline.TargetID == 0 {
-		return mobileui.TargetHUDModel{}
-	}
-	relation := mobileui.TargetHostile
-	if offline.TargetNPC {
-		relation = mobileui.TargetNPC
-	}
-	return mobileui.TargetHUDModel{Visible: true, ID: offline.TargetID, Name: offline.TargetName, HP: offline.TargetHP, MaxHP: offline.TargetMaxHP, Relation: relation}
 }
 
 func (g *Game) SetQuitFunc(quit func()) {

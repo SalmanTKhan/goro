@@ -63,22 +63,23 @@ var inventoryBagTabs = []struct {
 
 type InventoryBagWindow struct {
 	Window
-	tab            int
-	scrollY        state.Signal[float32]
-	snapshot       string
-	itemInfo       *ItemInfoWindow
-	lastClickItem  uint16
-	lastClickAt    time.Time
-	dragItem       session.InventoryItem
-	dragActive     bool
-	dragFrom       time.Time
-	amountPrompt   amountPrompt
-	pendingCard    uint16
-	tooltip        tooltipState
-	icons          map[inventoryBagIconKey]image.Image
-	iconMiss       map[inventoryBagIconKey]struct{}
+	tab           int
+	scrollY       state.Signal[float32]
+	snapshot      string
+	itemInfo      *ItemWindows
+	lastClickItem uint16
+	lastClickAt   time.Time
+	dragItem      session.InventoryItem
+	dragActive    bool
+	dragFrom      time.Time
+	amountPrompt  amountPrompt
+	pendingCard   uint16
+	tooltip       tooltipState
+	icons         map[inventoryBagIconKey]image.Image
+	iconMiss      map[inventoryBagIconKey]struct{}
 	controllerGrid *inventoryGridWidget
 	controllerTabs []*tabWidget
+
 }
 
 type inventoryBagIconKey struct {
@@ -105,7 +106,7 @@ func (w *InventoryBagWindow) Toggle(ctx Context) {
 	w.Publish(ctx)
 }
 
-func (w *InventoryBagWindow) Update(ctx Context, shortcuts *ShortcutBar, storage *StorageWindow, cart *CartWindow, trade *TradeWindow, equipment *EquipmentWindow, itemInfo *ItemInfoWindow, dropTargets ...InventoryDropTarget) bool {
+func (w *InventoryBagWindow) Update(ctx Context, shortcuts *ShortcutBar, storage *StorageWindow, cart *CartWindow, trade *TradeWindow, equipment *EquipmentWindow, itemInfo *ItemWindows, dropTargets ...InventoryDropTarget) bool {
 	w.EnsureWindow(inventoryBagWidth, inventoryBagHeight)
 	w.configureControllerNavigation()
 	if !w.IsOpen() || ctx.Input == nil {
@@ -234,7 +235,7 @@ func (w *InventoryBagWindow) DrawDragGhost(screen *render.Frame, ctx Context, as
 	assets.DrawInventoryItemIcon(screen, ctx.Resources, w.dragItem, ctx.Input.MouseX-inventoryIconSize/2, ctx.Input.MouseY-inventoryIconSize/2)
 }
 
-func (w *InventoryBagWindow) Rebind(ctx Context, itemInfo *ItemInfoWindow) {
+func (w *InventoryBagWindow) Rebind(ctx Context, itemInfo *ItemWindows) {
 	w.EnsureWindow(inventoryBagWidth, inventoryBagHeight)
 	if !w.IsOpen() {
 		return
@@ -246,7 +247,7 @@ func (w *InventoryBagWindow) PendingCardIndex() uint16 {
 	return w.pendingCard
 }
 
-func (w *InventoryBagWindow) widgetTree(ctx Context, itemInfo *ItemInfoWindow) widget.Widget {
+func (w *InventoryBagWindow) widgetTree(ctx Context, itemInfo *ItemWindows) widget.Widget {
 	items := w.tabItems(ctx.Session)
 	grid := newInventoryGridWidget(inventoryGridConfig{
 		items:     items,
@@ -385,7 +386,8 @@ func (w *InventoryBagWindow) handleControllerAction(action input.UIAction) bool 
 	}
 }
 
-func (w *InventoryBagWindow) refresh(ctx Context, itemInfo *ItemInfoWindow) {
+func (w *InventoryBagWindow) refresh(ctx Context, itemInfo *ItemWindows) {
+
 	w.hideTooltip()
 	w.ClampScroll(ctx.Session)
 	w.snapshot = w.inventorySnapshot(ctx.Session)

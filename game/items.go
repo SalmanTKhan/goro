@@ -3,6 +3,7 @@ package game
 import (
 	"fmt"
 	"github.com/kivutar/goro/client"
+	"github.com/kivutar/goro/db"
 	"github.com/kivutar/goro/glog"
 	"image"
 	"image/color"
@@ -144,6 +145,9 @@ func itemPickupAckAddsItem(ack network.ItemPickupAck) bool {
 }
 
 func (m *WorldMode) requestPickup(ctx client.Context, item worldstate.FloorItem, source string) bool {
+	if ctx.PlayerHasEffectState(db.EffectStateHide) {
+		return false
+	}
 	if playerIsDead(ctx) {
 		return false
 	}
@@ -286,6 +290,9 @@ func pendingPickupReadyAt(player worldstate.Actor, now time.Time) time.Time {
 }
 
 func (m *WorldMode) sendPickupRequest(ctx client.Context, item worldstate.FloorItem, source string) bool {
+	if ctx.PlayerHasEffectState(db.EffectStateHide) {
+		return false
+	}
 	if err := ctx.Network.SendItemPickup(item.ID); err == nil {
 		m.facePlayerTowardItem(ctx, item)
 		m.setWalkCooldown(walkRequestCooldown)
@@ -353,9 +360,13 @@ func pickupApproachCell(ctx client.Context, item worldstate.FloorItem) (int, int
 }
 
 func (m *WorldMode) drawGroundItems(screen *render.Frame, ctx client.Context, projection sceneProjection, now time.Time) {
-	for _, entry := range m.collectSceneItemEntries(screen, ctx, projection, now) {
-		m.drawGroundItemShadowEntry3D(screen, projection, entry)
-		m.drawGroundItemEntry3D(screen, projection, entry)
+	items := m.collectSceneItemEntries(screen, ctx, projection, now)
+	for _, entry := range sortedSceneDrawEntries(nil, items) {
+		if entry.itemShadowIndex >= 0 {
+			m.drawGroundItemShadowEntry3D(screen, projection, items[entry.itemShadowIndex])
+		} else {
+			m.drawGroundItemEntry3D(screen, projection, items[entry.itemIndex])
+		}
 	}
 }
 

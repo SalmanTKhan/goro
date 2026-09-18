@@ -60,6 +60,12 @@ func (m *WorldMode) openTradeRequest(ctx client.Context, request network.TradeRe
 		if m.respondTradeRequest(ctx, true) {
 			m.ui.tradeWindow.Open(ctx, name)
 		}
+		if err := ctx.Network.SendTradeAck(true); err != nil {
+			glog.Warnf("trade request accept failed name=%q: %v", request.Name, err)
+			return
+		}
+		m.pendingTradeName = name
+
 	}, func() {
 		m.respondTradeRequest(ctx, false)
 	})

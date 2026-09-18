@@ -51,6 +51,9 @@ func (m *WorldMode) handleNetworkPackets(ctx client.Context, now time.Time) (Mod
 // result stops the current frame when the packet changes modes or starts a map
 // transition.
 func (m *WorldMode) handleNetworkPacket(ctx client.Context, pkt network.Packet, now time.Time) (Mode, bool) {
+	if m.handleQuestPacket(ctx, pkt) {
+		return nil, false
+	}
 	if m.handleMailPacket(ctx, pkt, now) {
 		return nil, false
 	}
@@ -167,8 +170,9 @@ func (m *WorldMode) handleNetworkPacket(ctx client.Context, pkt network.Packet, 
 	if ack, ok, err := network.ParseWhisperAck(pkt); err != nil {
 		glog.Errorf("parse whisper ack 0x%04X: %v", pkt.ID, err)
 	} else if ok {
+		// This reply has no recipient and may arrive out of send order across
+		// map servers. Keep it in the console, without guessing a conversation.
 		addWhisperAck(&m.ui.console, ctx.Resources, ack)
-		m.addWhisperWindowAck(ctx, ack)
 		return nil, false
 	}
 	if ack, ok, err := network.ParseWhisperIgnoreAck(pkt); err != nil {
@@ -433,7 +437,9 @@ func (m *WorldMode) handleNetworkPacket(ctx client.Context, pkt network.Packet, 
 	} else if ok {
 		glog.Debugf("item identify ack index=%d success=%v", identifyAck.Index, identifyAck.Success)
 		applyItemIdentifyAck(ctx, identifyAck)
-		m.ui.identifyWindow.ApplyAck(ctx, identifyAck)
+		if !identifyAck.Success {
+			glog.Warnf("identify failed index=%d", identifyAck.Index)
+		}
 		m.ui.inventoryBag.ClampScroll(ctx.Session)
 		return nil, false
 	}
@@ -561,7 +567,7 @@ func (m *WorldMode) handleNetworkPacket(ctx client.Context, pkt network.Packet, 
 		glog.Debugf("cart item list items=%d", len(cartItems))
 		applyCartItemList(ctx, cartItems)
 		m.ui.cartWindow.ClampScroll(ctx.Session)
-		m.ui.cartWindow.Refresh(ctx, &m.ui.itemInfoWindow)
+		m.ui.cartWindow.Refresh(ctx, &m.ui.itemWindows)
 		return nil, false
 	}
 	if storageAmount, ok, err := network.ParseStorageAmount(pkt); err != nil {
@@ -579,7 +585,7 @@ func (m *WorldMode) handleNetworkPacket(ctx client.Context, pkt network.Packet, 
 		glog.Debugf("cart amount count=%d/%d weight=%d/%d", cartAmount.Amount, cartAmount.MaxAmount, cartAmount.Weight, cartAmount.MaxWeight)
 		applyCartAmount(ctx, cartAmount)
 		m.ui.cartWindow.ClampScroll(ctx.Session)
-		m.ui.cartWindow.Refresh(ctx, &m.ui.itemInfoWindow)
+		m.ui.cartWindow.Refresh(ctx, &m.ui.itemWindows)
 		return nil, false
 	}
 	if friends, ok, err := network.ParseFriendsList(pkt); err != nil {
@@ -965,7 +971,7 @@ func (m *WorldMode) handleNetworkPacket(ctx client.Context, pkt network.Packet, 
 		glog.Debugf("cart item added index=%d item=%d amount=%d", cartItem.Index, cartItem.ItemID, cartItem.Amount)
 		applyCartItemAdded(ctx, cartItem)
 		m.ui.cartWindow.ClampScroll(ctx.Session)
-		m.ui.cartWindow.Refresh(ctx, &m.ui.itemInfoWindow)
+		m.ui.cartWindow.Refresh(ctx, &m.ui.itemWindows)
 		m.ui.inventoryBag.ClampScroll(ctx.Session)
 		return nil, false
 	}
@@ -990,7 +996,7 @@ func (m *WorldMode) handleNetworkPacket(ctx client.Context, pkt network.Packet, 
 	} else if ok {
 		applyStorageItemRemoved(ctx, storageItem)
 		m.ui.storageWindow.ClampScroll(ctx.Session)
-		m.ui.storageWindow.Refresh(ctx, &m.ui.itemInfoWindow)
+		m.ui.storageWindow.Refresh(ctx, &m.ui.itemWindows)
 		return nil, false
 	}
 	if cartItem, ok, err := network.ParseCartItemRemoved(pkt); err != nil {
@@ -998,7 +1004,7 @@ func (m *WorldMode) handleNetworkPacket(ctx client.Context, pkt network.Packet, 
 	} else if ok {
 		applyCartItemRemoved(ctx, cartItem)
 		m.ui.cartWindow.ClampScroll(ctx.Session)
-		m.ui.cartWindow.Refresh(ctx, &m.ui.itemInfoWindow)
+		m.ui.cartWindow.Refresh(ctx, &m.ui.itemWindows)
 		return nil, false
 	}
 	if vendOpen, ok, err := network.ParseVendingOpenRequest(pkt); err != nil {

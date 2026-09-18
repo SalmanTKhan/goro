@@ -312,6 +312,7 @@ func TestLuaBotCanStartLongWalkFromPhysicalKey(t *testing.T) {
 	}
 	defer bot.close()
 
+	botKeyPressForTest(t, bot, keyW)
 	if err := bot.inputFrame(true); err != nil {
 		t.Fatal(err)
 	}
@@ -443,6 +444,7 @@ func TestLuaBotHeldSpaceLootsNearbyItemsInDistanceOrder(t *testing.T) {
 	}
 	defer bot.close()
 
+	botKeyPressForTest(t, bot, space)
 	if err := bot.inputFrame(true); err != nil {
 		t.Fatal(err)
 	}
@@ -499,6 +501,7 @@ func TestLuaBotHeldFightsNearbyEnemiesInDistanceOrder(t *testing.T) {
 	}
 	defer bot.close()
 
+	botKeyPressForTest(t, bot, keyF)
 	if err := bot.inputFrame(true); err != nil {
 		t.Fatal(err)
 	}
@@ -696,6 +699,7 @@ func TestWASDLuaCyclesAndUsesPendingSkillTargets(t *testing.T) {
 	defer bot.close()
 
 	inputState.SetKeyCode(tab, true)
+	botKeyPressForTest(t, bot, tab)
 	if err := bot.inputFrame(true); err != nil {
 		t.Fatal(err)
 	}
@@ -708,7 +712,25 @@ func TestWASDLuaCyclesAndUsesPendingSkillTargets(t *testing.T) {
 
 	inputState.SetKeyCode(tab, false)
 	inputState.EndFrame()
+	for _, name := range []string{"ControlLeft", "ControlRight", "AltLeft", "AltRight", "MetaLeft", "MetaRight"} {
+		modifier, ok := input.KeyCodeFromName(name)
+		if !ok {
+			t.Fatalf("%s was not recognized", name)
+		}
+		inputState.SetKeyCode(modifier, true)
+		for _, code := range []input.KeyCode{tab, enter} {
+			inputState.SetKeyCode(code, true)
+			botKeyPressForTest(t, bot, code)
+			if !inputState.KeyCodeJustPressed(code) || mode.scriptHighlight.id != 301 || mode.pendingSkill.skill.ID != skill.ID {
+				t.Fatalf("%s+%s changed skill targeting or consumed the shortcut", name, input.KeyCodeName(code))
+			}
+			inputState.SetKeyCode(code, false)
+			inputState.EndFrame()
+		}
+		inputState.SetKeyCode(modifier, false)
+	}
 	inputState.SetKeyCode(tab, true)
+	botKeyPressForTest(t, bot, tab)
 	if err := bot.inputFrame(true); err != nil {
 		t.Fatal(err)
 	}
@@ -720,6 +742,7 @@ func TestWASDLuaCyclesAndUsesPendingSkillTargets(t *testing.T) {
 	inputState.EndFrame()
 	inputState.SetKeyCode(shift, true)
 	inputState.SetKeyCode(tab, true)
+	botKeyPressForTest(t, bot, tab)
 	if err := bot.inputFrame(true); err != nil {
 		t.Fatal(err)
 	}
@@ -731,6 +754,7 @@ func TestWASDLuaCyclesAndUsesPendingSkillTargets(t *testing.T) {
 	inputState.SetKeyCode(shift, false)
 	inputState.EndFrame()
 	inputState.SetKeyCode(enter, true)
+	botKeyPressForTest(t, bot, enter)
 	if err := bot.inputFrame(true); err != nil {
 		t.Fatal(err)
 	}
@@ -775,6 +799,7 @@ func TestWASDLuaCyclesFriendlySkillTargets(t *testing.T) {
 	pressTab := func() {
 		t.Helper()
 		inputState.SetKeyCode(tab, true)
+		botKeyPressForTest(t, bot, tab)
 		if err := bot.inputFrame(true); err != nil {
 			t.Fatal(err)
 		}
@@ -813,6 +838,7 @@ func TestWASDLuaLeavesUnrelatedTargetingKeysAlone(t *testing.T) {
 	defer bot.close()
 
 	inputState.SetKeyCode(enter, true)
+	botKeyPressForTest(t, bot, enter)
 	if err := bot.inputFrame(true); err != nil {
 		t.Fatal(err)
 	}
@@ -826,6 +852,7 @@ func TestWASDLuaLeavesUnrelatedTargetingKeysAlone(t *testing.T) {
 		skill: session.Skill{ID: 18, Type: skillTargetPlace, Level: 1, Range: 9},
 	}
 	inputState.SetKeyCode(tab, true)
+	botKeyPressForTest(t, bot, tab)
 	if err := bot.inputFrame(true); err != nil {
 		t.Fatal(err)
 	}
@@ -954,6 +981,47 @@ end
 	if mode.pendingSkill.targetID != 300 || mode.pendingSkill.skill.ID != db.SkillACDouble {
 		t.Fatalf("pending skill = %+v, want AC_DOUBLE target 300", mode.pendingSkill)
 	}
+}
+
+func TestLuaBotCanUseSelfSkill(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bot.lua")
+	if err := os.WriteFile(path, []byte(`
+function tick()
+	assert(goro.skill(goro.player().id, "AL_ANGELUS", 3))
+	assert(goro.skill(goro.player().id, "AL_ANGELUS"))
+	assert(not goro.skill(300, "AL_ANGELUS"))
+	assert(not goro.skill(goro.player().id, "AL_ANGELUS", 6))
+end
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	networkClient, serverConn := newBotTestConnection(t, 20080910)
+	sess := session.New()
+	sess.AccountID = 2000000
+	sess.CharID = 150000
+	sess.Skills.List = []session.Skill{{ID: db.SkillALAngelus, Type: skillTargetSelf, Level: 5, Name: "Angelus"}}
+	world := worldstate.New()
+	world.Player = worldstate.Actor{ID: sess.AccountID, X: 10, Y: 20}
+	ctx := client.Context{Session: sess, Network: networkClient, World: world}
+	mode := &WorldMode{}
+	bot, err := newLuaBot(ctx, mode, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bot.close()
+	if err := bot.tick(); err != nil {
+		t.Fatal(err)
+	}
+	want := network.BuildUseSkillToIDPacketForClientDate(db.SkillALAngelus, 3, sess.AccountID, 20080910)
+	want = append(want, network.BuildUseSkillToIDPacketForClientDate(db.SkillALAngelus, 5, sess.AccountID, 20080910)...)
+	readBotTestPackets(t, serverConn, want)
+
+	sess.Dead = true
+	if mode.scriptSkill(ctx, sess.AccountID, lua.LString("AL_ANGELUS"), -1) {
+		t.Fatal("scriptSkill allowed a dead player to cast Angelus")
+	}
+	assertNoBotTestPacket(t, serverConn, func() error { return nil })
 }
 
 func TestLuaBotCanHealNearbyPlayer(t *testing.T) {

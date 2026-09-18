@@ -22,6 +22,8 @@ type LoginWindow struct {
 	Username string
 	Password string
 	Offline  bool
+	KeepID   bool
+
 
 	Window
 	layout    loginWindowLayout
@@ -29,21 +31,28 @@ type LoginWindow struct {
 	user      *textfield.Widget
 	password  *textfield.Widget
 	offline   *checkbox.Widget
+	keep      *checkbox.Widget
+
 }
 
 const (
-	loginWindowFormTopPad    = 18
-	loginWindowFieldGap      = 11
-	loginWindowFieldLeft     = 92
-	loginWindowFieldRightPad = 20
-	loginWindowFieldH        = 22
+	loginWindowFormTopPad   = 18
+	loginWindowFormLeftPad  = 16
+	loginWindowFormRightPad = 8
+	loginWindowFieldGap     = 11
+	loginWindowLabelW       = 56
+	loginWindowLabelGap     = 12
+	loginWindowFieldH       = 22
+	loginWindowKeepW        = 64
+	loginWindowKeepGap      = 12
 )
 
-func NewLoginWindow(ctx client.Context, username, password string, callbacks LoginWindowCallbacks) *LoginWindow {
+func NewLoginWindow(ctx client.Context, username, password string, keepID bool, callbacks LoginWindowCallbacks) *LoginWindow {
 	layout := loginWindowLayoutForContext(ctx)
 	w := &LoginWindow{
 		Username:  username,
 		Password:  password,
+		KeepID:    keepID,
 		layout:    layout,
 		callbacks: callbacks,
 	}
@@ -85,6 +94,23 @@ func (w *LoginWindow) rebuild() {
 	}
 }
 
+func (w *LoginWindow) restoreFocus(ctx client.Context) {
+	if wc := windowWidgetContext(ctx); wc != nil {
+		// Register the initial/rebuilt field with the focus manager too, so
+		// Tab advances from it instead of selecting it a second time.
+		if w.user.IsFocused() {
+			wc.RequestFocus(w.user)
+		} else if w.password.IsFocused() {
+			wc.RequestFocus(w.password)
+		} else if w.keep.IsFocused() {
+			wc.RequestFocus(w.keep)
+		}
+	}
+}
+
+	}
+}
+
 func (w *LoginWindow) widgetTree() widget.Widget {
 	submit := func() {
 		if w.Offline && w.callbacks.OnOfflineSubmit != nil {
@@ -96,6 +122,7 @@ func (w *LoginWindow) widgetTree() widget.Widget {
 		}
 	}
 	userFocused, passwordFocused := w.fieldFocus()
+	keepFocused := w.keep != nil && w.keep.IsFocused()
 	username, passwordValue := w.fieldValues()
 	user := rotheme.TextField(
 		username,
@@ -117,53 +144,73 @@ func (w *LoginWindow) widgetTree() widget.Widget {
 	password.SetFocused(passwordFocused)
 	w.user = user
 	w.password = password
-	offline := rotheme.Checkbox(
-		checkbox.Checked(w.Offline),
-		checkbox.LabelOpt("Offline"),
-		checkbox.OnToggle(func(enabled bool) { w.Offline = enabled }),
-	)
-	w.offline = offline
-	labelW := float32(loginWindowFieldLeft - 36)
-	fieldW := float32(w.layout.W - loginWindowFieldLeft - loginWindowFieldRightPad)
+		w.keep = rotheme.Checkbox(
+			checkbox.LabelOpt("Keep"),
+			checkbox.Checked(w.KeepID),
+			checkbox.OnToggle(func(keep bool) { w.KeepID = keep }),
+		)
+		w.keep.SetFocused(keepFocused)
+		offline := rotheme.Checkbox(
+			checkbox.Checked(w.Offline),
+			checkbox.LabelOpt("Offline"),
+			checkbox.OnToggle(func(enabled bool) { w.Offline = enabled }),
+		)
+		w.offline = offline
+		labelW := float32(loginWindowLabelW)
+		fieldW := float32(w.layout.W - loginWindowFormLeftPad - loginWindowFormRightPad - loginWindowLabelW - loginWindowLabelGap - loginWindowKeepW - loginWindowKeepGap)
+		fieldH := float32(loginWindowFieldH)
+		return Win(
+
 	fieldH := float32(loginWindowFieldH)
 	return Win(
 		Title("Login"),
 		CloseButton(false),
 		Size(float32(w.layout.W), float32(w.layout.H)),
 		Content(
-			primitives.Box(
-				primitives.HBox(
-					primitives.Box(
-						rotheme.Text("Account").
-							LineHeight(fieldH/rotheme.Default.Typography.TextSize),
+			primitives.HBox(
+				// Keep the text fields together so Tab still moves from Account to Password.
+				primitives.Box(
+					primitives.HBox(
+						primitives.Box(
+							rotheme.Label("Account").
+								Align(widget.TextAlignRight).
+								LineHeight(fieldH/rotheme.Default.Typography.TextSize),
+							).
+							CrossAlign(primitives.CrossAxisStretch).
+							Width(labelW).
+							Height(fieldH),
+						primitives.Box(user).
+							Width(fieldW).
+							Height(fieldH),
 					).
-						Width(labelW).
-						Height(fieldH),
-					primitives.Box(user).
-						Width(fieldW).
-						Height(fieldH),
-				).
-					CrossAlign(primitives.CrossAxisCenter).
-					Gap(12),
-				primitives.Box(offline).Height(fieldH),
-				primitives.HBox(
-					primitives.Box(
-						rotheme.Text("Password").
-							LineHeight(fieldH/rotheme.Default.Typography.TextSize),
+						CrossAlign(primitives.CrossAxisCenter).
+						Gap(loginWindowLabelGap),
+					primitives.HBox(
+						primitives.Box(
+							rotheme.Label("Password").
+								Align(widget.TextAlignRight).
+								LineHeight(fieldH/rotheme.Default.Typography.TextSize),
+							).
+							CrossAlign(primitives.CrossAxisStretch).
+							Width(labelW).
+							Height(fieldH),
+						primitives.Box(password).
+							Width(fieldW).
+							Height(fieldH),
 					).
-						Width(labelW).
-						Height(fieldH),
-					primitives.Box(password).
-						Width(fieldW).
-						Height(fieldH),
-				).
-					CrossAlign(primitives.CrossAxisCenter).
-					Gap(12),
+						CrossAlign(primitives.CrossAxisCenter).
+						Gap(loginWindowLabelGap),
+				).Gap(loginWindowFieldGap),
+				primitives.Box(w.keep).Width(loginWindowKeepW).Height(fieldH),
+			),
+			primitives.Box(offline).Height(fieldH),
+
 			).
 				PaddingTop(loginWindowFormTopPad).
-				PaddingLeft(24).
-				PaddingRight(loginWindowFieldRightPad).
-				Gap(loginWindowFieldGap),
+				PaddingLeft(loginWindowFormLeftPad).
+				PaddingRight(loginWindowFormRightPad).
+				CrossAlign(primitives.CrossAxisStart).
+				Gap(loginWindowKeepGap),
 		),
 		Footer(
 			primitives.Expanded(primitives.Box()),
@@ -180,11 +227,11 @@ func (w *LoginWindow) widgetTree() widget.Widget {
 
 func (w *LoginWindow) fieldFocus() (bool, bool) {
 	if w.user == nil && w.password == nil {
-		return true, false
+		return w.Username == "", w.Username != ""
 	}
 	userFocused := w.user != nil && w.user.IsFocused()
 	passwordFocused := w.password != nil && w.password.IsFocused()
-	if !userFocused && !passwordFocused {
+	if !userFocused && !passwordFocused && (w.keep == nil || !w.keep.IsFocused()) {
 		return true, false
 	}
 	return userFocused, passwordFocused

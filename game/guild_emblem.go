@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/kivutar/goro/client"
-	"github.com/kivutar/goro/db"
 	"github.com/kivutar/goro/glog"
 	"github.com/kivutar/goro/network"
 	"github.com/kivutar/goro/render"
@@ -35,7 +34,7 @@ func (m *WorldMode) requestActorGuildEmblem(ctx client.Context, guildID, version
 }
 
 func (m *WorldMode) requestGuildEmblem(ctx client.Context, guildID, version uint32, force bool) {
-	if guildID == 0 || version == 0 || ctx.Network == nil {
+	if ctx.Config.Headless || guildID == 0 || version == 0 || ctx.Network == nil {
 		return
 	}
 	if m.guildEmblems == nil {
@@ -57,6 +56,9 @@ func (m *WorldMode) requestGuildEmblem(ctx client.Context, guildID, version uint
 }
 
 func (m *WorldMode) applyGuildEmblemImage(ctx client.Context, packet network.GuildEmblemImage) {
+	if ctx.Config.Headless {
+		return
+	}
 	decodedImage, err := decodeGuildEmblemImage(packet.Data)
 	if err != nil {
 		glog.Warnf("decode guild emblem failed guild=%d version=%d: %v", packet.GuildID, packet.EmblemVersion, err)
@@ -227,8 +229,7 @@ func (m *WorldMode) drawSiegeGuildEmblems(screen *render.Frame, ctx client.Conte
 }
 
 func siegeActorShowsGuildEmblem(entry sceneActorDrawEntry) bool {
-	const hiddenEffectMask = db.EffectStateHide | db.EffectStateCloak | db.EffectStateInvisible | db.EffectStateChasewalk
-	return !entry.hidden && entry.actor.EffectState&hiddenEffectMask == 0 && entry.actor.GuildID != 0 && entry.actor.EmblemVersion != 0
+	return !actorHasStealth(entry.actor) && entry.actor.GuildID != 0 && entry.actor.EmblemVersion != 0
 }
 
 func (m *WorldMode) siegeGuildEmblemAnchor(ctx client.Context, projection sceneProjection, now time.Time, entry sceneActorDrawEntry) (float64, float64) {

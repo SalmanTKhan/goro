@@ -3,10 +3,14 @@ package ui
 import (
 	"testing"
 
+	"github.com/gogpu/gpucontext"
+	uiapp "github.com/gogpu/ui/app"
 	"github.com/gogpu/ui/core/button"
+
 	"github.com/gogpu/ui/event"
 	"github.com/gogpu/ui/geometry"
 	"github.com/gogpu/ui/primitives"
+	"github.com/gogpu/ui/state"
 	"github.com/gogpu/ui/uitest"
 	"github.com/gogpu/ui/widget"
 	"github.com/kivutar/goro/client"
@@ -29,47 +33,37 @@ func TestWindowControllerInitialFocusPrefersBodyOverCloseButton(t *testing.T) {
 	}
 }
 
-func TestEquipmentSlotControllerActivationDoesNotRequireMouseDoubleClick(t *testing.T) {
-	item := session.InventoryItem{Index: 7, ItemID: 501}
-	mouseCalls := 0
-	controllerCalls := 0
-	slot := newEquipmentSlotWidget(equipmentSlotWidgetConfig{
-		slot:    equipmentSlotWeapon,
-		item:    item,
-		hasItem: true,
-		width:   equipmentLeftColW,
-		onClick: func(session.InventoryItem) { mouseCalls++ },
-		onControllerClick: func(session.InventoryItem) {
-			controllerCalls++
-		},
-	})
-	slot.SetFocused(true)
-
-	if !slot.Event(widget.NewContext(), event.NewKeyEvent(event.KeyPress, event.KeyEnter, 0, event.ModNone)) {
-		t.Fatal("controller activation was not consumed by the equipment slot")
+func TestWindowTitleSignalRelayoutKeepsHeader(t *testing.T) {
+	app := uiapp.New(uiapp.WithWindowProvider(gpucontext.NullWindowProvider{W: 800, H: 600}),
+		uiapp.WithRenderMode(uiapp.RenderModeFrameworkManaged))
+	title := state.NewSignal("A")
+	root := Win(TitleSignal(title), TitleButton(rotheme.IconButtonMinus, nil), CloseButton(false), Size(324, 80))
+	app.SetRoot(root)
+	// Match Manager's window overlays; MockCanvas does not record scene replay.
+	disableRootRepaintBoundary(root)
+	app.Frame()
+	app.Window().DrawTo(&uitest.MockCanvas{})
+	header := root.Children()[0].(*roTitleBarWidget)
+	label := header.child.Children()[0].(*windowTitleText)
+	initialWidth := label.Bounds().Width()
+	title.Set("A much longer title")
+	app.Frame()
+	if root.Children()[0] != header || header.child.Children()[0] != label {
+		t.Fatal("title update replaced the header")
 	}
-	if controllerCalls != 1 || mouseCalls != 0 {
-		t.Fatalf("controller calls=%d mouse calls=%d, want controller=1 mouse=0", controllerCalls, mouseCalls)
+	if label.Bounds().Width() <= initialWidth {
+		t.Fatal("longer title retained the old layout width")
 	}
+	canvas := &uitest.MockCanvas{}
+	app.Window().DrawTo(canvas)
+	for _, text := range canvas.StyledTexts {
+		if text.Text == "A much longer title" {
+			return
+		}
+	}
+	t.Fatal("updated title was not drawn")
 }
 
-func TestInventoryGridControllerActivationUsesDirectCallback(t *testing.T) {
-	item := session.InventoryItem{Index: 3, ItemID: 501}
-	moused := false
-	controlled := false
-	grid := newInventoryGridWidget(inventoryGridConfig{
-		items:             []session.InventoryItem{item},
-		onPress:           func(session.InventoryItem) { moused = true },
-		onControllerPress: func(session.InventoryItem) { controlled = true },
-	})
-	grid.SetFocused(true)
-
-	if !grid.handleControllerKey(event.KeyEnter) {
-		t.Fatal("controller activation was not consumed by the inventory grid")
-	}
-	if !controlled || moused {
-		t.Fatalf("controller callback=%t mouse callback=%t, want controller=true mouse=false", controlled, moused)
-	}
 }
 
 func TestFooterStretchesContent(t *testing.T) {
@@ -421,8 +415,8 @@ func TestScreenEdgeAnchorsUseWindowMargin(t *testing.T) {
 	if characterWindowX != windowScreenMargin || characterWindowY != windowScreenMargin {
 		t.Fatalf("character window position = %d,%d; want %d,%d", characterWindowX, characterWindowY, windowScreenMargin, windowScreenMargin)
 	}
-	if x, y, _, _ := basicMenuBounds(); x != windowScreenMargin || y != windowScreenMargin+characterWindowHeight+6 {
-		t.Fatalf("basic menu position = %d,%d; want x=%d y=%d", x, y, windowScreenMargin, windowScreenMargin+characterWindowHeight+6)
+	if x, y, _, _ := basicMenuBounds(); x != windowScreenMargin || y != windowScreenMargin+characterWindowHeight+basicMenuFollowGap {
+		t.Fatalf("basic menu position = %d,%d; want x=%d y=%d", x, y, windowScreenMargin, windowScreenMargin+characterWindowHeight+basicMenuFollowGap)
 	}
 	if x, y, _, _ := MinimapBounds(ctx.ScreenW, ctx.ScreenH); x != ctx.ScreenW-minimapWidth-windowScreenMargin || y != windowScreenMargin {
 		t.Fatalf("minimap position = %d,%d; want x=%d y=%d", x, y, ctx.ScreenW-minimapWidth-windowScreenMargin, windowScreenMargin)

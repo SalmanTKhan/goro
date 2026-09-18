@@ -152,6 +152,9 @@ func (m *LoginMode) showCharacterCreateWindow(ctx client.Context) {
 }
 
 func (m *LoginMode) updateCharacterCreateWindow(ctx client.Context) {
+	if ctx.Config.Headless {
+		return
+	}
 	opts := gameui.CharacterCreateWindowOptions{
 		Name:    m.create.name,
 		Stats:   m.create.stats,

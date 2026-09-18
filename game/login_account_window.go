@@ -2,6 +2,7 @@ package game
 
 import (
 	"github.com/kivutar/goro/client"
+	"github.com/kivutar/goro/glog"
 	"github.com/kivutar/goro/res"
 	gameui "github.com/kivutar/goro/ui"
 )
@@ -47,11 +48,16 @@ func (m *LoginMode) updateAccountWindow(ctx client.Context) {
 }
 
 func (m *LoginMode) updateLoginWindow(ctx client.Context) {
+	if ctx.Config.Headless {
+		return
+	}
 	if m.loginWindow == nil {
-		m.loginWindow = gameui.NewLoginWindow(ctx, m.username, m.password, gameui.LoginWindowCallbacks{
+		m.loginWindow = gameui.NewLoginWindow(ctx, m.username, m.password, m.keepID, gameui.LoginWindowCallbacks{
 			OnSubmit: func() {
 				m.username = m.loginWindow.Username
 				m.password = m.loginWindow.Password
+				m.keepID = m.loginWindow.KeepID
+				m.saveLoginID(ctx)
 				if conn, ok := m.selectedLoginConnection(ctx); ok {
 					m.connectAndMaybeLogin(ctx, conn, true)
 				}
@@ -74,6 +80,19 @@ func (m *LoginMode) updateLoginWindow(ctx client.Context) {
 	m.username = m.loginWindow.Username
 	m.password = m.loginWindow.Password
 	m.loginWindow.Publish(ctx)
+}
+
+func (m *LoginMode) saveLoginID(ctx client.Context) {
+	if ctx.Session != nil {
+		ctx.Session.KeepLoginID = m.keepID
+		ctx.Session.SavedUsername = ""
+		if m.keepID {
+			ctx.Session.SavedUsername = m.username
+		}
+	}
+	if _, err := ctx.Config.SaveLoginID(m.username, m.keepID); err != nil {
+		glog.Warnf("login ID save failed: %v", err)
+	}
 }
 
 func (m *LoginMode) selectedLoginConnection(ctx client.Context) (res.Connection, bool) {

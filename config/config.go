@@ -16,6 +16,10 @@ import (
 )
 
 type Config struct {
+	// ConfigPath is the absolute file path selected by LoadConfig for saving settings.
+	ConfigPath    string
+	Headless      bool
+
 	DataDir       string
 	Window        WindowConfig
 	Packet        PacketConfig
@@ -27,12 +31,15 @@ type Config struct {
 	MobileSession MobileSessionConfig
 	Fog           FogConfig
 	Gameplay      GameplayConfig
+	Script        ScriptConfig
+	Log           glog.LogConfig
+	ChatShortcuts ChatShortcuts
 	Controller    input.ControllerSettings
 	UI            input.UISettings
 	Mobile        input.MobileControls
 	MobileDisplay input.MobileDisplaySettings
-	Script        ScriptConfig
-	Log           LogConfig
+	// other fields remain
+
 }
 
 type WindowConfig struct {
@@ -48,10 +55,12 @@ type PacketConfig struct {
 }
 
 type LoginConfig struct {
-	Username  string
-	Password  string
-	AutoLogin bool
-	CharSlot  int
+	Username      string
+	Password      string
+	AutoLogin     bool
+	CharSlot      int
+	KeepID        bool
+	SavedUsername string
 }
 
 type AudioConfig struct {
@@ -108,22 +117,39 @@ type ScriptConfig struct {
 type LogConfig = glog.LogConfig
 
 func LoadConfig(args []string) (Config, error) {
+	// Parse once to find explicitly supplied paths, using the same flag rules as
+	// the final pass. Defer validation until file settings have also been loaded.
+	cli := defaultConfig()
+	if err := parseCLI(&cli, args); err != nil {
+		return Config{}, err
+	}
 	cfg := defaultConfig()
 
-	if path, err := UserConfigPath(); err == nil {
-		if err := applyINIFile(&cfg, path, false); err != nil {
+	// Defaults < ./goro.ini < --data-dir/goro.ini < --config < command-line flags.
+	cfg.ConfigPath = "goro.ini"
+	if err := applyINIFile(&cfg, cfg.ConfigPath, false); err != nil {
+		return Config{}, err
+	}
+	if cli.DataDir != "" {
+		cfg.ConfigPath = filepath.Join(cli.DataDir, "goro.ini")
+		if err := applyINIFile(&cfg, cfg.ConfigPath, false); err != nil {
 			return Config{}, err
 		}
 	}
-	configPath, explicitConfig := configPathFromArgs(args)
-	if configPath != "" {
-		if err := applyINIFile(&cfg, configPath, explicitConfig); err != nil {
+	if cli.ConfigPath != "" {
+		cfg.ConfigPath = cli.ConfigPath
+		if err := applyINIFile(&cfg, cfg.ConfigPath, true); err != nil {
 			return Config{}, err
 		}
 	}
 	if err := applyCLI(&cfg, args); err != nil {
 		return Config{}, err
 	}
+	path, err := filepath.Abs(cfg.ConfigPath)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.ConfigPath = path
 	cfg.DataDir = resolveDataDir(cfg.DataDir)
 	return cfg, nil
 }
@@ -143,14 +169,6 @@ type UserSettings struct {
 	Mobile        *input.MobileControls
 	MobileDisplay *input.MobileDisplaySettings
 	Controller    *input.ControllerSettings
-}
-
-func UserConfigPath() (string, error) {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, "goro", "goro.ini"), nil
 }
 
 func UserDataDir() (string, error) {
@@ -239,19 +257,12 @@ func nextTimestampedPath(now time.Time, directory, extension string) (string, er
 	}
 }
 
-func SaveUserSettings(settings UserSettings) (string, error) {
+func (cfg Config) SaveUserSettings(settings UserSettings) (string, error) {
 	if settings.BGMVolume < 0 || settings.BGMVolume > 1 {
 		return "", fmt.Errorf("bgm volume must be between 0 and 1")
 	}
 	if settings.SFXVolume < 0 || settings.SFXVolume > 1 {
 		return "", fmt.Errorf("sfx volume must be between 0 and 1")
-	}
-	path, err := UserConfigPath()
-	if err != nil {
-		return "", err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return "", err
 	}
 	values := map[string]map[string]string{
 		"ui": {
@@ -294,6 +305,40 @@ func SaveUserSettings(settings UserSettings) (string, error) {
 		values["mobile"] = ensureINISection(values["mobile"])
 		values["mobile"]["show_minimap"] = formatINIValueBool(settings.MobileDisplay.ShowMinimap)
 		values["mobile"]["presentation"] = string(settings.MobileDisplay.Presentation)
+	}
+	return cfg.saveConfigValues(values)
+}
+
+// SaveLoginID remembers only the ID, independently of explicit login credentials.
+func (cfg Config) SaveLoginID(username string, keep bool) (string, error) {
+	if !keep {
+		username = ""
+	}
+	if strings.ContainsAny(username, "\r\n\x00") {
+		return "", fmt.Errorf("login ID must be a single line without NUL characters")
+	}
+	return cfg.saveConfigValues(map[string]map[string]string{
+		"login": {
+			"keep_id":        formatINIValueBool(keep),
+			"saved_username": `"` + username + `"`,
+		},
+	})
+}
+
+func (cfg Config) saveConfigValues(values map[string]map[string]string) (string, error) {
+	path := cfg.ConfigPath
+	if path == "" {
+		return "", fmt.Errorf("no config file selected")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", err
+	}
+	existing, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+	// rest of implementation...
+
 	}
 	existing, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
@@ -449,6 +494,7 @@ func ensureINISection(values map[string]string) map[string]string {
 
 func defaultConfig() Config {
 	return Config{
+		ChatShortcuts: defaultChatShortcuts(),
 		Window: WindowConfig{
 			Title:      "goro",
 			Width:      1280,
@@ -491,22 +537,6 @@ func defaultConfig() Config {
 	}
 }
 
-func configPathFromArgs(args []string) (string, bool) {
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "--config" && i+1 < len(args) {
-			return args[i+1], true
-		}
-		if strings.HasPrefix(arg, "--config=") {
-			return strings.TrimPrefix(arg, "--config="), true
-		}
-	}
-	if _, err := os.Stat("goro.ini"); err == nil {
-		return "goro.ini", false
-	}
-	return "", false
-}
-
 func applyINIFile(cfg *Config, path string, explicit bool) error {
 	file, err := os.Open(path)
 	if err != nil {
@@ -523,14 +553,14 @@ func applyINIFile(cfg *Config, path string, explicit bool) error {
 	return nil
 }
 
-func applyCLI(cfg *Config, args []string) error {
+func parseCLI(cfg *Config, args []string) error {
 	fs := flag.NewFlagSet("goro", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 
-	configPath := ""
 	windowed := false
-	fs.StringVar(&configPath, "config", "", "path to goro ini configuration")
-	fs.StringVar(&cfg.DataDir, "data-dir", cfg.DataDir, "Ragnarok data directory")
+	fs.StringVar(&cfg.ConfigPath, "config", cfg.ConfigPath, "path to goro ini configuration (also used to save settings)")
+	fs.BoolVar(&cfg.Headless, "headless", false, "run without a window or audio (implies autologin)")
+	fs.StringVar(&cfg.DataDir, "data-dir", cfg.DataDir, "Ragnarok data directory (loads goro.ini from this directory)")
 	fs.StringVar(&cfg.Window.Title, "title", cfg.Window.Title, "window title")
 	fs.IntVar(&cfg.Window.Width, "width", cfg.Window.Width, "window width")
 	fs.IntVar(&cfg.Window.Height, "height", cfg.Window.Height, "window height")
@@ -579,8 +609,38 @@ func applyCLI(cfg *Config, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	var pathErr error
+	fs.Visit(func(f *flag.Flag) {
+		if (f.Name == "config" || f.Name == "data-dir") && f.Value.String() == "" {
+			pathErr = fmt.Errorf("--%s requires a non-empty path", f.Name)
+		}
+	})
+	if pathErr != nil {
+		return pathErr
+	}
 	if windowed {
 		cfg.Window.Fullscreen = false
+	}
+	return nil
+}
+
+func applyCLI(cfg *Config, args []string) error {
+	if err := parseCLI(cfg, args); err != nil {
+		return err
+	}
+	if cfg.Headless {
+		cfg.Login.AutoLogin = true
+		cfg.Audio.Disabled = true
+		username := cfg.Login.Username
+		if username == "" && cfg.Login.KeepID {
+			username = cfg.Login.SavedUsername
+		}
+		if strings.TrimSpace(username) == "" || cfg.Login.Password == "" {
+			return fmt.Errorf("headless mode requires a login ID and password")
+		}
+		if cfg.Login.CharSlot < 0 {
+			return fmt.Errorf("headless mode requires --char-slot (0 to 8)")
+		}
 	}
 	return validateConfig(cfg)
 }
@@ -614,6 +674,14 @@ func applyINI(cfg *Config, r io.Reader) error {
 }
 
 func applyConfigValue(cfg *Config, section, key, value string) error {
+	if section == "chatshortcuts" {
+		digit, err := strconv.Atoi(key)
+		if err != nil || digit < 0 || digit > 9 {
+			return fmt.Errorf("invalid chat shortcut key %q", key)
+		}
+		cfg.ChatShortcuts[(digit+9)%10] = value
+		return nil
+	}
 	switch section + "." + key {
 	case ".datadir", "data.dir", "data.datadir", "config.datadir", "core.datadir":
 		cfg.DataDir = value
@@ -637,6 +705,10 @@ func applyConfigValue(cfg *Config, section, key, value string) error {
 		return setBool(value, &cfg.Login.AutoLogin)
 	case "login.charslot":
 		return setInt(value, &cfg.Login.CharSlot)
+	case "login.keepid":
+		return setBool(value, &cfg.Login.KeepID)
+	case "login.savedusername":
+		cfg.Login.SavedUsername = value
 	case "audio.bgm":
 		return setBool(value, &cfg.Audio.BGM)
 	case "audio.noaudio":
@@ -827,7 +899,8 @@ func validateConfig(cfg *Config) error {
 }
 
 func upsertINIValues(src string, values map[string]map[string]string) string {
-	sectionOrder := []string{"window", "render", "capture", "ui", "audio", "gameplay", "mobile", "controller"}
+	sectionOrder := []string{"window", "render", "capture", "audio", "gameplay", "login", "chatshortcuts", "ui", "mobile", "controller"}
+
 	seenSections := make(map[string]bool)
 	written := make(map[string]map[string]bool)
 	for section := range values {
@@ -885,7 +958,8 @@ func upsertINIValues(src string, values map[string]map[string]string) string {
 	}
 	flushMissing(currentSection)
 	for _, section := range sectionOrder {
-		if seenSections[section] || values[section] == nil {
+		if _, ok := values[section]; !ok || seenSections[section] {
+
 			continue
 		}
 		if len(out) > 0 && strings.TrimSpace(out[len(out)-1]) != "" {
@@ -898,7 +972,8 @@ func upsertINIValues(src string, values map[string]map[string]string) string {
 }
 
 func sortedINIKeys(values map[string]string) []string {
-	preferred := []string{"fullscreen", "vsync", "fps", "ffmpeg_path", "scale", "bgm", "bgm_volume", "sfx_volume", "no_shift", "no_ctrl", "less_effects", "snap", "itemsnap", "movement", "camera_sensitivity", "zoom_sensitivity", "invert_camera_y", "long_press_ms", "show_target_names", "show_minimap", "presentation", "enabled", "deadzone", "outer_deadzone", "trigger_deadzone", "move_mode", "ui_nav_mode", "cursor_speed", "nav_repeat_delay_ms", "nav_repeat_ms", "rumble", "confirm_button", "cancel_button", "attack_button", "loot_button", "target_previous", "target_next", "reset_camera", "menu_button", "map_button", "left_modifier", "right_modifier"}
+	preferred := []string{"fullscreen", "vsync", "fps", "ffmpeg_path", "scale", "bgm", "bgm_volume", "sfx_volume", "no_shift", "no_ctrl", "less_effects", "snap", "itemsnap", "movement", "camera_sensitivity", "zoom_sensitivity", "invert_camera_y", "long_press_ms", "show_target_names", "show_minimap", "presentation", "enabled", "deadzone", "outer_deadzone", "trigger_deadzone", "move_mode", "ui_nav_mode", "cursor_speed", "nav_repeat_delay_ms", "nav_repeat_ms", "rumble", "confirm_button", "cancel_button", "attack_button", "loot_button", "target_previous", "target_next", "reset_camera", "menu_button", "map_button", "left_modifier", "right_modifier", "keep_id", "saved_username", "1", "2", "3", "4", "5", "6", "7", "8", "9", "0"}
+
 	keys := make([]string, 0, len(values))
 	seen := make(map[string]bool, len(values))
 	for _, key := range preferred {

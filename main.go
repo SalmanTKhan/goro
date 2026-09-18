@@ -3,6 +3,7 @@ package main
 //go:generate go run packaging/windows/generate.go
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -30,7 +31,15 @@ func main() {
 		glog.Fatalf("%v", err)
 	}
 
-	if err := render.Run(game, cfg.Window, cfg.Render, cfg.Capture); err != nil {
+if cfg.Headless {
+	err = render.RunHeadless(context.Background(), game, cfg.Window)
+} else {
+	err = render.Run(game, cfg.Window, cfg.Render, cfg.Capture)
+}
+if err != nil {
+	glog.Fatalf("%v", err)
+}
+
 		glog.Fatalf("%v", err)
 	}
 }
