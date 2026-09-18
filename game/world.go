@@ -668,7 +668,7 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 	}
 	// Status presentation must follow server updates even when a window or
 	// modal consumes input for the rest of the frame.
-	removeExpiredStatusEffects(ctx.Session, now)
+	m.removeExpiredStatusEffects(ctx.Session, now)
 	m.updateMail(ctx, now)
 	progressBlocksActions := m.updateServerProgress(ctx, now)
 	if !ctx.Config.Headless {
