@@ -226,11 +226,11 @@ func TestCharacterWindowExpandingKeepsAttachedMenuOnScreen(t *testing.T) {
 			menu.toggleCollapsed()
 			menu.FollowCharacterWindow(ctx, &character)
 		}
-		character.toggleCompact()
+		character.ToggleCompact()
 		bottomY := ctx.ScreenH - windowScreenMargin - character.height - character.dragBottom
 		character.setPosition(ctx, character.x, bottomY)
 		menu.FollowCharacterWindow(ctx, &character)
-		character.toggleCompact()
+		character.ToggleCompact()
 		menu.FollowCharacterWindow(ctx, &character)
 		if character.y >= bottomY || menu.y+menu.height != ctx.ScreenH-windowScreenMargin {
 			t.Fatalf("menu collapsed=%v: expanded group off screen: character y=%d, menu bottom=%d", collapsed, character.y, menu.y+menu.height)
@@ -246,7 +246,7 @@ func TestCharacterWindowRebindKeepsCompactStateAndOwnsToggle(t *testing.T) {
 	ctx := Context{Input: input.NewState(), UIApp: bridge, UIManager: manager, Session: &session.Session{}, ScreenW: 800, ScreenH: 600}
 	var original CharacterWindow
 	original.Update(ctx)
-	original.toggleCompact()
+	original.ToggleCompact()
 	carried := original
 	carried.Rebind(ctx)
 	app.Frame()
@@ -279,7 +279,7 @@ func TestCharacterWindowToggleSurvivesUpdatesWhilePressed(t *testing.T) {
 			var character CharacterWindow
 			character.Update(ctx)
 			if mode == "compact" {
-				character.toggleCompact()
+				character.ToggleCompact()
 			}
 			app.Frame()
 			app.Window().DrawTo(&uitest.MockCanvas{})

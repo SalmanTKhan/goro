@@ -170,7 +170,7 @@ func testCharacterDragKeepsAttachedBasicMenuOnScreen(t *testing.T, collapsed, co
 	menu.Update(ctx, BasicMenuCallbacks{})
 
 	if compact {
-		character.toggleCompact()
+		character.ToggleCompact()
 	}
 	if collapsed {
 		menu.toggleCollapsed()
