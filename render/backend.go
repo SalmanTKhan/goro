@@ -286,13 +286,6 @@ func (b *uiAppBridge) HandleControllerAction(action input.UIAction) bool {
 			focused = b.focusInitialControllerScope(scope)
 		}
 	}
-	// Give packet-driven modal windows (NPC dialogs, trade prompts, and other
-	// semantic overlays) first refusal. This keeps their action state local and
-	// avoids pretending that a controller Confirm is a physical Enter that can
-	// be interpreted by an unrelated widget.
-	if handler, ok := scope.(interface{ HandleControllerAction(input.UIAction) bool }); ok && handler.HandleControllerAction(action) {
-		return true
-	}
 	if action == input.UIActionCancel {
 		if active, ok := b.uiManager.(interface{ ControllerKeyboardActive() bool }); ok && active.ControllerKeyboardActive() {
 			if closer, ok := b.uiManager.(interface{ CloseControllerKeyboard() }); ok {
@@ -310,6 +303,13 @@ func (b *uiAppBridge) HandleControllerAction(action input.UIAction) bool {
 				}
 			}
 		}
+	}
+	// Give packet-driven modal windows (NPC dialogs, trade prompts, and other
+	// semantic overlays) first refusal after text-entry handling. A focused
+	// text field must open the controller keyboard on explicit Confirm instead
+	// of submitting/consuming the field's enclosing window action.
+	if handler, ok := scope.(interface{ HandleControllerAction(input.UIAction) bool }); ok && handler.HandleControllerAction(action) {
+		return true
 	}
 	if action == input.UIActionContext || action == input.UIActionSecondary {
 		// These face-button roles have no framework key equivalent. A concrete
@@ -1554,17 +1554,20 @@ func (r *runner) pollController() {
 	}
 	pointerOverride := r.controllerPointerMode || r.cursorLeftDown
 	navigationMode := settings.UINavMode
-	if controllerUI && !pointerOverride {
+	if controllerUI && pointerOverride {
+		navigationMode = input.ControllerUINavCursor
+	} else if controllerUI {
 		navigationMode = input.ControllerUINavFocus
 	}
-	pointerActive := settings.UINavMode == input.ControllerUINavCursor && controllerUI && pointerOverride
+	pointerActive := controllerUI && pointerOverride
 	pointerOverUI := pointerActive && r.pointerOverUI()
 	if !pointerActive {
 		pointerX, pointerY = 0, 0
 	}
+	uiFocusActive := focusNavigation || controllerUI
 	route := RouteController(actions, r.controllerFrame, ControllerRouteContext{
 		NavigationMode: navigationMode, PointerActive: pointerActive, PointerOverUI: pointerOverUI,
-		FocusNavigationActive: focusNavigation, ModalUIActive: r.controllerKeyboardActive(),
+		FocusNavigationActive: uiFocusActive, ModalUIActive: r.controllerKeyboardActive(),
 		TextInputActive: r.controllerKeyboardActive(), RebindActive: r.controllerRebindActive(),
 	}, pointerX, pointerY)
 	r.controllerDispatch = route

@@ -855,7 +855,7 @@ func (m *LoginMode) submitSelectedCharacter(ctx client.Context) {
 	character, ok := characterBySlot(ctx.Session.Characters, m.selectedSlot)
 	if !ok {
 		m.status = "empty character slot"
-		return false
+		return
 	}
 	if ctx.Network == nil {
 		if m.offline {
@@ -868,20 +868,19 @@ func (m *LoginMode) submitSelectedCharacter(ctx client.Context) {
 			m.status = fmt.Sprintf("selected character %s", character.Name)
 			m.playConfirmSFX(ctx)
 			m.startWorldFade(time.Now())
-			return true
+			return
 		}
 		m.status = "select character failed: not connected"
-		return false
+		return
 	}
 	if err := ctx.Network.SendSelectCharacter(character.Slot); err != nil {
 		m.status = "select character failed: " + err.Error()
-		return false
+		return
 	}
 	m.charSelectPending = true
 	m.playConfirmSFX(ctx)
 	ctx.Session.SelectCharacter(character)
 	m.status = fmt.Sprintf("selected character %s", character.Name)
-	return true
 }
 
 func (m *LoginMode) drawBackground(ctx client.Context, screen *render.Frame) {

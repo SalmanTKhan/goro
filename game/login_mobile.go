@@ -82,7 +82,8 @@ func (m *LoginMode) ApplyPlayerCommand(ctx client.Context, command input.PlayerC
 			return false
 		}
 		m.selectedSlot = clampCharacterSlot(int(command.Slot), m.maxSlots)
-		return m.submitSelectedCharacter(ctx)
+		m.submitSelectedCharacter(ctx)
+		return false
 	case input.CommandOnlineCreateCharacter:
 		if m.phase != loginPhaseCharacter || ctx.Session == nil || ctx.Network == nil {
 			return false

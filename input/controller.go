@@ -660,7 +660,7 @@ func DefaultControllerSettings() ControllerSettings {
 		OuterDeadzone:     0.95,
 		CameraSensitivity: 1,
 		MoveMode:          ControllerMoveCharacter,
-		UINavMode:         ControllerUINavCursor,
+		UINavMode:         ControllerUINavFocus,
 		CursorSpeed:       1400,
 		TriggerDeadzone:   0.10,
 		NavRepeatDelayMS:  350,
@@ -686,7 +686,7 @@ func ApplyControllerScheme(settings ControllerSettings, scheme ControllerScheme)
 		settings.CameraSensitivity = 1
 	default:
 		settings.MoveMode = ControllerMoveCharacter
-		settings.UINavMode = ControllerUINavCursor
+		settings.UINavMode = ControllerUINavFocus
 		settings.CameraSensitivity = 1
 	}
 	return settings.Normalized()

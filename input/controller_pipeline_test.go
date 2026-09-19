@@ -89,7 +89,7 @@ func TestResolveControllerActionsAnalogVectorAndExclusiveShortcut(t *testing.T) 
 func TestControllerSchemesApplyDeterministicPresets(t *testing.T) {
 	base := DefaultControllerSettings()
 	classic := ApplyControllerScheme(base, ControllerSchemeClassic)
-	if classic.MoveMode != ControllerMoveCharacter || classic.UINavMode != ControllerUINavCursor {
+	if classic.MoveMode != ControllerMoveCharacter || classic.UINavMode != ControllerUINavFocus {
 		t.Fatalf("classic scheme = %#v", classic)
 	}
 	twin := ApplyControllerScheme(base, ControllerSchemeTwinStick)
