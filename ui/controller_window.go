@@ -161,7 +161,8 @@ func (w *ControllerWindow) contentTree(ctx client.Context) widget.Widget {
 }
 
 func (w *ControllerWindow) bindingRow(ctx client.Context, action input.Action, settings input.ControllerSettings) widget.Widget {
-	snapshot := controllerSnapshot(ctx)\n\tlabel := fmt.Sprintf("%s: %s", action.Name(), controllerPromptButtonLabel(snapshot.Kind, settings.Bindings.Get(action)))
+	snapshot := controllerSnapshot(ctx)
+	label := fmt.Sprintf("%s: %s", action.Name(), controllerPromptButtonLabel(snapshot.Kind, settings.Bindings.Get(action)))
 	if w.captureOpen && w.capturing == action {
 		label = action.Name() + ": press a button…"
 	}
