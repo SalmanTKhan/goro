@@ -295,6 +295,12 @@ const (
 	ActionLeftModifier
 	ActionRightModifier
 	ActionResetCamera
+	ActionGameMenu
+	ActionSit
+	ActionTargetSelf
+	ActionTargetAlly
+	ActionTargetEnemy
+	ActionTargetCompanion
 )
 
 // BindableActions lists every action whose physical button is configurable, in
@@ -312,6 +318,8 @@ func BindableActions() []Action {
 		ActionMenu,
 		ActionMap,
 		ActionResetCamera,
+		ActionGameMenu,
+		ActionSit,
 		ActionLeftModifier,
 		ActionRightModifier,
 	}
@@ -342,6 +350,18 @@ func (a Action) Name() string {
 		return "RightModifier"
 	case ActionResetCamera:
 		return "ResetCamera"
+	case ActionGameMenu:
+		return "GameMenu"
+	case ActionSit:
+		return "Sit"
+	case ActionTargetSelf:
+		return "TargetSelf"
+	case ActionTargetAlly:
+		return "TargetAlly"
+	case ActionTargetEnemy:
+		return "TargetEnemy"
+	case ActionTargetCompanion:
+		return "TargetCompanion"
 	default:
 		if a >= ActionShortcut1 && a <= ActionShortcut8 {
 			return "Shortcut" + string(rune('1'+int(a-ActionShortcut1)))
@@ -432,6 +452,8 @@ type ControllerBindings struct {
 	Menu           ControllerButton
 	Map            ControllerButton
 	ResetCamera    ControllerButton
+	GameMenu       ControllerButton
+	Sit            ControllerButton
 	LeftModifier   ControllerButton
 	RightModifier  ControllerButton
 }
@@ -447,6 +469,8 @@ func DefaultControllerBindings() ControllerBindings {
 		Menu:           ControllerButtonStart,
 		Map:            ControllerButtonTouchpad,
 		ResetCamera:    ControllerButtonRightStick,
+		GameMenu:       ControllerButtonBack,
+		Sit:            ControllerButtonLeftStick,
 		LeftModifier:   ControllerButtonLeftTrigger,
 		RightModifier:  ControllerButtonRightTrigger,
 	}
@@ -474,6 +498,10 @@ func (b ControllerBindings) Get(action Action) ControllerButton {
 		return b.Map
 	case ActionResetCamera:
 		return b.ResetCamera
+	case ActionGameMenu:
+		return b.GameMenu
+	case ActionSit:
+		return b.Sit
 	case ActionLeftModifier:
 		return b.LeftModifier
 	case ActionRightModifier:

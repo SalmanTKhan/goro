@@ -65,6 +65,10 @@ func (g *Game) SetControllerActions(actions input.ActionState) {
 	}
 }
 
+func (g *Game) ControllerTargetingActive() bool {
+	return g != nil && g.modes != nil && g.modes.ControllerTargetingActive()
+}
+
 func (g *Game) SetMobileSettingsChanged(callback func(input.MobileSettings)) {
 	if g != nil {
 		g.mobileSettingsChanged = callback

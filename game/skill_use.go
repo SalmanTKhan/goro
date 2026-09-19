@@ -280,7 +280,12 @@ func (c skillController) Use(ctx client.Context, skill session.Skill, source str
 		return c.SendToID(ctx, skill, target, source)
 	}
 	if skill.Range > 0 || isGroundTargetSkill(skill) {
-		c.mode.pendingSkill = pendingSkillTarget{skill: skill, maxLevel: skillUseMaxLevel(skill), started: time.Now()}
+		c.mode.pendingSkill = pendingSkillTarget{
+			skill:    skill,
+			ground:   isGroundTargetSkill(skill),
+			maxLevel: skillUseMaxLevel(skill),
+			started:  time.Now(),
+		}
 		glog.Debugf("%s skill target pending skill=%d level=%d range=%d", source, skill.ID, skill.Level, skill.Range)
 		return nil
 	}
@@ -518,7 +523,7 @@ func (c skillController) UseGround(ctx client.Context, skill session.Skill, x, y
 	if ctx.Network == nil {
 		return fmt.Errorf("not connected")
 	}
-	pending := pendingSkillTarget{skill: skill, ground: true, x: x, y: y, text: text}
+	pending := pendingSkillTarget{skill: skill, ground: true, groundTargetSet: true, x: x, y: y, text: text}
 	if c.chaseSkillTargetIfNeeded(ctx, pending, x, y, source) {
 		return nil
 	}
@@ -530,7 +535,10 @@ func (c skillController) UseGround(ctx client.Context, skill session.Skill, x, y
 }
 
 func (pending pendingSkillTarget) hasTarget() bool {
-	return pending.ground || pending.targetID != 0
+	// A shortcut-selected ground skill enters selection mode with no cell yet.
+	// Explicit ground casts (mouse/text or a controller-confirmed reticle) mark
+	// the cell as set, including the valid world coordinate (0,0).
+	return (pending.ground && pending.groundTargetSet) || pending.targetID != 0
 }
 
 func (pending pendingSkillTarget) targetCell(ctx client.Context, now time.Time) (int, int, bool) {
@@ -640,6 +648,9 @@ func (c skillController) ContinuePendingTarget(ctx client.Context, source string
 
 func (c skillController) UpdatePendingTarget(ctx client.Context, source string, logOutOfRange bool) {
 	pending := c.mode.pendingSkill
+	if pending.controllerTargeting {
+		return
+	}
 	if pending.skill.ID == 0 || !pending.hasTarget() || ctx.World == nil {
 		return
 	}
@@ -688,6 +699,9 @@ func (c skillController) UpdatePendingTarget(ctx client.Context, source string, 
 
 func (c skillController) ProcessPendingTarget(ctx client.Context) {
 	pending := c.mode.pendingSkill
+	if pending.controllerTargeting {
+		return
+	}
 	if pending.skill.ID == 0 || !pending.hasTarget() || pending.readyAt.IsZero() || ctx.World == nil {
 		return
 	}

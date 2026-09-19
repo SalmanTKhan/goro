@@ -12,6 +12,10 @@ type ControllerRouteContext struct {
 	ModalUIActive         bool
 	TextInputActive       bool
 	RebindActive          bool
+	// SkillTargetingActive gives the world the right-stick vector even when a
+	// UI pointer was previously active. While a skill is pending the stick is
+	// an explicit world-targeting control, never a mouse/cursor control.
+	SkillTargetingActive bool
 }
 
 type ControllerGameplayIntent struct {
@@ -56,10 +60,13 @@ func RouteController(actions input.ActionState, frame input.ControllerFrame, ctx
 	}
 	// The right stick is the virtual pointer while it owns UI hit testing; do
 	// not also interpret that same sample as world camera motion.
-	if ctx.PointerOverUI {
+	if ctx.PointerOverUI && !ctx.SkillTargetingActive {
 		d.Gameplay.CameraX, d.Gameplay.CameraY = 0, 0
 	}
-	focus := ctx.NavigationMode == input.ControllerUINavFocus && ctx.FocusNavigationActive
+	// A pending skill is a world interaction and takes priority over any
+	// passive/focused HUD scope. Confirm, cancel, and LB/RB must reach the
+	// targeting state rather than being translated into menu events.
+	focus := ctx.NavigationMode == input.ControllerUINavFocus && ctx.FocusNavigationActive && !ctx.SkillTargetingActive
 	if focus {
 		d.Gameplay.Move = input.DirectionNone
 		if actions.Move != input.DirectionNone {

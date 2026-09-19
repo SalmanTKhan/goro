@@ -94,6 +94,18 @@ func (m *Manager) Update() error {
 	return nil
 }
 
+// ControllerTargetingActive exposes the active world mode's targeting state
+// to the renderer without coupling the renderer to game mode internals.
+func (m *Manager) ControllerTargetingActive() bool {
+	if m == nil || m.mode == nil {
+		return false
+	}
+	if mode, ok := m.mode.(interface{ ControllerTargetingActive() bool }); ok {
+		return mode.ControllerTargetingActive()
+	}
+	return false
+}
+
 func (m *Manager) Draw(screen *render.Frame) {
 	if m.mode != nil {
 		m.mode.Draw(m.ctx, screen)

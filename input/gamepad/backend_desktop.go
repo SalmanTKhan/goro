@@ -171,14 +171,6 @@ func (b *Backend) drainEvents() error {
 	return nil
 }
 
-func (b *Backend) closeGamepad() {
-	for id, current := range b.devices {
-		current.gamepad.Close()
-		delete(b.devices, id)
-	}
-	b.activeID = 0
-}
-
 // Rumble drives both motors. Magnitudes are in [0, 1].
 func (b *Backend) Rumble(low, high float32, duration time.Duration) error {
 	if b == nil {

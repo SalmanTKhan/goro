@@ -107,6 +107,8 @@ func (m *WorldMode) ApplyPlayerCommand(ctx client.Context, command input.PlayerC
 	case input.CommandResetCamera:
 		m.camera.ResetToDefaultOrientation()
 		return true
+	case input.CommandToggleSit:
+		return m.toggleControllerSit(ctx)
 	case input.CommandCancelAction:
 		m.cancelControllerAction(ctx)
 		if ctx.Offline != nil {

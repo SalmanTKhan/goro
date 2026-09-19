@@ -157,7 +157,7 @@ func (m *WorldMode) requestWalk(ctx client.Context, targetX, targetY int, source
 	if ctx.PlayerHasEffectState(db.EffectStateHide) && learnedSkillLevel(ctx.Session, db.SkillRGTunneldrive) == 0 {
 		return false
 	}
-	if ctx.World == nil || ctx.Network == nil || !walkTargetInBounds(ctx, targetX, targetY) {
+	if ctx.World == nil || (ctx.Network == nil && ctx.Offline == nil) || !walkTargetInBounds(ctx, targetX, targetY) {
 
 		m.setWalkCooldown(walkRequestCooldown)
 		return false

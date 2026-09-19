@@ -83,6 +83,7 @@ const (
 	CommandLootFocused
 	CommandUseShortcut
 	CommandResetCamera
+	CommandToggleSit
 )
 
 // WorldPosition is a presentation-independent world target. Screen-space

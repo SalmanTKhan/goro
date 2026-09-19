@@ -110,6 +110,10 @@ type WorldMode struct {
 	attackFocusID              uint32
 	attackFocusStart           time.Time
 	controllerFocusItemID      uint32
+	controllerSkillTargetID    uint32
+	controllerSkillLane        input.Action
+	controllerGroundCursorX    float32
+	controllerGroundCursorY    float32
 	controllerMoveDir          input.Direction8
 	controllerMoveTargetX      int
 	controllerMoveTargetY      int
@@ -382,17 +386,19 @@ type pickupIntent struct {
 }
 
 type pendingSkillTarget struct {
-	skill       session.Skill
-	maxLevel    int
-	targetID    uint32
-	ground      bool
-	x, y        int
-	text        string
-	expires     time.Time
-	readyAt     time.Time
-	source      string
-	started     time.Time
-	lastChaseAt time.Time
+	skill               session.Skill
+	maxLevel            int
+	targetID            uint32
+	ground              bool
+	groundTargetSet     bool
+	controllerTargeting bool
+	x, y                int
+	text                string
+	expires             time.Time
+	readyAt             time.Time
+	source              string
+	started             time.Time
+	lastChaseAt         time.Time
 }
 
 type actorHighlight struct {
@@ -1684,6 +1690,7 @@ func (m *WorldMode) DrawUIOverlay(ctx client.Context, screen *render.Frame) {
 	}
 	now := time.Now()
 	m.drawShowDigit(screen, ctx, now)
+	m.drawControllerTargetHUD(screen, ctx)
 	m.ui.announcement.Draw(screen, now)
 	m.ui.poptips.Draw(screen, now)
 	m.ui.inventoryBag.DrawTooltip(ctx, screen)

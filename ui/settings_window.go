@@ -356,14 +356,6 @@ func controllerMoveModeLabel(ctx client.Context) string {
 	return "Movement: " + settingsController(ctx).MoveMode.String()
 }
 
-func controllerSchemeLabel(ctx client.Context) string {
-	return "Scheme: " + settingsController(ctx).Scheme.String()
-}
-
-func controllerUINavModeLabel(ctx client.Context) string {
-	return "Menus: " + settingsController(ctx).UINavMode.String()
-}
-
 func (w *SettingsWindow) refresh(ctx client.Context) {
 	w.EnsureWindow(settingsWindowW, settingsWindowH)
 	w.ctx = ctx

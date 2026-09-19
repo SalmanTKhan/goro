@@ -1,6 +1,6 @@
 module github.com/kivutar/goro/android-host
 
-go 1.26.4
+go 1.26.5
 
 require (
 	github.com/gogpu/gpucontext v0.31.3
@@ -12,7 +12,7 @@ require (
 
 require (
 	github.com/Zyko0/go-sdl3 v0.1.1 // indirect
-	github.com/Zyko0/purego-gen v0.0.0-20250727121216-3bcd331a1e0c // indirect
+	github.com/Zyko0/purego-gen v0.0.1 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/charmbracelet/colorprofile v0.2.3-0.20250311203215-f60798e515dc // indirect
 	github.com/charmbracelet/lipgloss v1.1.0 // indirect
@@ -23,7 +23,7 @@ require (
 	github.com/coregx/signals v0.1.1 // indirect
 	github.com/deepteams/webp v1.2.7 // indirect
 	github.com/ebitengine/oto/v3 v3.5.0-alpha.8 // indirect
-	github.com/ebitengine/purego v0.10.1 // indirect
+	github.com/ebitengine/purego v0.10.2 // indirect
 	github.com/go-logfmt/logfmt v0.6.1 // indirect
 	github.com/go-webgpu/goffi v0.6.3 // indirect
 	github.com/go-webgpu/webgpu v0.5.5 // indirect

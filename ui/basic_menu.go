@@ -4,6 +4,7 @@ import (
 	"github.com/gogpu/ui/primitives"
 	"github.com/gogpu/ui/widget"
 	"github.com/kivutar/goro/client"
+	"github.com/kivutar/goro/input"
 	"github.com/kivutar/goro/ui/rotheme"
 )
 
@@ -24,9 +25,10 @@ const (
 
 type BasicMenu struct {
 	Window
-	content   widget.Widget
-	callbacks BasicMenuCallbacks
-	collapsed bool
+	content          widget.Widget
+	callbacks        BasicMenuCallbacks
+	collapsed        bool
+	controllerActive bool
 }
 
 type BasicMenuCallbacks struct {
@@ -58,7 +60,7 @@ var basicMenuButtons = []basicMenuButton{
 
 func (m *BasicMenu) Update(ctx client.Context, callbacks BasicMenuCallbacks) bool {
 	m.callbacks = callbacks
-	m.SetControllerNavigationPassthrough(true)
+	m.SetControllerNavigationPassthrough(!m.controllerActive)
 	m.SetControllerNavigationEntryPoint(true)
 	width, height := basicMenuSize(m.collapsed)
 
@@ -74,6 +76,41 @@ func (m *BasicMenu) Update(ctx client.Context, callbacks BasicMenuCallbacks) boo
 	consumed := m.Window.Update(ctx)
 	m.Publish(ctx)
 	return consumed
+}
+
+func (m *BasicMenu) ActivateController(ctx client.Context) {
+	if m == nil {
+		return
+	}
+	m.controllerActive = true
+	m.collapsed = false
+	m.content = nil
+	m.SetSize(basicMenuSize(false))
+	m.SetContent(m.widgetTree())
+	m.Publish(ctx)
+}
+
+func (m *BasicMenu) DeactivateController(ctx client.Context) {
+	if m == nil {
+		return
+	}
+	m.controllerActive = false
+	m.SetControllerNavigationPassthrough(true)
+	m.Publish(ctx)
+}
+
+func (m *BasicMenu) ControllerActive() bool { return m != nil && m.controllerActive }
+
+func (m *BasicMenu) HandleControllerAction(action input.UIAction) bool {
+	if m == nil || !m.controllerActive {
+		return false
+	}
+	if action == input.UIActionCancel {
+		m.controllerActive = false
+		m.SetControllerNavigationPassthrough(true)
+		return true
+	}
+	return false
 }
 
 func (m *BasicMenu) Rebind(ctx client.Context, callbacks BasicMenuCallbacks) {

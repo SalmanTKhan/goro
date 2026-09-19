@@ -384,6 +384,8 @@ func controllerINIValues(settings input.ControllerSettings) map[string]string {
 		"target_next":         formatINIControllerButton(controller.Bindings.TargetNext),
 		"reset_camera":        formatINIControllerButton(controller.Bindings.ResetCamera),
 		"menu_button":         formatINIControllerButton(controller.Bindings.Menu),
+		"game_menu_button":    formatINIControllerButton(controller.Bindings.GameMenu),
+		"sit_button":          formatINIControllerButton(controller.Bindings.Sit),
 		"map_button":          formatINIControllerButton(controller.Bindings.Map),
 		"left_modifier":       formatINIControllerButton(controller.Bindings.LeftModifier),
 		"right_modifier":      formatINIControllerButton(controller.Bindings.RightModifier),
@@ -542,22 +544,6 @@ func defaultConfig() Config {
 			Level: "info",
 		},
 	}
-}
-
-func configPathFromArgs(args []string) (string, bool) {
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "--config" && i+1 < len(args) {
-			return args[i+1], true
-		}
-		if strings.HasPrefix(arg, "--config=") {
-			return strings.TrimPrefix(arg, "--config="), true
-		}
-	}
-	if _, err := os.Stat("goro.ini"); err == nil {
-		return "goro.ini", false
-	}
-	return "", false
 }
 
 func applyINIFile(cfg *Config, path string, explicit bool) error {
@@ -845,6 +831,10 @@ func applyConfigValue(cfg *Config, section, key, value string) error {
 		return setControllerButton(value, &cfg.Controller.Bindings.ResetCamera)
 	case "controller.menubutton", "controller.menu_button":
 		return setControllerButton(value, &cfg.Controller.Bindings.Menu)
+	case "controller.gamemenubutton", "controller.game_menu_button":
+		return setControllerButton(value, &cfg.Controller.Bindings.GameMenu)
+	case "controller.sitbutton", "controller.sit_button":
+		return setControllerButton(value, &cfg.Controller.Bindings.Sit)
 	case "controller.mapbutton", "controller.map_button":
 		return setControllerButton(value, &cfg.Controller.Bindings.Map)
 	case "controller.leftmodifier", "controller.left_modifier":
@@ -997,7 +987,7 @@ func upsertINIValues(src string, values map[string]map[string]string) string {
 }
 
 func sortedINIKeys(values map[string]string) []string {
-	preferred := []string{"fullscreen", "vsync", "fps", "ffmpeg_path", "scale", "bgm", "bgm_volume", "sfx_volume", "no_shift", "no_ctrl", "less_effects", "snap", "itemsnap", "movement", "camera_sensitivity", "zoom_sensitivity", "invert_camera_y", "long_press_ms", "show_target_names", "show_minimap", "presentation", "enabled", "deadzone", "outer_deadzone", "trigger_deadzone", "move_mode", "ui_nav_mode", "cursor_speed", "nav_repeat_delay_ms", "nav_repeat_ms", "rumble", "confirm_button", "cancel_button", "attack_button", "loot_button", "target_previous", "target_next", "reset_camera", "menu_button", "map_button", "left_modifier", "right_modifier", "keep_id", "saved_username", "1", "2", "3", "4", "5", "6", "7", "8", "9", "0"}
+	preferred := []string{"fullscreen", "vsync", "fps", "ffmpeg_path", "scale", "bgm", "bgm_volume", "sfx_volume", "no_shift", "no_ctrl", "less_effects", "snap", "itemsnap", "movement", "camera_sensitivity", "zoom_sensitivity", "invert_camera_y", "long_press_ms", "show_target_names", "show_minimap", "presentation", "enabled", "deadzone", "outer_deadzone", "trigger_deadzone", "move_mode", "ui_nav_mode", "cursor_speed", "nav_repeat_delay_ms", "nav_repeat_ms", "rumble", "confirm_button", "cancel_button", "attack_button", "loot_button", "target_previous", "target_next", "reset_camera", "menu_button", "game_menu_button", "sit_button", "map_button", "left_modifier", "right_modifier", "keep_id", "saved_username", "1", "2", "3", "4", "5", "6", "7", "8", "9", "0"}
 
 	keys := make([]string, 0, len(values))
 	seen := make(map[string]bool, len(values))

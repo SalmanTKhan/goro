@@ -17,10 +17,6 @@ const (
 	controllerActionRadius         = 8
 	controllerTargetFallbackRadius = 24
 	controllerCameraScale          = 8
-	// controllerZoomInterval throttles analog trigger zoom so a held trigger
-	// steps the camera at a readable rate rather than once per frame.
-	controllerZoomInterval = 110 * time.Millisecond
-	controllerZoomScale    = 120
 )
 
 // updateControllerInput is the production keyboard/controller consumer. It
@@ -58,7 +54,18 @@ func (m *WorldMode) updateControllerInput(ctx client.Context, dead, blocked bool
 	m.applyControllerActions(ctx, actions)
 }
 
+// ControllerTargetingActive is queried by the renderer before routing the
+// current controller sample. It keeps the right stick on the world targeting
+// reticle while a controller skill is pending, including when a trackpad
+// pointer override had been used immediately beforehand.
+func (m *WorldMode) ControllerTargetingActive() bool {
+	return m != nil && m.pendingSkill.skill.ID != 0
+}
+
 func (m *WorldMode) applyControllerMovement(ctx client.Context, actions input.ActionState) {
+	if ctx.World != nil && (ctx.World.Player.Sitting || m.pendingSkill.skill.ID != 0) {
+		return
+	}
 	if actions.Move != input.DirectionNone {
 		// A new direction is an explicit resume/re-target and supersedes a stop
 		// that was waiting for the walk-request cooldown.
@@ -77,6 +84,39 @@ func (m *WorldMode) applyControllerMovement(ctx client.Context, actions input.Ac
 }
 
 func (m *WorldMode) applyControllerActions(ctx client.Context, actions input.ActionState) {
+	if m.pendingSkill.skill.ID == 0 {
+		m.controllerSkillTargetID = 0
+		m.controllerSkillLane = 0
+		m.controllerGroundCursorX = 0
+		m.controllerGroundCursorY = 0
+	}
+	if m.pendingSkill.skill.ID != 0 && isGroundTargetSkill(m.pendingSkill.skill) {
+		m.updateControllerGroundReticle(ctx, actions)
+		// LB/RB use the same target-cycle edges as actor skills, but for a
+		// ground skill they reposition the reticle onto the selected actor's
+		// current cell. Handle them before the ground-mode early return.
+		if actions.Pressed.Has(input.ActionTargetPrevious) {
+			m.cycleControllerGroundTarget(ctx, true)
+		}
+		if actions.Pressed.Has(input.ActionTargetNext) {
+			m.cycleControllerGroundTarget(ctx, false)
+		}
+		if actions.Pressed.Has(input.ActionConfirm) {
+			if m.skills().sendTarget(ctx, m.pendingSkill, "controller ground") == nil {
+				m.pendingSkill = pendingSkillTarget{}
+				m.controllerSkillTargetID = 0
+				m.controllerSkillLane = 0
+			}
+			return
+		}
+		if actions.Pressed.Has(input.ActionCancel) {
+			m.skills().Cancel("controller ground")
+			m.controllerSkillTargetID = 0
+			m.controllerSkillLane = 0
+			return
+		}
+		return
+	}
 	if actions.CameraX != 0 || actions.CameraY != 0 {
 		now := time.Now()
 		dt := time.Second / 60
@@ -105,10 +145,27 @@ func (m *WorldMode) applyControllerActions(ctx client.Context, actions input.Act
 
 	pressed := actions.Pressed
 	if pressed.Has(input.ActionTargetPrevious) {
-		m.ApplyPlayerCommand(ctx, input.PlayerCommand{Kind: input.CommandTargetPrevious})
+		if isGroundTargetSkill(m.pendingSkill.skill) {
+			m.cycleControllerGroundTarget(ctx, true)
+		} else if m.pendingSkill.skill.ID != 0 {
+			m.cycleControllerSkillTarget(ctx, true)
+		} else {
+			m.ApplyPlayerCommand(ctx, input.PlayerCommand{Kind: input.CommandTargetPrevious})
+		}
 	}
 	if pressed.Has(input.ActionTargetNext) {
-		m.ApplyPlayerCommand(ctx, input.PlayerCommand{Kind: input.CommandTargetNext})
+		if isGroundTargetSkill(m.pendingSkill.skill) {
+			m.cycleControllerGroundTarget(ctx, false)
+		} else if m.pendingSkill.skill.ID != 0 {
+			m.cycleControllerSkillTarget(ctx, false)
+		} else {
+			m.ApplyPlayerCommand(ctx, input.PlayerCommand{Kind: input.CommandTargetNext})
+		}
+	}
+	for _, lane := range []input.Action{input.ActionTargetSelf, input.ActionTargetAlly, input.ActionTargetEnemy, input.ActionTargetCompanion} {
+		if pressed.Has(lane) && m.pendingSkill.skill.ID != 0 {
+			m.selectControllerSkillLane(ctx, lane)
+		}
 	}
 	if pressed.Has(input.ActionConfirm) {
 		if m.pendingSkill.skill.ID != 0 {
@@ -140,6 +197,12 @@ func (m *WorldMode) applyControllerActions(ctx client.Context, actions input.Act
 	if pressed.Has(input.ActionResetCamera) && !m.mapPointerBlocked(ctx) {
 		m.ApplyPlayerCommand(ctx, input.PlayerCommand{Kind: input.CommandResetCamera})
 	}
+	if pressed.Has(input.ActionGameMenu) {
+		m.ui.basicMenu.ActivateController(ctx)
+	}
+	if pressed.Has(input.ActionSit) {
+		m.ApplyPlayerCommand(ctx, input.PlayerCommand{Kind: input.CommandToggleSit})
+	}
 	for slot := 0; slot < 8; slot++ {
 		action := input.ActionShortcut1 + input.Action(slot)
 		if pressed.Has(action) {
@@ -151,13 +214,89 @@ func (m *WorldMode) applyControllerActions(ctx client.Context, actions input.Act
 	}
 }
 
+func (m *WorldMode) updateControllerGroundReticle(ctx client.Context, actions input.ActionState) {
+	if ctx.World == nil {
+		return
+	}
+	if m.pendingSkill.x == 0 && m.pendingSkill.y == 0 {
+		m.pendingSkill.x, m.pendingSkill.y = currentPlayerCell(ctx, time.Now())
+	}
+	m.pendingSkill.controllerTargeting = true
+	m.pendingSkill.groundTargetSet = true
+	m.controllerGroundCursorX += actions.CameraX * 0.75
+	m.controllerGroundCursorY += actions.CameraY * 0.75
+	stepX, stepY := int(m.controllerGroundCursorX), int(m.controllerGroundCursorY)
+	if stepX != 0 || stepY != 0 {
+		oldX, oldY := m.pendingSkill.x, m.pendingSkill.y
+		m.pendingSkill.x += stepX
+		m.pendingSkill.y -= stepY
+		m.controllerGroundCursorX -= float32(stepX)
+		m.controllerGroundCursorY -= float32(stepY)
+		if !walkTargetInBounds(ctx, m.pendingSkill.x, m.pendingSkill.y) {
+			m.pendingSkill.x, m.pendingSkill.y = oldX, oldY
+		}
+	}
+}
+
+func (m *WorldMode) cycleControllerGroundTarget(ctx client.Context, reverse bool) {
+	// Ground targeting cycles actor positions, not floor-item focus entries.
+	// Use the broad candidate set here: the skill-specific legality is handled
+	// by the cast path, while this control is selecting a useful world cell.
+	allCandidates := m.controllerTargetCandidates(ctx, false)
+	candidates := make([]controllerTargetCandidate, 0, len(allCandidates))
+	for _, candidate := range allCandidates {
+		if !candidate.isItem {
+			candidates = append(candidates, candidate)
+		}
+	}
+	if len(candidates) == 0 {
+		return
+	}
+	now := time.Now()
+	index := -1
+	for i := range candidates {
+		x, y := actorCurrentCell(candidates[i].actor, now)
+		if x == m.pendingSkill.x && y == m.pendingSkill.y {
+			index = i
+			break
+		}
+	}
+	if reverse {
+		if index <= 0 {
+			index = len(candidates) - 1
+		} else {
+			index--
+		}
+	} else if index < 0 || index == len(candidates)-1 {
+		index = 0
+	} else {
+		index++
+	}
+	m.pendingSkill.x, m.pendingSkill.y = actorCurrentCell(candidates[index].actor, now)
+	m.controllerGroundCursorX, m.controllerGroundCursorY = 0, 0
+}
+
 // confirmControllerPendingSkill completes the explicit controller cast flow:
 // shortcut selects the skill, LB/RB selects an actor, and Confirm casts it.
 func (m *WorldMode) confirmControllerPendingSkill(ctx client.Context) {
-	if m == nil || m.pendingSkill.skill.ID == 0 || m.pendingSkill.targetID != 0 || isGroundTargetSkill(m.pendingSkill.skill) || isSelfTargetSkill(m.pendingSkill.skill) {
+	if m == nil || m.pendingSkill.skill.ID == 0 || m.pendingSkill.targetID != 0 || isGroundTargetSkill(m.pendingSkill.skill) {
 		return
 	}
-	actor, ok := m.focusedControllerActor(ctx)
+	if isSelfTargetSkill(m.pendingSkill.skill) {
+		target := ctx.World.Player.ID
+		if target == 0 && ctx.Session != nil {
+			target = ctx.Session.CharID
+		}
+		if target != 0 {
+			if err := m.skills().SendToID(ctx, m.pendingSkill.skill, target, "controller self"); err == nil {
+				m.pendingSkill = pendingSkillTarget{}
+				m.controllerSkillTargetID = 0
+				m.controllerSkillLane = 0
+			}
+		}
+		return
+	}
+	actor, ok := m.controllerSkillTargetActor(ctx)
 	if !ok || !actorCanBeSkillTargeted(ctx, m.pendingSkill.skill, actor) {
 		return
 	}
@@ -165,6 +304,94 @@ func (m *WorldMode) confirmControllerPendingSkill(ctx client.Context) {
 		return
 	}
 	m.pendingSkill = pendingSkillTarget{}
+	m.controllerSkillTargetID = 0
+	m.controllerSkillLane = 0
+}
+
+func (m *WorldMode) selectControllerSkillLane(ctx client.Context, lane input.Action) {
+	m.controllerSkillLane = lane
+	m.controllerSkillTargetID = 0
+	if lane == input.ActionTargetSelf {
+		if ctx.World != nil {
+			m.controllerSkillTargetID = ctx.World.Player.ID
+		}
+		return
+	}
+	m.cycleControllerSkillTarget(ctx, false)
+}
+
+func (m *WorldMode) controllerSkillTargetActor(ctx client.Context) (worldstate.Actor, bool) {
+	if ctx.World == nil || m.controllerSkillTargetID == 0 {
+		return worldstate.Actor{}, false
+	}
+	actor, ok := ctx.World.Actors[m.controllerSkillTargetID]
+	if !ok || !m.controllerSkillCandidate(ctx, actor) {
+		return worldstate.Actor{}, false
+	}
+	return actor, true
+}
+
+func (m *WorldMode) controllerSkillCandidate(ctx client.Context, actor worldstate.Actor) bool {
+	if !actorCanBeSkillTargeted(ctx, m.pendingSkill.skill, actor) {
+		return false
+	}
+	flags, known := skillTargetFlagsForActor(ctx, actor)
+	if !known {
+		return false
+	}
+	switch m.controllerSkillLane {
+	case input.ActionTargetAlly:
+		return m.pendingSkill.skill.Type&skillTargetFriend != 0 && actorRepresentsPlayer(actor) && !isLocalActor(ctx, actor.ID)
+	case input.ActionTargetEnemy:
+		return m.pendingSkill.skill.Type&skillTargetEnemy != 0 && !isLocalActor(ctx, actor.ID)
+	case input.ActionTargetCompanion:
+		return flags&(skillTargetPet|skillTargetHomun) != 0 && m.pendingSkill.skill.Type&(skillTargetPet|skillTargetHomun) != 0
+	default:
+		return true
+	}
+}
+
+func (m *WorldMode) cycleControllerSkillTarget(ctx client.Context, reverse bool) bool {
+	if ctx.World == nil || m.pendingSkill.skill.ID == 0 {
+		return false
+	}
+	now := time.Now()
+	px, py := currentPlayerCell(ctx, now)
+	candidates := make([]worldstate.Actor, 0, len(ctx.World.Actors))
+	for _, actor := range ctx.World.Actors {
+		if !m.controllerSkillCandidate(ctx, actor) {
+			continue
+		}
+		x, y := actorCurrentCell(actor, now)
+		dx, dy := x-px, y-py
+		candidates = append(candidates, actor)
+		_ = dx
+		_ = dy
+	}
+	if len(candidates) == 0 {
+		return false
+	}
+	sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].ID < candidates[j].ID })
+	index := -1
+	for i := range candidates {
+		if candidates[i].ID == m.controllerSkillTargetID {
+			index = i
+			break
+		}
+	}
+	if reverse {
+		if index <= 0 {
+			index = len(candidates) - 1
+		} else {
+			index--
+		}
+	} else if index < 0 || index == len(candidates)-1 {
+		index = 0
+	} else {
+		index++
+	}
+	m.controllerSkillTargetID = candidates[index].ID
+	return true
 }
 
 // preemptControllerCombat handles the intent switch before the normal combat
@@ -243,11 +470,6 @@ func (m *WorldMode) clearControllerMovementState() {
 	m.controllerMoveTargetX = 0
 	m.controllerMoveTargetY = 0
 	m.controllerMoveTargetKnown = false
-}
-
-func (m *WorldMode) moveController(ctx client.Context, direction input.Direction8) bool {
-	dx, dy := direction.Vector()
-	return m.moveControllerVector(ctx, direction, float32(dx), float32(dy), 1)
 }
 
 func (m *WorldMode) moveControllerVector(ctx client.Context, direction input.Direction8, vectorX, vectorY, magnitude float32) bool {

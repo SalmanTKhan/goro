@@ -77,6 +77,17 @@ func TestRouteControllerPointerOwnershipSuppressesCamera(t *testing.T) {
 	}
 }
 
+func TestRouteControllerSkillTargetingKeepsRightStickForWorld(t *testing.T) {
+	a := input.ActionState{CameraX: 0.8, CameraY: -0.4}
+	got := RouteController(a, input.ControllerFrame{}, ControllerRouteContext{
+		PointerOverUI:        true,
+		SkillTargetingActive: true,
+	}, 0, 0)
+	if got.Gameplay.CameraX != a.CameraX || got.Gameplay.CameraY != a.CameraY {
+		t.Fatalf("skill targeting lost right-stick vector: %#v", got.Gameplay)
+	}
+}
+
 func TestRouteControllerCaptureBlocksGameplay(t *testing.T) {
 	a := input.ActionState{Move: input.DirectionNorth, CameraX: 1, ZoomDelta: 1}
 	a.Pressed.Set(input.ActionConfirm, true)

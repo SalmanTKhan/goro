@@ -23,23 +23,6 @@ func controllerPromptSignature(ctx client.Context) string {
 	return fmt.Sprintf("%d/%t/%d/%d/%d/%d", ctx.Input.InputSource(), s.Connected, s.Kind, settings.Bindings.Confirm, settings.Bindings.Cancel, settings.Bindings.Attack)
 }
 
-// controllerPromptFooter returns a compact, context-aware fallback for a
-// window footer. The resolver still owns family and binding selection; keeping
-// this helper in ui makes every surface use the same visibility rule.
-func controllerPromptFooter(ctx client.Context, actions ...input.Action) widget.Widget {
-	if ctx.Input == nil || ctx.Input.InputSource() != input.InputSourceController || !ctx.Input.Controller().Connected {
-		return primitives.Box()
-	}
-	return rotheme.Text(inputprompt.NewResolver().FooterText(ctx.ControllerSettings(), ctx.Input.Controller().Kind, actions...))
-}
-
-func appendControllerPromptFooter(footer []widget.Widget, ctx client.Context, actions ...input.Action) []widget.Widget {
-	if ctx.Input == nil || ctx.Input.InputSource() != input.InputSourceController || !ctx.Input.Controller().Connected {
-		return footer
-	}
-	return append(footer, controllerPromptFooter(ctx, actions...))
-}
-
 // controllerButtonLabel keeps prompts inside the action control instead of
 // reserving a second footer row that can displace the actual buttons.
 func contextualControllerButtonLabel(ctx client.Context, base string, action input.Action) string {

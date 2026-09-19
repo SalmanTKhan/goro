@@ -1544,6 +1544,10 @@ func (r *runner) pollController() {
 	if active, ok := r.uiBridge.uiManager.(interface{ ControllerUIActive() bool }); ok {
 		controllerUI = active.ControllerUIActive()
 	}
+	skillTargeting := false
+	if targeting, ok := r.game.(interface{ ControllerTargetingActive() bool }); ok {
+		skillTargeting = targeting.ControllerTargetingActive()
+	}
 	// Right-stick or trackpad movement is an explicit pointer override for an
 	// interactive menu. Without it, menus use normal focus navigation.
 	pointerX, pointerY, _ := controllerCursorAxes(snapshot, settings, false)
@@ -1552,7 +1556,13 @@ func (r *runner) pollController() {
 	} else if snapshot.Touchpads[1].Down {
 		r.controllerPointerMode = true
 	}
-	pointerOverride := r.controllerPointerMode || r.cursorLeftDown
+	// A pending skill owns the right stick for world targeting. This also
+	// clears a previously selected trackpad pointer override so the same stick
+	// sample cannot move both a UI cursor and the ground reticle.
+	if skillTargeting {
+		r.controllerPointerMode = false
+	}
+	pointerOverride := (r.controllerPointerMode || r.cursorLeftDown) && !skillTargeting
 	navigationMode := settings.UINavMode
 	if controllerUI && pointerOverride {
 		navigationMode = input.ControllerUINavCursor
@@ -1569,6 +1579,7 @@ func (r *runner) pollController() {
 		NavigationMode: navigationMode, PointerActive: pointerActive, PointerOverUI: pointerOverUI,
 		FocusNavigationActive: uiFocusActive, ModalUIActive: r.controllerKeyboardActive(),
 		TextInputActive: r.controllerKeyboardActive(), RebindActive: r.controllerRebindActive(),
+		SkillTargetingActive: skillTargeting,
 	}, pointerX, pointerY)
 	r.controllerDispatch = route
 	traceControllerRoute(r.controllerFrame, actions, route, settings, focusNavigation)
@@ -1645,9 +1656,9 @@ func traceControllerRoute(frame input.ControllerFrame, actions input.ActionState
 		actions.CameraX == 0 && actions.CameraY == 0 && !frame.DeviceChanged {
 		return
 	}
-	glog.Infof("controller trace: frame seq=%d device=%d changed=%t pressed=0x%X released=0x%X move=%v mode=%d focus_ui=%t gameplay_move=%v ui_actions=%d pointer_click=%t",
+	glog.Infof("controller trace: frame seq=%d device=%d changed=%t pressed=0x%X released=0x%X move=%v camera=(%.2f,%.2f) mode=%d focus_ui=%t gameplay_move=%v ui_actions=%d pointer_click=%t",
 		frame.Sequence, frame.DeviceID, frame.DeviceChanged, frame.Pressed, frame.Released, actions.Move,
-		settings.UINavMode, focus, route.Gameplay.Move, len(route.UI.Actions), route.UI.PointerClick)
+		route.Gameplay.CameraX, route.Gameplay.CameraY, settings.UINavMode, focus, route.Gameplay.Move, len(route.UI.Actions), route.UI.PointerClick)
 }
 
 // controllerCursorAxes reports the right stick vector that drives the virtual
@@ -1695,16 +1706,28 @@ func (r *runner) dispatchControllerPointer(state *input.State, snapshot input.Co
 	}
 
 	x, y := r.cursor.Position()
-	// The router is the only source of virtual pointer button edges. Do not
-	// reconstruct Confirm edges from the snapshot or State; doing so can turn
-	// one physical press into a stuck or duplicated mouse button.
+	pointer := r.controllerDispatch.Pointer
+	if r.controllerFrame.Sequence == 0 && settings.MoveMode == input.ControllerMoveCursor {
+		// Compatibility for direct callers that predate the renderer-owned poll
+		// path. Production calls always have a ControllerFrame and use only
+		// router output below.
+		confirmHeld := snapshot.Buttons.Has(settings.Bindings.Confirm)
+		pointer.LeftDown = confirmHeld
+		pointer.LeftPressed = confirmHeld && !r.cursorLeftDown
+		pointer.LeftReleased = !confirmHeld && r.cursorLeftDown
+		if pointer.LeftPressed && state != nil {
+			state.ConsumeControllerAction(input.ActionConfirm)
+		}
+	}
+	// The router is the only source of virtual pointer button edges in the
+	// production path. Do not reconstruct Confirm edges after a frame exists.
 	switch {
-	case r.controllerDispatch.Pointer.LeftPressed && !r.cursorLeftDown:
+	case pointer.LeftPressed && !r.cursorLeftDown:
 		r.cursorLeftDown = true
 		r.injectPointer(func() {
 			r.events.EmitMousePress(gpucontext.MouseButtonLeft, float64(x), float64(y))
 		})
-	case r.controllerDispatch.Pointer.LeftReleased && r.cursorLeftDown:
+	case pointer.LeftReleased && r.cursorLeftDown:
 		r.cursorLeftDown = false
 		r.injectPointer(func() {
 			r.events.EmitMouseRelease(gpucontext.MouseButtonLeft, float64(x), float64(y))
@@ -2595,6 +2618,7 @@ func (r *runner) collectAsyncUIResults(width, height int, deviceScale float64) {
 			r.uiAsyncBusy = false
 			if result.err != nil {
 				glog.Warnf("async ui raster failed: %v", result.err)
+				r.uiAsyncDraining = false
 				r.uiGeneration++
 				r.uiDrawnOnce = false
 				r.setUIImage(nil)
@@ -2606,6 +2630,7 @@ func (r *runner) collectAsyncUIResults(width, height int, deviceScale float64) {
 				// Stale work still updates the rasterizer's retained canvas. Keep
 				// draining queued lists in order, but publish only the current
 				// generation.
+				r.uiAsyncDraining = false
 				r.submitPendingUIDrawLists()
 				continue
 			}
@@ -2613,12 +2638,19 @@ func (r *runner) collectAsyncUIResults(width, height int, deviceScale float64) {
 			// intermediate image must not reach the screen after the UI has
 			// already changed again. Keep displaying the last coherent image
 			// until the worker catches up.
-			if len(r.uiPendingLists) == 0 {
+			publish := len(r.uiPendingLists) == 0 || r.uiAsyncDraining
+			if publish {
 				imageStart := time.Now()
 				r.setUIImage(result.image)
 				r.uiDrawnOnce = r.uiImage != nil
+				r.uiAsyncDraining = false
 				r.completeUIDragLayerRelease()
 				r.lastUIImageDur += time.Since(imageStart)
+			} else {
+				// Suppress one intermediate result so the latest retained draw list
+				// can catch up, but do not starve publication during continuous UI
+				// animation.
+				r.uiAsyncDraining = true
 			}
 			if r.renderCfg.UIProfile && result.rasterDur > 16*time.Millisecond {
 				glog.Debugf(
@@ -2813,7 +2845,7 @@ func (r *runner) shouldRecordAsyncUI(needsWork bool) bool {
 	if !needsWork {
 		return false
 	}
-	if r != nil && r.uiAsyncBusy && len(r.uiPendingLists) > 0 {
+	if r != nil && r.uiAsyncBusy && (len(r.uiPendingLists) > 0 || r.uiAsyncDraining) {
 		r.lastUIWork = true
 		return false
 	}
@@ -3219,13 +3251,13 @@ func (r *runner) cachedOverlayTextBoxImage(provider gpucontext.DeviceProvider, k
 		lines = []string{text}
 	}
 	if style.maxLines > 0 && len(lines) > style.maxLines {
-		lines = append(lines[:style.maxLines-1], ellipsizeOverlayText(measure, strings.Join(lines[style.maxLines-1:], " "), style.size, false, style.maxWidth-style.padX*2))
+		lines = append(lines[:style.maxLines-1], ellipsizeOverlayText(measure, strings.Join(lines[style.maxLines-1:], " "), style.size, style.bold, style.maxWidth-style.padX*2))
 	}
 	textWidth := float32(0)
 	if err := measure.Draw(func(cc *gg.Context) {
 		canvas := uirender.NewCanvas(cc, 1, 1)
 		for _, line := range lines {
-			if w := rotheme.MeasureText(canvas, line, style.size, false); w > textWidth {
+			if w := rotheme.MeasureText(canvas, line, style.size, style.bold); w > textWidth {
 				textWidth = w
 			}
 		}
@@ -3254,7 +3286,7 @@ func (r *runner) cachedOverlayTextBoxImage(provider gpucontext.DeviceProvider, k
 		uiCanvas.DrawRect(geometry.NewRect(0, 0, float32(width), float32(height)), style.background)
 		for i, line := range lines {
 			y := style.padY + float32(i)*style.lineH
-			rotheme.DrawText(uiCanvas, line, geometry.NewRect(style.padX, y, float32(width)-style.padX*2, style.lineH), style.size, style.foreground, false, widget.TextAlignLeft)
+			rotheme.DrawText(uiCanvas, line, geometry.NewRect(style.padX, y, float32(width)-style.padX*2, style.lineH), style.size, style.foreground, style.bold, widget.TextAlignLeft)
 		}
 	}); err != nil {
 		return cachedOverlayImage{}, fmt.Errorf("draw text box overlay: %w", err)
@@ -3295,7 +3327,7 @@ func overlayTextBoxLines(canvas widget.Canvas, text string, style overlayTextBox
 			continue
 		}
 		if style.wrap {
-			wrapped := wrapOverlayText(canvas, paragraph, style.size, false, style.maxWidth-style.padX*2)
+			wrapped := wrapOverlayText(canvas, paragraph, style.size, style.bold, style.maxWidth-style.padX*2)
 			if len(wrapped) == 0 {
 				lines = append(lines, paragraph)
 			} else {

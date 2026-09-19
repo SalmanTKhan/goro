@@ -122,6 +122,18 @@ func setButtonActionsFrame(a *ActionState, f ControllerFrame, b ControllerBindin
 	button(ActionMenu, b.Menu)
 	button(ActionMap, b.Map)
 	button(ActionResetCamera, b.ResetCamera)
+	button(ActionGameMenu, b.GameMenu)
+	button(ActionSit, b.Sit)
+	// D-pad lane actions are semantic edges. They are ignored by gameplay
+	// during ordinary movement and consumed by pending skill targeting.
+	buttonDPad := func(action Action, physical ControllerButton) {
+		down, was := currentButtons.Has(physical), previousButtons.Has(physical)
+		a.Pressed.Set(action, down && !was)
+	}
+	buttonDPad(ActionTargetSelf, ControllerButtonDPadUp)
+	buttonDPad(ActionTargetAlly, ControllerButtonDPadLeft)
+	buttonDPad(ActionTargetEnemy, ControllerButtonDPadRight)
+	buttonDPad(ActionTargetCompanion, ControllerButtonDPadDown)
 	leftModifier := currentButtons.Has(b.LeftModifier)
 	rightModifier := currentButtons.Has(b.RightModifier)
 	if leftModifier || rightModifier {

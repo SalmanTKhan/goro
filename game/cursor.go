@@ -69,10 +69,12 @@ func (m *WorldMode) drawROCursor(screen *render.Frame, ctx client.Context, proje
 	// Controller target selection has no physical mouse position to follow;
 	// anchor its cast cursor to the focused actor. Preserve the original mouse
 	// cursor behavior for keyboard/mouse skill targeting.
-	if m.pendingSkill.skill.ID != 0 &&
-		ctx.Input.InputSource() == input.InputSourceController &&
-		m.attackFocusID != 0 {
-		if actor, ok := m.focusedControllerActor(ctx); ok {
+	if m.pendingSkill.skill.ID != 0 && ctx.Input.InputSource() == input.InputSourceController {
+		if m.pendingSkill.ground && ctx.World != nil {
+			z := terrainHeightAt(ctx.World, float64(m.pendingSkill.x), float64(m.pendingSkill.y))
+			point := projection.Project(cellCenter(float64(m.pendingSkill.x)), cellCenter(float64(m.pendingSkill.y)), z)
+			cursorX, cursorY = float64(point.x), float64(point.y)
+		} else if actor, ok := m.controllerSkillTargetActor(ctx); ok {
 			ax, ay := actorRenderPosition(actor, now)
 			az := terrainHeightAt(ctx.World, ax, ay)
 			point := projection.Project(cellCenter(ax), cellCenter(ay), az)
