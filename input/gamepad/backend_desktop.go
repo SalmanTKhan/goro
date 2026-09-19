@@ -321,7 +321,7 @@ func (b *Backend) snapshot(gamepad *sdl.Gamepad, id sdl.JoystickID) input.Contro
 		}
 		var down bool
 		var x, y, pressure float32
-		if gamepad.TouchpadFinger(touchpad, 0, &down, &x, &y, &pressure) {
+		if gamepad.TouchpadFingerState(touchpad, 0, &down, &x, &y, &pressure) {
 			touchpads[touchpad] = input.ControllerTouch{Down: down, X: x, Y: y, Pressure: pressure}
 		}
 	}
