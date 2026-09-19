@@ -87,6 +87,7 @@ type ShortcutBar struct {
 	icons         map[shortcutItemIconKey]image.Image
 	iconMiss      map[shortcutItemIconKey]struct{}
 	tooltip       tooltipState
+	promptContext controllerPromptContextKey
 }
 
 type shortcutItemIconKey struct {
@@ -147,7 +148,14 @@ func (b *ShortcutBar) Publish(ctx Context, actions GameActions, assets AssetProv
 	b.ctx = ctx
 	b.actions = actions
 	b.assets = assets
+	nextPromptContext := controllerPromptContextFor(ctx)
+	promptChanged := nextPromptContext != b.promptContext
+	b.promptContext = nextPromptContext
 	b.ensureContent()
+	if promptChanged {
+		b.redraw()
+		b.invalidate(ctx)
+	}
 	x, y := b.bounds(ctx)
 	w, h := shortcutBarWidth(), shortcutBarHeightForRows(b.visibleRowCount())
 	if b.root == nil || b.rootX != x || b.rootY != y || b.rootW != w || b.rootH != h {
@@ -543,10 +551,13 @@ func (w *shortcutSlotButton) drawContent(canvas widget.Canvas, bounds geometry.R
 	// the prompt only on those slots so the UI never advertises an inactive
 	// binding when a different keyboard row is visible.
 	if prompt := controllerShortcutPrompt(w.bar.ctx, w.slot); prompt != "" {
+		badge := geometry.NewRect(bounds.Min.X+1, bounds.Max.Y-11, shortcutSlot-2, 10)
+		canvas.DrawRect(badge, rotheme.Default.Colors.WindowBody)
+		canvas.StrokeRect(badge, rotheme.Default.Colors.ButtonBorder, 1)
 		rotheme.DrawText(
 			canvas,
 			prompt,
-			geometry.NewRect(bounds.Min.X+1, bounds.Max.Y-11, shortcutSlot-2, 10),
+			badge,
 			8,
 			rotheme.Default.Colors.TitleText,
 			true,
