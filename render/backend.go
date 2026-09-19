@@ -47,6 +47,8 @@ type Game interface {
 	InputState() *input.State
 }
 
+type controllerActionSink interface{ SetControllerActions(input.ActionState) }
+
 type uiScaleProvider interface {
 	UISettings() input.UISettings
 }
@@ -879,36 +881,40 @@ type runner struct {
 	uiGeneration    uint64
 	uiDrag          uiDragLayer
 
-	lastUpdateDuration   time.Duration
-	lastGameUpdateDur    time.Duration
-	lastUIFrameDur       time.Duration
-	lastUIWork           bool
-	lastUIRedraw         bool
-	lastUIDrawDur        time.Duration
-	lastUICanvasDrawDur  time.Duration
-	lastUIFlushDur       time.Duration
-	lastUIImageDur       time.Duration
-	lastUIDirtyRegions   int
-	lastUIFullRepaint    bool
-	lastUIDirtyUnion     geometry.Rect
-	lastUIDrawStats      widget.DrawStats
-	uiProfile            uiProfileStats
-	captureCfg           config.CaptureConfig
-	capture              *captureRuntime
-	controller           input.ControllerBackend
-	controllerSettings   input.ControllerSettings
-	uiBridge             *uiAppBridge
-	controllerNav        navRepeater
-	controllerRightNav   navRepeater
-	controllerTriggerNav navRepeater
-	controllerPollError  bool
-	events               *fanoutEventSource
-	cursor               input.VirtualCursor
-	controllerLastPoll   time.Time
-	injectingPointer     bool
-	cursorLeftDown       bool
-	controllerConnected  bool
-	closed               bool
+	lastUpdateDuration    time.Duration
+	lastGameUpdateDur     time.Duration
+	lastUIFrameDur        time.Duration
+	lastUIWork            bool
+	lastUIRedraw          bool
+	lastUIDrawDur         time.Duration
+	lastUICanvasDrawDur   time.Duration
+	lastUIFlushDur        time.Duration
+	lastUIImageDur        time.Duration
+	lastUIDirtyRegions    int
+	lastUIFullRepaint     bool
+	lastUIDirtyUnion      geometry.Rect
+	lastUIDrawStats       widget.DrawStats
+	uiProfile             uiProfileStats
+	captureCfg            config.CaptureConfig
+	capture               *captureRuntime
+	controller            input.ControllerBackend
+	controllerSettings    input.ControllerSettings
+	controllerCoordinator input.ControllerCoordinator
+	controllerFrame       input.ControllerFrame
+	controllerDispatch    ControllerDispatch
+	uiBridge              *uiAppBridge
+	controllerNav         navRepeater
+	controllerRightNav    navRepeater
+	controllerTriggerNav  navRepeater
+	controllerPollError   bool
+	events                *fanoutEventSource
+	cursor                input.VirtualCursor
+	controllerLastPoll    time.Time
+	injectingPointer      bool
+	cursorLeftDown        bool
+	controllerConnected   bool
+	controllerPointerMode bool
+	closed                bool
 }
 
 func (r *runner) close() {
@@ -959,6 +965,8 @@ func Run(game Game, cfg config.WindowConfig, renderCfg config.RenderConfig, capt
 	defer widget.RegisterClipboardProvider(nil)
 	events := newFanoutEventSource(gg.EventSource())
 	if pointers, ok := gg.EventSource().(gpucontext.PointerEventSource); ok {
+		touchX, touchY := float64(cfg.Width)/2, float64(cfg.Height)/2
+		touchActive := false
 		pointers.OnPointer(func(event gpucontext.PointerEvent) {
 			if event.PointerType != gpucontext.PointerTypeTouch || !event.IsPrimary {
 				return
@@ -969,14 +977,24 @@ func Run(game Game, cfg config.WindowConfig, renderCfg config.RenderConfig, capt
 			// and Android touch behavior.
 			switch event.Type {
 			case gpucontext.PointerDown:
+				touchX, touchY = event.X, event.Y
+				touchActive = true
 				game.InputState().SetPointerSource(input.InputSourceTouch)
-				events.EmitMousePress(gpucontext.MouseButtonLeft, event.X, event.Y)
+				events.EmitMousePress(gpucontext.MouseButtonLeft, touchX, touchY)
 			case gpucontext.PointerMove:
+				touchX, touchY = event.X, event.Y
 				game.InputState().SetPointerSource(input.InputSourceTouch)
-				events.EmitMouseMove(event.X, event.Y)
+				events.EmitMouseMove(touchX, touchY)
 			case gpucontext.PointerUp, gpucontext.PointerCancel:
+				// Some Wayland compositors report zero coordinates on the
+				// terminal contact. Release at the last valid primary-contact
+				// position so the virtual cursor does not jump to the origin.
+				if touchActive && event.X != 0 && event.Y != 0 {
+					touchX, touchY = event.X, event.Y
+				}
+				touchActive = false
 				game.InputState().SetPointerSource(input.InputSourceTouch)
-				events.EmitMouseRelease(gpucontext.MouseButtonLeft, event.X, event.Y)
+				events.EmitMouseRelease(gpucontext.MouseButtonLeft, touchX, touchY)
 			}
 		})
 	}
@@ -1046,6 +1064,9 @@ func Run(game Game, cfg config.WindowConfig, renderCfg config.RenderConfig, capt
 		}
 	}
 	if r.controllerSettings.Enabled {
+		glog.Infof("controller runtime env: SteamAppId=%q SteamGameId=%q SteamOverlayGameId=%q SteamDeck=%q XDG_SESSION_TYPE=%q WAYLAND_DISPLAY=%q",
+			os.Getenv("SteamAppId"), os.Getenv("SteamGameId"), os.Getenv("SteamOverlayGameId"),
+			os.Getenv("SteamDeck"), os.Getenv("XDG_SESSION_TYPE"), os.Getenv("WAYLAND_DISPLAY"))
 		controller, controllerErr := gamepad.Open()
 		if controllerErr != nil {
 			glog.Warnf("controller input unavailable: %v", controllerErr)
@@ -1060,6 +1081,13 @@ func Run(game Game, cfg config.WindowConfig, renderCfg config.RenderConfig, capt
 		receiver.SetUIApp(r.uiBridge)
 	}
 	game.Resize(cfg.Width, cfg.Height)
+	// Keep the virtual cursor coherent with every physical pointer source.
+	// This makes controller -> touch/mouse -> controller handoff resume at the
+	// user's actual pointer location instead of the cursor's initialization
+	// position.
+	events.OnMouseMove(func(x, y float64) { r.cursor.SyncTo(int(x+0.5), int(y+0.5)) })
+	events.OnMousePress(func(_ gpucontext.MouseButton, x, y float64) { r.cursor.SyncTo(int(x+0.5), int(y+0.5)) })
+	events.OnMouseRelease(func(_ gpucontext.MouseButton, x, y float64) { r.cursor.SyncTo(int(x+0.5), int(y+0.5)) })
 	wireInput(events, game.InputState(), func() bool { return r.injectingPointer }, func(source input.InputSource) {
 		if r.uiBridge != nil {
 			r.uiBridge.SetControllerMode(source == input.InputSourceController)
@@ -1085,6 +1113,12 @@ func Run(game Game, cfg config.WindowConfig, renderCfg config.RenderConfig, capt
 			// character walking, mirroring the safeguard the real window
 			// already applies to keyboard state.
 			r.releaseControllerPointer()
+			r.controllerCoordinator.ResetTransient()
+			r.clearControllerActions()
+		} else if lifecycle, ok := r.controller.(interface{ Reset() error }); ok {
+			if err := lifecycle.Reset(); err != nil {
+				glog.Warnf("controller resume reset failed: %v", err)
+			}
 		}
 	})
 	gg.OnUpdate(func(float64) {
@@ -1374,6 +1408,13 @@ func wireInput(events gpucontext.EventSource, state *input.State, optional ...an
 	if state == nil {
 		return
 	}
+	// The fanout performs consumption and text filtering before forwarding
+	// events to the UI. Keep it wired to the same physical snapshot that this
+	// function updates; otherwise its handlers see an empty/stale key state.
+	fanoutEvents, isFanout := events.(*fanoutEventSource)
+	if isFanout {
+		fanoutEvents.inputState = state
+	}
 	var synthetic func() bool
 	var sourceChanged []func(input.InputSource)
 	for _, value := range optional {
@@ -1426,7 +1467,11 @@ func wireInput(events gpucontext.EventSource, state *input.State, optional ...an
 		notifySource(input.InputSourceMouse)
 	})
 	events.OnTextInput(func(text string) {
-		state.AddTextInput(text)
+		// fanoutEventSource records raw text before applying its active
+		// shortcut/editor filter. Do not append it a second time here.
+		if !isFanout {
+			state.AddTextInput(text)
+		}
 		notifySource(input.InputSourceKeyboard)
 	})
 
@@ -1447,6 +1492,9 @@ func (r *runner) pollController() {
 	if r == nil || r.controller == nil || r.game == nil || r.game.InputState() == nil {
 		return
 	}
+	// Poll is deliberately synchronous: one application update owns exactly
+	// one backend sample, one coordinator advance, and one action resolution.
+	snapshot, err := r.controller.Poll()
 	now := time.Now()
 	dt := input.ClampFrameDelta(now.Sub(r.controllerLastPoll))
 	if r.controllerLastPoll.IsZero() {
@@ -1461,22 +1509,21 @@ func (r *runner) pollController() {
 	}
 	settings := r.controllerSettings
 
-	snapshot, err := r.controller.Poll()
 	if err != nil {
 		if !r.controllerPollError {
 			glog.Warnf("controller poll failed: %v", err)
 			r.controllerPollError = true
 		}
 		r.game.InputState().SetController(input.ControllerSnapshot{})
+		r.controllerCoordinator.ResetTransient()
+		r.clearControllerActions()
 		r.handleControllerDisconnect()
 		return
 	}
 	r.controllerPollError = false
 	state := r.game.InputState()
-	state.SetController(snapshot)
-	if snapshot.Active() {
-		r.uiBridge.SetControllerMode(true)
-	}
+	r.controllerFrame = r.controllerCoordinator.Advance(snapshot)
+	state.SetControllerFrame(r.controllerFrame)
 	if snapshot.Connected != r.controllerConnected {
 		if snapshot.Connected {
 			r.handleControllerConnect(snapshot)
@@ -1488,29 +1535,7 @@ func (r *runner) pollController() {
 		return
 	}
 
-	actions := input.ResolveActions(state, settings)
-
-	// The on-screen keyboard owns the whole frame while it is open: no pointer
-	// motion, no zoom, and no walking behind it.
-	if r.controllerKeyboardActive() {
-		r.dispatchControllerUI(state, actions, now)
-		state.ConsumeControllerMovement()
-		state.ConsumeControllerCamera()
-		state.ConsumeControllerZoom()
-		consumeControllerUIActions(state)
-		return
-	}
-	// A rebinding capture likewise consumes everything, so the button being
-	// bound does not also fire the action it is being bound to. The snapshot is
-	// still published above, which keeps the diagnostics animating.
-	if r.controllerRebindActive() {
-		state.ConsumeControllerMovement()
-		state.ConsumeControllerCamera()
-		state.ConsumeControllerZoom()
-		consumeControllerUIActions(state)
-		return
-	}
-
+	actions := input.ResolveControllerActions(r.controllerFrame, settings)
 	focusNavigation := false
 	if nav, ok := r.uiBridge.uiManager.(interface{ ControllerFocusNavigationActive() bool }); ok {
 		focusNavigation = nav.ControllerFocusNavigationActive()
@@ -1519,52 +1544,115 @@ func (r *runner) pollController() {
 	if active, ok := r.uiBridge.uiManager.(interface{ ControllerUIActive() bool }); ok {
 		controllerUI = active.ControllerUIActive()
 	}
-	if controllerUI || focusNavigation || (settings.UINavMode == input.ControllerUINavFocus && r.pointerOverUI()) {
-		r.dispatchControllerUI(state, actions, now)
-		// Focus navigation owns the movement stick/D-pad while it is active;
-		// otherwise the world consumer could interpret the same input as a walk.
-		state.ConsumeControllerMovement()
-		state.ConsumeControllerCamera()
-		state.ConsumeControllerZoom()
-		// The active UI scope owns every controller edge for this frame. This
-		// closes the remaining leak paths (Map, camera reset, shortcut chords,
-		// and unhandled alternate buttons) into the world consumer.
-		consumeControllerUIActions(state)
+	// Right-stick or trackpad movement is an explicit pointer override for an
+	// interactive menu. Without it, menus use normal focus navigation.
+	pointerX, pointerY, _ := controllerCursorAxes(snapshot, settings, false)
+	if !controllerUI {
+		r.controllerPointerMode = false
+	} else if snapshot.Touchpads[1].Down || pointerX != 0 || pointerY != 0 {
+		r.controllerPointerMode = true
+	}
+	pointerOverride := r.controllerPointerMode || r.cursorLeftDown
+	navigationMode := settings.UINavMode
+	if controllerUI && !pointerOverride {
+		navigationMode = input.ControllerUINavFocus
+	}
+	pointerActive := settings.UINavMode == input.ControllerUINavCursor && controllerUI && pointerOverride
+	pointerOverUI := pointerActive && r.pointerOverUI()
+	if !pointerActive {
+		pointerX, pointerY = 0, 0
+	}
+	route := RouteController(actions, r.controllerFrame, ControllerRouteContext{
+		NavigationMode: navigationMode, PointerActive: pointerActive, PointerOverUI: pointerOverUI,
+		FocusNavigationActive: focusNavigation, ModalUIActive: r.controllerKeyboardActive(),
+		TextInputActive: r.controllerKeyboardActive(), RebindActive: r.controllerRebindActive(),
+	}, pointerX, pointerY)
+	r.controllerDispatch = route
+	traceControllerRoute(r.controllerFrame, actions, route, settings, focusNavigation)
+	if sink, ok := r.game.(controllerActionSink); ok {
+		sink.SetControllerActions(input.ActionState{Source: input.InputSourceController, Move: route.Gameplay.Move,
+			CameraX: route.Gameplay.CameraX, CameraY: route.Gameplay.CameraY, ZoomDelta: route.Gameplay.ZoomDelta,
+			Held: route.Gameplay.Held, Pressed: route.Gameplay.Pressed, Released: route.Gameplay.Released})
+	}
+	if snapshot.Active() && controllerHasUserActivity(snapshot, settings) {
+		r.uiBridge.SetControllerMode(true)
+	}
+
+	// The on-screen keyboard owns the whole frame while it is open: no pointer
+	// motion, no zoom, and no walking behind it.
+	if r.controllerKeyboardActive() {
+		r.dispatchControllerUI(state, actions, now, true)
 		return
 	}
-	r.dispatchControllerPointer(state, snapshot, settings, dt)
-}
-
-func consumeControllerUIActions(state *input.State) {
-	if state == nil {
+	// A rebinding capture likewise consumes everything, so the button being
+	// bound does not also fire the action it is being bound to. The snapshot is
+	// still published above, which keeps the diagnostics animating.
+	if r.controllerRebindActive() {
 		return
 	}
-	for action := input.ActionConfirm; action <= input.ActionResetCamera; action++ {
-		state.ConsumeControllerAction(action)
+
+	if controllerUI || focusNavigation || (navigationMode == input.ControllerUINavFocus && r.pointerOverUI()) {
+		uiOwned := false
+		if controllerUI || (navigationMode == input.ControllerUINavFocus && focusNavigation) {
+			uiOwned = r.dispatchControllerRouteUI(route.UI, now, settings)
+		} else {
+			allowDirectionalNavigation := navigationMode == input.ControllerUINavFocus && focusNavigation
+			uiOwned = r.dispatchControllerUI(state, actions, now, allowDirectionalNavigation)
+		}
+		// A UI scope owns input only after it accepts an action. This is
+		// important on the Deck, where the HUD/chat overlay can coexist with
+		// world controls: unhandled movement and buttons must reach gameplay.
+		if uiOwned {
+			return
+		}
+	}
+	if pointerActive {
+		r.dispatchControllerPointer(state, snapshot, settings, dt)
 	}
 }
 
-// controllerCursorAxes reports the stick vector that should drive the pointer
-// this frame, and whether the left stick is therefore unavailable for walking.
-// In cursor move mode the left stick always aims. In character move mode the
-// right stick always aims, including while the pointer crosses a UI window;
-// changing sticks at the window boundary made the virtual cursor feel broken
-// and exposed the same stick to gameplay camera handling.
+func (r *runner) dispatchControllerRouteUI(intent ControllerUIIntent, now time.Time, settings input.ControllerSettings) bool {
+	if r == nil || r.uiBridge == nil {
+		return false
+	}
+	owned := false
+	for _, action := range intent.Actions {
+		if action == input.UIActionUp || action == input.UIActionDown || action == input.UIActionLeft || action == input.UIActionRight {
+			if !r.controllerNav.fire(action, now, settings.NavRepeatDelay(), settings.NavRepeatRate()) {
+				continue
+			}
+		} else {
+			r.controllerNav.reset()
+		}
+		if r.uiBridge.HandleControllerAction(action) {
+			owned = true
+		}
+	}
+	if len(intent.Actions) == 0 {
+		r.controllerNav.reset()
+	}
+	return owned
+}
+
+func traceControllerRoute(frame input.ControllerFrame, actions input.ActionState, route ControllerDispatch, settings input.ControllerSettings, focus bool) {
+	if os.Getenv("GORO_CONTROLLER_TRACE") != "1" {
+		return
+	}
+	if frame.Pressed == 0 && frame.Released == 0 && actions.Move == input.DirectionNone &&
+		actions.CameraX == 0 && actions.CameraY == 0 && !frame.DeviceChanged {
+		return
+	}
+	glog.Infof("controller trace: frame seq=%d device=%d changed=%t pressed=0x%X released=0x%X move=%v mode=%d focus_ui=%t gameplay_move=%v ui_actions=%d pointer_click=%t",
+		frame.Sequence, frame.DeviceID, frame.DeviceChanged, frame.Pressed, frame.Released, actions.Move,
+		settings.UINavMode, focus, route.Gameplay.Move, len(route.UI.Actions), route.UI.PointerClick)
+}
+
+// controllerCursorAxes reports the right stick vector that drives the virtual
+// pointer. Left stick and D-pad ownership remains character movement in every
+// controller navigation mode.
 func controllerCursorAxes(snapshot input.ControllerSnapshot, settings input.ControllerSettings, _ bool) (x, y float32, blocksMovement bool) {
-	leftX, leftY := input.ApplyRadialDeadzone(snapshot.LeftX, snapshot.LeftY, settings.Deadzone, settings.OuterDeadzone)
 	rightX, rightY := input.ApplyRadialDeadzone(snapshot.RightX, snapshot.RightY, settings.Deadzone, settings.OuterDeadzone)
-	if settings.MoveMode == input.ControllerMoveCursor {
-		return leftX, leftY, true
-	}
 	return rightX, rightY, false
-}
-
-// controllerPointerClickEnabled keeps the virtual pointer's mouse-click
-// compatibility path scoped to the modes that actually use it. In direct
-// character movement mode, Confirm is a semantic gameplay action (interact,
-// pick up, or talk) and must not also become a world left click/attack.
-func controllerPointerClickEnabled(settings input.ControllerSettings, overUI bool) bool {
-	return settings.MoveMode == input.ControllerMoveCursor || overUI
 }
 
 // controllerWheelScale converts full right-stick deflection into wheel notches
@@ -1576,16 +1664,27 @@ func (r *runner) dispatchControllerPointer(state *input.State, snapshot input.Co
 		return
 	}
 	overUI := r.pointerOverUI()
+	// SDL exposes the Deck's right trackpad as touchpad 1. Feed its normalized
+	// contact into the same virtual-pointer path as a physical pointer; this
+	// keeps UI hit testing and gameplay interaction device-neutral.
+	touch := snapshot.Touchpads[1]
+	if touch.Down {
+		maxX, maxY := r.width-1, r.height-1
+		if maxX < 1 {
+			maxX = 1
+		}
+		if maxY < 1 {
+			maxY = 1
+		}
+		x := int(clampControllerTouch(touch.X)*float32(maxX) + 0.5)
+		y := int(clampControllerTouch(touch.Y)*float32(maxY) + 0.5)
+		r.cursor.SyncTo(x, y)
+		r.injectPointer(func() { r.events.EmitMouseMove(float64(x), float64(y)) })
+	}
 	axisX, axisY, blocksMovement := controllerCursorAxes(snapshot, settings, overUI)
-	if blocksMovement {
-		// The left stick is aiming, so gameplay must not also read it as a walk
-		// request this frame.
-		state.ConsumeControllerMovement()
-	} else {
-		// The right stick is aiming instead. Gameplay must not also rotate the
-		// camera with the same deflection, or the stick would do two jobs at
-		// once.
-		state.ConsumeControllerCamera()
+	_ = blocksMovement
+	if r.controllerFrame.Sequence != 0 {
+		axisX, axisY = r.controllerDispatch.Pointer.MoveX, r.controllerDispatch.Pointer.MoveY
 	}
 	if r.cursor.Move(axisX, axisY, dt, settings.CursorSpeed) {
 		x, y := r.cursor.Position()
@@ -1593,27 +1692,20 @@ func (r *runner) dispatchControllerPointer(state *input.State, snapshot input.Co
 	}
 
 	x, y := r.cursor.Position()
-	confirm := settings.Bindings.Confirm
-	pointerClickEnabled := controllerPointerClickEnabled(settings, overUI)
+	// The router is the only source of virtual pointer button edges. Do not
+	// reconstruct Confirm edges from the snapshot or State; doing so can turn
+	// one physical press into a stuck or duplicated mouse button.
 	switch {
-	case pointerClickEnabled && snapshot.ButtonDown(confirm) && !r.cursorLeftDown:
+	case r.controllerDispatch.Pointer.LeftPressed && !r.cursorLeftDown:
 		r.cursorLeftDown = true
 		r.injectPointer(func() {
 			r.events.EmitMousePress(gpucontext.MouseButtonLeft, float64(x), float64(y))
 		})
-		state.ConsumeControllerAction(input.ActionConfirm)
-	case !snapshot.ButtonDown(confirm) && r.cursorLeftDown:
+	case r.controllerDispatch.Pointer.LeftReleased && r.cursorLeftDown:
 		r.cursorLeftDown = false
 		r.injectPointer(func() {
 			r.events.EmitMouseRelease(gpucontext.MouseButtonLeft, float64(x), float64(y))
 		})
-		if overUI {
-			// gogpu buttons activate on release, so a synthetic click on a
-			// hovered but unfocused control is ambiguous. Confirm the focused
-			// widget as well.
-			r.uiBridge.HandleControllerAction(input.UIActionConfirm)
-		}
-		state.ConsumeControllerAction(input.ActionConfirm)
 	}
 
 	if overUI {
@@ -1626,6 +1718,16 @@ func (r *runner) dispatchControllerPointer(state *input.State, snapshot input.Co
 			r.injectPointer(func() { r.events.EmitScroll(0, notches) })
 		}
 	}
+}
+
+func clampControllerTouch(value float32) float32 {
+	if value < 0 {
+		return 0
+	}
+	if value > 1 {
+		return 1
+	}
+	return value
 }
 
 // injectPointer marks the emission as synthetic so wireInput does not attribute
@@ -1660,11 +1762,14 @@ func (r *runner) releaseControllerPointer() {
 			r.events.EmitMouseRelease(gpucontext.MouseButtonLeft, float64(x), float64(y))
 		})
 	}
+	r.controllerPointerMode = false
 }
 
 func (r *runner) handleControllerConnect(snapshot input.ControllerSnapshot) {
 	r.controllerConnected = true
-	r.cursor.Reset(r.width, r.height)
+	if !r.cursor.Ready() {
+		r.cursor.Reset(r.width, r.height)
+	}
 	glog.Infof("controller connected name=%q type=%s", snapshot.Name, snapshot.Kind)
 	if !r.controllerSettings.Rumble {
 		return
@@ -1682,8 +1787,19 @@ func (r *runner) handleControllerDisconnect() {
 		return
 	}
 	r.controllerConnected = false
+	r.controllerCoordinator.ResetTransient()
+	r.clearControllerActions()
 	r.releaseControllerPointer()
 	glog.Infof("controller disconnected")
+}
+
+func (r *runner) clearControllerActions() {
+	if r == nil || r.game == nil {
+		return
+	}
+	if sink, ok := r.game.(controllerActionSink); ok {
+		sink.SetControllerActions(input.ActionState{})
+	}
 }
 
 func (r *runner) pointerOverUI() bool {
@@ -1714,23 +1830,32 @@ func (r *runner) controllerRebindActive() bool {
 	return ok && active.ControllerRebindActive()
 }
 
-func (r *runner) dispatchControllerUI(state *input.State, actions input.ActionState, now time.Time) {
+func (r *runner) dispatchControllerUI(state *input.State, actions input.ActionState, now time.Time, allowDirectionalNavigation bool) bool {
 	if r == nil || state == nil || r.uiBridge == nil || !state.Controller().Connected {
-		return
+		return false
 	}
+	owned := false
 	settings := r.controllerSettings
 	delay, rate := settings.NavRepeatDelay(), settings.NavRepeatRate()
 	move := actions.Move
+	if !allowDirectionalNavigation {
+		move = input.DirectionNone
+	}
 	if !controllerMoveActive(state.Controller(), settings) || move == input.DirectionNone {
 		r.controllerNav.reset()
 	} else {
 		action := controllerUIActionForDirection(move)
 		if r.controllerNav.fire(action, now, delay, rate) && r.uiBridge.HandleControllerAction(action) {
-			state.ConsumeControllerMovement()
+			state.ConsumeControllerMovement() // compatibility marker only
+			owned = true
 		}
 	}
-	r.dispatchControllerAnalogUI(state, actions, now, delay, rate)
-	r.dispatchControllerTriggerPaging(state, now, delay, rate)
+	if r.dispatchControllerAnalogUI(state, actions, now, delay, rate) {
+		owned = true
+	}
+	if r.dispatchControllerTriggerPaging(state, now, delay, rate) {
+		owned = true
+	}
 
 	buttonActions := []struct {
 		action input.Action
@@ -1745,21 +1870,28 @@ func (r *runner) dispatchControllerUI(state *input.State, actions input.ActionSt
 		{input.ActionMenu, input.UIActionCancel},
 	}
 	for _, item := range buttonActions {
+		// Cursor-mode Confirm belongs exclusively to the routed virtual pointer.
+		// It must not also become a focus/UI Confirm event.
+		if item.action == input.ActionConfirm && r.controllerSettings.UINavMode == input.ControllerUINavCursor {
+			continue
+		}
 		if !actions.Pressed.Has(item.action) {
 			continue
 		}
 		if r.uiBridge.HandleControllerAction(item.ui) {
-			state.ConsumeControllerAction(item.action)
+			state.ConsumeControllerAction(item.action) // compatibility marker only
+			owned = true
 		}
 	}
+	return owned
 }
 
 // dispatchControllerTriggerPaging gives bare L2/R2 a page role in a focused
 // window while preserving their existing shortcut-modifier role when a face
 // button is held with them.
-func (r *runner) dispatchControllerTriggerPaging(state *input.State, now time.Time, delay, rate time.Duration) {
+func (r *runner) dispatchControllerTriggerPaging(state *input.State, now time.Time, delay, rate time.Duration) bool {
 	if r == nil || state == nil || r.uiBridge == nil {
-		return
+		return false
 	}
 	snapshot := state.Controller()
 	bindings := r.controllerSettings.Bindings
@@ -1769,7 +1901,7 @@ func (r *runner) dispatchControllerTriggerPaging(state *input.State, now time.Ti
 		snapshot.ButtonDown(input.ControllerButtonNorth)
 	if faceHeld {
 		r.controllerTriggerNav.reset()
-		return
+		return false
 	}
 	page := input.UIAction(0)
 	active := false
@@ -1782,17 +1914,19 @@ func (r *runner) dispatchControllerTriggerPaging(state *input.State, now time.Ti
 	}
 	if !active {
 		r.controllerTriggerNav.reset()
-		return
+		return false
 	}
 	if r.controllerTriggerNav.fire(page, now, delay, rate) && r.uiBridge.HandleControllerAction(page) {
-		state.ConsumeControllerAction(input.ActionLeftModifier)
-		state.ConsumeControllerAction(input.ActionRightModifier)
+		state.ConsumeControllerAction(input.ActionLeftModifier)  // compatibility marker only
+		state.ConsumeControllerAction(input.ActionRightModifier) // compatibility marker only
+		return true
 	}
+	return false
 }
 
-func (r *runner) dispatchControllerAnalogUI(state *input.State, actions input.ActionState, now time.Time, delay, rate time.Duration) {
+func (r *runner) dispatchControllerAnalogUI(state *input.State, actions input.ActionState, now time.Time, delay, rate time.Duration) bool {
 	if r == nil || state == nil || r.uiBridge == nil || !state.Controller().Connected {
-		return
+		return false
 	}
 	var action input.UIAction
 	switch {
@@ -1806,16 +1940,27 @@ func (r *runner) dispatchControllerAnalogUI(state *input.State, actions input.Ac
 		action = input.UIActionRight
 	default:
 		r.controllerRightNav.reset()
-		return
+		return false
 	}
 	if r.controllerRightNav.fire(action, now, delay, rate) {
-		r.uiBridge.HandleControllerAction(action)
+		return r.uiBridge.HandleControllerAction(action)
 	}
+	return false
 }
 
 func controllerMoveActive(snapshot input.ControllerSnapshot, settings input.ControllerSettings) bool {
 	leftX, leftY := input.ApplyRadialDeadzone(snapshot.LeftX, snapshot.LeftY, settings.Deadzone, settings.OuterDeadzone)
 	return leftX != 0 || leftY != 0 || snapshot.Buttons.Has(input.ControllerButtonDPadUp) || snapshot.Buttons.Has(input.ControllerButtonDPadDown) || snapshot.Buttons.Has(input.ControllerButtonDPadLeft) || snapshot.Buttons.Has(input.ControllerButtonDPadRight)
+}
+
+func controllerHasUserActivity(snapshot input.ControllerSnapshot, settings input.ControllerSettings) bool {
+	if snapshot.Buttons != 0 {
+		return true
+	}
+	leftX, leftY := input.ApplyRadialDeadzone(snapshot.LeftX, snapshot.LeftY, settings.Deadzone, settings.OuterDeadzone)
+	rightX, rightY := input.ApplyRadialDeadzone(snapshot.RightX, snapshot.RightY, settings.Deadzone, settings.OuterDeadzone)
+	return leftX != 0 || leftY != 0 || rightX != 0 || rightY != 0 ||
+		snapshot.LeftTrigger >= settings.TriggerDeadzone || snapshot.RightTrigger >= settings.TriggerDeadzone
 }
 
 func controllerUIActionForDirection(direction input.Direction8) input.UIAction {

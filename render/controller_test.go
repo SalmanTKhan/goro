@@ -193,10 +193,11 @@ func TestControllerCursorAxesRespectMoveMode(t *testing.T) {
 	settings := input.DefaultControllerSettings().Normalized()
 	snapshot := input.ControllerSnapshot{Connected: true, LeftX: 1, RightY: 1}
 
-	// Cursor move mode: the left stick always aims, so it can never also walk.
+	// Cursor navigation keeps the left stick available for character movement;
+	// the right stick owns the virtual pointer.
 	settings.MoveMode = input.ControllerMoveCursor
 	x, y, blocks := controllerCursorAxes(snapshot, settings, false)
-	if x == 0 || y != 0 || !blocks {
+	if x != 0 || y == 0 || blocks {
 		t.Fatalf("cursor mode over world = %v,%v blocks=%v", x, y, blocks)
 	}
 
@@ -274,7 +275,7 @@ func TestDispatchControllerPointerEmitsOneMovePerPixelChange(t *testing.T) {
 	r, recorder := newPointerTestRunner()
 	settings := r.controllerSettings
 	settings.MoveMode = input.ControllerMoveCursor
-	snapshot := input.ControllerSnapshot{Connected: true, LeftX: 1}
+	snapshot := input.ControllerSnapshot{Connected: true, RightX: 1}
 	state := r.game.InputState()
 
 	// A frame short enough to move less than a pixel emits nothing.
@@ -399,11 +400,8 @@ func TestCharacterModeRightStickAimingConsumesCamera(t *testing.T) {
 	snapshot := input.ControllerSnapshot{Connected: true, RightX: 1}
 
 	r.dispatchControllerPointer(state, snapshot, settings, 16*time.Millisecond)
-	if !state.ControllerCameraConsumed() {
-		t.Fatal("right-stick aiming did not consume camera rotation")
-	}
 	if state.ControllerMovementConsumed() {
-		t.Fatal("character mode over the world must leave the left stick free to walk")
+		t.Fatal("character mode must leave left-stick movement to gameplay")
 	}
 }
 
@@ -415,10 +413,7 @@ func TestCursorModeLeavesCameraToGameplay(t *testing.T) {
 	snapshot := input.ControllerSnapshot{Connected: true, LeftX: 1, RightX: 1}
 
 	r.dispatchControllerPointer(state, snapshot, settings, 16*time.Millisecond)
-	if state.ControllerCameraConsumed() {
-		t.Fatal("cursor mode must leave the right stick to camera rotation")
-	}
-	if !state.ControllerMovementConsumed() {
-		t.Fatal("cursor mode must consume left-stick movement")
+	if state.ControllerMovementConsumed() || state.ControllerCameraConsumed() {
+		t.Fatal("cursor mode must not arbitrate through shared consumed flags")
 	}
 }

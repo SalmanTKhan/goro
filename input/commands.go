@@ -95,7 +95,12 @@ type WorldPosition struct {
 // PlayerCommand carries semantic player intent. Hardware-specific values
 // such as MouseButton, KeyCode, TouchID, and screen coordinates are absent.
 type PlayerCommand struct {
-	Kind             CommandKind
+	Kind CommandKind
+	// MoveVector/MoveMagnitude preserve analog controller intent while the
+	// existing Direction field remains available for digital callers.
+	MoveX            float32
+	MoveY            float32
+	MoveMagnitude    float32
 	Position         WorldPosition
 	ActorID          uint32
 	ItemID           uint32

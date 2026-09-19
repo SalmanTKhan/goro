@@ -26,35 +26,43 @@ import (
 )
 
 type Game struct {
-	cfg                   config.Config
-	input                 *input.State
-	resource              *res.Manager
-	assets                client.AssetAvailability
-	session               *session.Session
-	world                 *world.World
-	network               *network.Client
-	offline               *session.OfflineSession
-	audio                 *gameaudio.BGM
-	modes                 *game.Manager
-	runtime               *runtimeSettings
-	uiApp                 client.UIApp
-	ui                    *gameui.Manager
-	started               time.Time
-	lastUpdate            time.Time
-	screenW               int
-	screenH               int
-	uiW                   int
-	uiH                   int
-	quit                  func()
-	quitting              bool
-	pendingScreenshot     string
-	pendingScreenshotOpts capture.ScreenshotOptions
-	pendingRecording      capture.RecordingOptions
-	hasPendingRecording   bool
-	recordingActive       bool
-	pendingRecordingStop  bool
-	mobileTarget          mobileui.TargetHUDModel
-	mobileSettingsChanged func(input.MobileSettings)
+	cfg                    config.Config
+	input                  *input.State
+	resource               *res.Manager
+	assets                 client.AssetAvailability
+	session                *session.Session
+	world                  *world.World
+	network                *network.Client
+	offline                *session.OfflineSession
+	audio                  *gameaudio.BGM
+	modes                  *game.Manager
+	runtime                *runtimeSettings
+	uiApp                  client.UIApp
+	ui                     *gameui.Manager
+	started                time.Time
+	lastUpdate             time.Time
+	screenW                int
+	screenH                int
+	uiW                    int
+	uiH                    int
+	quit                   func()
+	quitting               bool
+	pendingScreenshot      string
+	pendingScreenshotOpts  capture.ScreenshotOptions
+	pendingRecording       capture.RecordingOptions
+	hasPendingRecording    bool
+	recordingActive        bool
+	pendingRecordingStop   bool
+	mobileTarget           mobileui.TargetHUDModel
+	mobileSettingsChanged  func(input.MobileSettings)
+	controllerActions      input.ActionState
+	controllerActionsValid bool
+}
+
+func (g *Game) SetControllerActions(actions input.ActionState) {
+	if g != nil {
+		g.controllerActions, g.controllerActionsValid = actions, true
+	}
 }
 
 func (g *Game) SetMobileSettingsChanged(callback func(input.MobileSettings)) {
@@ -988,5 +996,7 @@ func (g *Game) modeContext() client.Context {
 		MobileSettingsHost:       g,
 		UISettingsHost:           g,
 		ControllerSettingsHost:   g,
+		ControllerActions:        g.controllerActions,
+		ControllerActionsValid:   g.controllerActionsValid,
 	}
 }

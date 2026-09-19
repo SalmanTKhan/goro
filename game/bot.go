@@ -573,7 +573,10 @@ func luaPlayerTable(L *lua.LState, ctx client.Context) *lua.LTable {
 
 func luaActionTable(L *lua.LState, ctx client.Context) *lua.LTable {
 	result := L.NewTable()
-	actions := input.ResolveActions(ctx.Input, ctx.ControllerSettings())
+	actions := ctx.ControllerActions
+	if !ctx.ControllerActionsValid {
+		actions = input.ResolveActions(ctx.Input, ctx.ControllerSettings())
+	}
 	result.RawSetString("source", lua.LString(luaInputSourceName(actions.Source)))
 	result.RawSetString("move", lua.LString(luaDirectionName(actions.Move)))
 	moveX, moveY := actions.Move.Vector()

@@ -4,6 +4,9 @@ package gamepad
 
 import (
 	"fmt"
+	"os"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/Zyko0/go-sdl3/sdl"
@@ -15,12 +18,22 @@ import (
 // standardized gamepad interface rather than depending on vendor-specific
 // DualSense HID layouts.
 type Backend struct {
+	mu           sync.Mutex
 	loaded       bool
-	gamepad      *sdl.Gamepad
-	gamepadID    sdl.JoystickID
+	devices      map[sdl.JoystickID]*device
+	activeID     sdl.JoystickID
+	resetRequest bool
 	closed       bool
 	lastReconcil time.Time
 	noGamepadLog time.Time
+	trace        bool
+}
+
+type device struct {
+	id       sdl.JoystickID
+	gamepad  *sdl.Gamepad
+	snapshot input.ControllerSnapshot
+	lastUsed time.Time
 }
 
 // reconcileInterval is how often the backend re-enumerates devices as a
@@ -33,6 +46,7 @@ const reconcileInterval = time.Second
 // USB but not over Bluetooth.
 var hidapiHints = [][2]string{
 	{sdl.HINT_JOYSTICK_HIDAPI, "1"},
+	{sdl.HINT_JOYSTICK_HIDAPI_STEAMDECK, "1"},
 	{sdl.HINT_JOYSTICK_HIDAPI_PS5, "1"},
 	{sdl.HINT_JOYSTICK_HIDAPI_PS5_PLAYER_LED, "1"},
 	{sdl.HINT_JOYSTICK_ENHANCED_REPORTS, "1"},
@@ -60,7 +74,7 @@ func Open() (*Backend, error) {
 		_ = sdl.CloseLibrary()
 		return nil, fmt.Errorf("initialize SDL gamepad subsystem: %w", err)
 	}
-	backend := &Backend{loaded: true}
+	backend := &Backend{loaded: true, devices: make(map[sdl.JoystickID]*device), trace: os.Getenv("GORO_CONTROLLER_TRACE") == "1"}
 	found, err := backend.refresh()
 	if err != nil {
 		backend.Close()
@@ -73,35 +87,55 @@ func Open() (*Backend, error) {
 }
 
 func (b *Backend) Poll() (input.ControllerSnapshot, error) {
-	if b == nil || b.closed {
+	if b == nil {
 		return input.ControllerSnapshot{}, nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed {
+		return input.ControllerSnapshot{}, nil
+	}
+	if b.resetRequest {
+		b.resetRequest = false
+		b.lastReconcil = time.Time{}
+		b.tracef("controller reconcile applied reason=focus-restored devices=%d", len(b.devices))
 	}
 	sdl.PumpEvents()
 	sdl.UpdateGamepads()
 	if err := b.drainEvents(); err != nil {
 		return input.ControllerSnapshot{}, err
 	}
-	// Re-enumerate periodically so a dropped add/remove event cannot leave the
-	// backend permanently blind, and immediately whenever no pad is open.
+	// Re-enumerate periodically so missed hotplug events and suspend/resume
+	// handle invalidation cannot leave the backend permanently blind.
 	now := time.Now()
-	if b.gamepad == nil || now.Sub(b.lastReconcil) >= reconcileInterval {
+	if len(b.devices) == 0 || now.Sub(b.lastReconcil) >= reconcileInterval {
 		b.lastReconcil = now
 		if _, err := b.refresh(); err != nil {
 			return input.ControllerSnapshot{}, err
 		}
 	}
-	if b.gamepad == nil {
+	if len(b.devices) == 0 {
 		if b.noGamepadLog.IsZero() || now.Sub(b.noGamepadLog) >= 10*time.Second {
 			glog.Debugf("SDL3 gamepad poll: no standardized gamepad available")
 			b.noGamepadLog = now
 		}
 		return input.ControllerSnapshot{}, nil
 	}
-	snapshot := b.snapshot()
-	if !snapshot.Connected {
-		glog.Debugf("SDL3 gamepad poll: selected device is no longer connected")
+	for id, current := range b.devices {
+		next := b.snapshot(current.gamepad, id)
+		if meaningfulActivity(current.snapshot, next) {
+			current.lastUsed = now
+			if b.activeID != id {
+				b.tracef("controller active %d -> %d reason=%s axis=(%.2f,%.2f)", b.activeID, id, activityReason(current.snapshot, next), next.LeftX, next.LeftY)
+			}
+			b.activeID = id
+		}
+		current.snapshot = next
 	}
-	return snapshot, nil
+	if active, ok := b.devices[b.activeID]; ok {
+		return active.snapshot, nil
+	}
+	return input.ControllerSnapshot{}, nil
 }
 
 // drainEvents consumes SDL's event queue, acting only on gamepad arrival and
@@ -115,18 +149,22 @@ func (b *Backend) drainEvents() error {
 		switch event.Type {
 		case sdl.EVENT_GAMEPAD_ADDED:
 			glog.Infof("SDL3 gamepad added event")
-			if b.gamepad == nil {
-				if _, err := b.refresh(); err != nil {
-					return err
-				}
+			if _, err := b.refresh(); err != nil {
+				return err
 			}
 		case sdl.EVENT_GAMEPAD_REMOVED:
 			device := event.GamepadDeviceEvent()
 			if device != nil {
 				glog.Warnf("SDL3 gamepad removed event id=%d", device.Which)
 			}
-			if device != nil && device.Which == b.gamepadID {
-				b.closeGamepad()
+			if device != nil {
+				// Steam Input can replace its virtual Deck pad during profile
+				// activation. Re-enumerate before closing the handle: a transient
+				// removal event must not make the controller disappear when the
+				// same device is still present (or has already been recreated).
+				if _, err := b.refresh(); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -134,27 +172,49 @@ func (b *Backend) drainEvents() error {
 }
 
 func (b *Backend) closeGamepad() {
-	if b.gamepad != nil {
-		b.gamepad.Close()
-		b.gamepad = nil
+	for id, current := range b.devices {
+		current.gamepad.Close()
+		delete(b.devices, id)
 	}
-	b.gamepadID = 0
+	b.activeID = 0
 }
 
 // Rumble drives both motors. Magnitudes are in [0, 1].
 func (b *Backend) Rumble(low, high float32, duration time.Duration) error {
-	if b == nil || b.closed || b.gamepad == nil {
+	if b == nil {
 		return nil
 	}
-	return b.gamepad.Rumble(rumbleMagnitude(low), rumbleMagnitude(high), uint32(duration.Milliseconds()))
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed {
+		return nil
+	}
+	active := b.devices[b.activeID]
+	if active == nil {
+		return nil
+	}
+	err := active.gamepad.Rumble(rumbleMagnitude(low), rumbleMagnitude(high), uint32(duration.Milliseconds()))
+	b.tracef("rumble id=%d success=%t", active.id, err == nil)
+	return err
 }
 
 // SetLED sets the light bar colour on controllers that have one.
 func (b *Backend) SetLED(red, green, blue uint8) error {
-	if b == nil || b.closed || b.gamepad == nil {
+	if b == nil {
 		return nil
 	}
-	return b.gamepad.SetLED(red, green, blue)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed {
+		return nil
+	}
+	active := b.devices[b.activeID]
+	if active == nil {
+		return nil
+	}
+	err := active.gamepad.SetLED(red, green, blue)
+	b.tracef("led id=%d success=%t", active.id, err == nil)
+	return err
 }
 
 func rumbleMagnitude(value float32) uint16 {
@@ -192,45 +252,43 @@ func (b *Backend) refresh() (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("enumerate SDL gamepads: %w", err)
 	}
-	var selected sdl.JoystickID
-	found := false
+	present := make(map[sdl.JoystickID]bool, len(ids))
 	for _, id := range ids {
-		if id == b.gamepadID && b.gamepad != nil {
-			selected, found = id, true
-			break
+		present[id] = true
+		if _, ok := b.devices[id]; ok {
+			continue
+		}
+		gamepad, err := id.OpenGamepad()
+		if err != nil {
+			glog.Warnf("open SDL gamepad %d failed: %v", id, err)
+			continue
+		}
+		b.devices[id] = &device{id: id, gamepad: gamepad}
+		kind := diagnosticKind(gamepad.Name(), gamepad.Type())
+		glog.Infof("SDL3 gamepad opened id=%d name=%q type=%s", id, gamepad.Name(), kind)
+		b.tracef("controller add id=%d name=%q kind=%s touchpads=%d", id, gamepad.Name(), kind, gamepad.NumTouchpadFingers(0))
+	}
+	for id, current := range b.devices {
+		if present[id] {
+			continue
+		}
+		glog.Warnf("SDL3 gamepad enumeration no longer contains id=%d", id)
+		current.gamepad.Close()
+		delete(b.devices, id)
+		if b.activeID == id {
+			b.tracef("controller remove id=%d active=true", id)
+			b.activeID = 0
+		} else {
+			b.tracef("controller remove id=%d active=false", id)
 		}
 	}
-	if !found && len(ids) > 0 {
-		selected, found = ids[0], true
-	}
-	if !found {
-		if b.gamepad != nil {
-			glog.Warnf("SDL3 gamepad enumeration no longer contains id=%d", b.gamepadID)
-		}
-		b.closeGamepad()
-		return false, nil
-	}
-	if b.gamepad != nil && b.gamepadID == selected {
-		return true, nil
-	}
-	if b.gamepad != nil {
-		b.gamepad.Close()
-	}
-	gamepad, err := selected.OpenGamepad()
-	if err != nil {
-		b.gamepad = nil
-		b.gamepadID = 0
-		return false, fmt.Errorf("open SDL gamepad %d: %w", selected, err)
-	}
-	b.gamepad = gamepad
-	b.gamepadID = selected
 	b.noGamepadLog = time.Time{}
-	glog.Infof("SDL3 gamepad opened id=%d name=%q type=%s", selected, gamepad.Name(), controllerKind(gamepad.Type()))
-	return true, nil
+	return len(b.devices) > 0, nil
 }
 
-func (b *Backend) snapshot() input.ControllerSnapshot {
-	gamepad := b.gamepad
+func (b *Backend) snapshot(gamepad *sdl.Gamepad, id sdl.JoystickID) input.ControllerSnapshot {
+	name := gamepad.Name()
+	kind := diagnosticKind(name, gamepad.Type())
 	var buttons input.ControllerButtons
 	set := func(dst input.ControllerButton, src sdl.GamepadButton) {
 		buttons.Set(dst, gamepad.Button(src))
@@ -245,11 +303,28 @@ func (b *Backend) snapshot() input.ControllerSnapshot {
 	set(input.ControllerButtonRightStick, sdl.GAMEPAD_BUTTON_RIGHT_STICK)
 	set(input.ControllerButtonLeftShoulder, sdl.GAMEPAD_BUTTON_LEFT_SHOULDER)
 	set(input.ControllerButtonRightShoulder, sdl.GAMEPAD_BUTTON_RIGHT_SHOULDER)
+	set(input.ControllerButtonGuide, sdl.GAMEPAD_BUTTON_GUIDE)
+	set(input.ControllerButtonMisc1, sdl.GAMEPAD_BUTTON_MISC1)
+	set(input.ControllerButtonRightPaddle1, sdl.GAMEPAD_BUTTON_RIGHT_PADDLE1)
+	set(input.ControllerButtonLeftPaddle1, sdl.GAMEPAD_BUTTON_LEFT_PADDLE1)
+	set(input.ControllerButtonRightPaddle2, sdl.GAMEPAD_BUTTON_RIGHT_PADDLE2)
+	set(input.ControllerButtonLeftPaddle2, sdl.GAMEPAD_BUTTON_LEFT_PADDLE2)
 	set(input.ControllerButtonDPadUp, sdl.GAMEPAD_BUTTON_DPAD_UP)
 	set(input.ControllerButtonDPadDown, sdl.GAMEPAD_BUTTON_DPAD_DOWN)
 	set(input.ControllerButtonDPadLeft, sdl.GAMEPAD_BUTTON_DPAD_LEFT)
 	set(input.ControllerButtonDPadRight, sdl.GAMEPAD_BUTTON_DPAD_RIGHT)
 	set(input.ControllerButtonTouchpad, sdl.GAMEPAD_BUTTON_TOUCHPAD)
+	var touchpads [2]input.ControllerTouch
+	for touchpad := int32(0); touchpad < int32(len(touchpads)); touchpad++ {
+		if gamepad.NumTouchpadFingers(touchpad) <= 0 {
+			continue
+		}
+		var down bool
+		var x, y, pressure float32
+		if gamepad.TouchpadFinger(touchpad, 0, &down, &x, &y, &pressure) {
+			touchpads[touchpad] = input.ControllerTouch{Down: down, X: x, Y: y, Pressure: pressure}
+		}
+	}
 
 	// Keep the logical connection alive while the handle is open. SDL can
 	// briefly report Connected()==false for Steam Input's virtual Deck pad
@@ -262,9 +337,9 @@ func (b *Backend) snapshot() input.ControllerSnapshot {
 	}
 	return input.ControllerSnapshot{
 		Connected:    true,
-		ID:           uint64(b.gamepadID),
-		Name:         gamepad.Name(),
-		Kind:         controllerKind(gamepad.Type()),
+		ID:           uint64(id),
+		Name:         name,
+		Kind:         kind,
 		Buttons:      buttons,
 		LeftX:        axis(gamepad.Axis(sdl.GAMEPAD_AXIS_LEFTX)),
 		LeftY:        axis(gamepad.Axis(sdl.GAMEPAD_AXIS_LEFTY)),
@@ -272,7 +347,15 @@ func (b *Backend) snapshot() input.ControllerSnapshot {
 		RightY:       axis(gamepad.Axis(sdl.GAMEPAD_AXIS_RIGHTY)),
 		LeftTrigger:  trigger(gamepad.Axis(sdl.GAMEPAD_AXIS_LEFT_TRIGGER)),
 		RightTrigger: trigger(gamepad.Axis(sdl.GAMEPAD_AXIS_RIGHT_TRIGGER)),
+		Touchpads:    touchpads,
 	}
+}
+
+func diagnosticKind(name string, gamepadType sdl.GamepadType) input.ControllerKind {
+	if strings.Contains(strings.ToLower(name), "steam deck") {
+		return input.ControllerKindSteamDeck
+	}
+	return controllerKind(gamepadType)
 }
 
 func axis(value int16) float32 {
@@ -289,15 +372,70 @@ func trigger(value int16) float32 {
 	return float32(value) / 32767
 }
 
+func meaningfulActivity(previous, next input.ControllerSnapshot) bool {
+	if previous.Buttons != next.Buttons {
+		return true
+	}
+	const axisDelta = 0.08
+	axisChanged := func(a, b float32) bool {
+		return float32Abs(a-b) > axisDelta
+	}
+	if axisChanged(previous.LeftX, next.LeftX) || axisChanged(previous.LeftY, next.LeftY) ||
+		axisChanged(previous.RightX, next.RightX) || axisChanged(previous.RightY, next.RightY) ||
+		axisChanged(previous.LeftTrigger, next.LeftTrigger) || axisChanged(previous.RightTrigger, next.RightTrigger) {
+		return true
+	}
+	for i := range next.Touchpads {
+		if previous.Touchpads[i].Down != next.Touchpads[i].Down {
+			return true
+		}
+		if next.Touchpads[i].Down && (axisChanged(previous.Touchpads[i].X, next.Touchpads[i].X) || axisChanged(previous.Touchpads[i].Y, next.Touchpads[i].Y)) {
+			return true
+		}
+	}
+	return (float32Abs(next.LeftX)+float32Abs(next.LeftY) >= 0.15) ||
+		(float32Abs(next.RightX)+float32Abs(next.RightY) >= 0.15) ||
+		next.LeftTrigger >= 0.15 || next.RightTrigger >= 0.15
+}
+
+func activityReason(previous, next input.ControllerSnapshot) string {
+	if previous.Buttons != next.Buttons {
+		return "button"
+	}
+	if previous.Touchpads[0].Down != next.Touchpads[0].Down || previous.Touchpads[1].Down != next.Touchpads[1].Down {
+		return "trackpad"
+	}
+	if float32Abs(next.LeftTrigger-previous.LeftTrigger) > 0.08 || float32Abs(next.RightTrigger-previous.RightTrigger) > 0.08 {
+		return "trigger"
+	}
+	if float32Abs(next.LeftX-previous.LeftX) > 0.08 || float32Abs(next.LeftY-previous.LeftY) > 0.08 {
+		return "left-stick"
+	}
+	return "right-stick"
+}
+
+func float32Abs(value float32) float32 {
+	if value < 0 {
+		return -value
+	}
+	return value
+}
+
 func (b *Backend) Close() error {
-	if b == nil || b.closed {
+	if b == nil {
+		return nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed {
 		return nil
 	}
 	b.closed = true
-	if b.gamepad != nil {
-		b.gamepad.Close()
-		b.gamepad = nil
+	for id, current := range b.devices {
+		current.gamepad.Close()
+		delete(b.devices, id)
 	}
+	b.activeID = 0
 	sdl.Quit()
 	if b.loaded {
 		if err := sdl.CloseLibrary(); err != nil {
@@ -306,4 +444,30 @@ func (b *Backend) Close() error {
 		b.loaded = false
 	}
 	return nil
+}
+
+// Reset discards SDL handles and ownership so a suspend/resume or compositor
+// focus restoration is handled as a fresh topology build on the next Poll.
+func (b *Backend) Reset() error {
+	if b == nil {
+		return nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed {
+		return nil
+	}
+	if b.resetRequest {
+		b.tracef("controller reconcile coalesced reason=focus-restored")
+		return nil
+	}
+	b.resetRequest = true
+	b.tracef("controller reconcile requested reason=focus-restored devices=%d", len(b.devices))
+	return nil
+}
+
+func (b *Backend) tracef(format string, args ...any) {
+	if b != nil && b.trace {
+		glog.Infof("controller trace: "+format, args...)
+	}
 }

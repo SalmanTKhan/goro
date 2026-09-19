@@ -67,28 +67,28 @@ const (
 type TouchID int64
 
 type State struct {
-	frameID           uint64
-	keys              map[Key]bool
-	prev              map[Key]bool
-	justKeys          map[Key]bool
-	keyCodes          map[KeyCode]bool
-	prevKeyCodes      map[KeyCode]bool
-	justKeyCodes      map[KeyCode]bool
-	justKeyCodeUps    map[KeyCode]bool
-	consumedKeyCodes  map[KeyCode]bool
-	buttons           map[MouseButton]bool
-	prevMouse         map[MouseButton]bool
-	justMouse         map[MouseButton]bool
-	justMouseReleased map[MouseButton]bool
+	frameID                  uint64
+	keys                     map[Key]bool
+	prev                     map[Key]bool
+	justKeys                 map[Key]bool
+	keyCodes                 map[KeyCode]bool
+	prevKeyCodes             map[KeyCode]bool
+	justKeyCodes             map[KeyCode]bool
+	justKeyCodeUps           map[KeyCode]bool
+	consumedKeyCodes         map[KeyCode]bool
+	buttons                  map[MouseButton]bool
+	prevMouse                map[MouseButton]bool
+	justMouse                map[MouseButton]bool
+	justMouseReleased        map[MouseButton]bool
 	controller               ControllerSnapshot
 	prevController           ControllerSnapshot
+	controllerFrame          ControllerFrame
 	consumedActions          ActionSet
 	controllerMoveConsumed   bool
 	controllerCameraConsumed bool
 	controllerZoomConsumed   bool
 	pointerSource            InputSource
 	source                   InputSource
-
 
 	MouseX   int
 	MouseY   int
@@ -249,6 +249,23 @@ func (s *State) SetController(snapshot ControllerSnapshot) {
 	}
 }
 
+// SetControllerFrame publishes the coordinator-owned immutable controller
+// sample for consumers migrating away from State's legacy temporal fields.
+func (s *State) SetControllerFrame(frame ControllerFrame) {
+	if s == nil {
+		return
+	}
+	s.controllerFrame = frame
+	s.controller = frame.Current
+}
+
+func (s *State) ControllerFrame() ControllerFrame {
+	if s == nil {
+		return ControllerFrame{}
+	}
+	return s.controllerFrame
+}
+
 func (s *State) Controller() ControllerSnapshot {
 	if s == nil {
 		return ControllerSnapshot{}
@@ -346,11 +363,19 @@ func (s *State) TextInput() string {
 }
 
 func (s *State) SetTouch(id TouchID, x, y int, pressed bool) {
+	if s == nil {
+		return
+	}
 	if pressed {
 		s.touches[id] = TouchPoint{ID: id, X: x, Y: y}
+		s.source = InputSourceTouch
 		return
 	}
 	delete(s.touches, id)
+	// A release is still touch activity; keeping the source here prevents a
+	// controller sample in the same frame from incorrectly owning the UI
+	// transition caused by the touch release.
+	s.source = InputSourceTouch
 }
 
 func (s *State) Pressed(key Key) bool {

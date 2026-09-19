@@ -16,7 +16,7 @@ import (
 func (m *WorldMode) ApplyPlayerCommand(ctx client.Context, command input.PlayerCommand) bool {
 	switch command.Kind {
 	case input.CommandMoveDirection:
-		return m.moveController(ctx, command.Direction)
+		return m.moveControllerVector(ctx, command.Direction, command.MoveX, command.MoveY, command.MoveMagnitude)
 	case input.CommandTargetPrevious:
 		return m.cycleControllerTarget(ctx, true)
 	case input.CommandTargetNext:

@@ -252,24 +252,11 @@ func (w *SettingsWindow) contentTree(ctx client.Context) widget.Widget {
 			}),
 		),
 
-		rotheme.Button(controllerMoveModeLabel(ctx), func() {
-			controller := settingsController(ctx)
-			if controller.MoveMode == input.ControllerMoveCharacter {
-				controller.MoveMode = input.ControllerMoveCursor
-			} else {
-				controller.MoveMode = input.ControllerMoveCharacter
-			}
-			w.applyController(ctx, controller)
-		}),
-
-		rotheme.Button(controllerUINavModeLabel(ctx), func() {
-			controller := settingsController(ctx)
-			if controller.UINavMode == input.ControllerUINavCursor {
-				controller.UINavMode = input.ControllerUINavFocus
-			} else {
-				controller.UINavMode = input.ControllerUINavCursor
-			}
-			w.applyController(ctx, controller)
+		rotheme.Button("Controller: Recommended", func() {
+			// The normal settings surface exposes one coherent layout. Pointer
+			// control remains an explicit override from a real UI context, not a
+			// second movement scheme selected independently by the player.
+			w.applyController(ctx, input.ApplyControllerScheme(settingsController(ctx), input.ControllerSchemeClassic))
 		}),
 
 		primitives.HBox(
@@ -367,6 +354,10 @@ func settingsController(ctx client.Context) input.ControllerSettings {
 
 func controllerMoveModeLabel(ctx client.Context) string {
 	return "Movement: " + settingsController(ctx).MoveMode.String()
+}
+
+func controllerSchemeLabel(ctx client.Context) string {
+	return "Scheme: " + settingsController(ctx).Scheme.String()
 }
 
 func controllerUINavModeLabel(ctx client.Context) string {

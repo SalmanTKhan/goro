@@ -24,7 +24,6 @@ type LoginWindow struct {
 	Offline  bool
 	KeepID   bool
 
-
 	Window
 	layout    loginWindowLayout
 	callbacks LoginWindowCallbacks
@@ -32,7 +31,6 @@ type LoginWindow struct {
 	password  *textfield.Widget
 	offline   *checkbox.Widget
 	keep      *checkbox.Widget
-
 }
 
 const (
@@ -85,6 +83,7 @@ func (w *LoginWindow) Update(ctx client.Context) bool {
 
 func (w *LoginWindow) rebuild() {
 	userFocused, passwordFocused := w.fieldFocus()
+	keepFocused := w.keep != nil && w.keep.IsFocused()
 	w.SetContent(w.widgetTree())
 	if w.user != nil {
 		w.user.SetFocused(userFocused)
@@ -92,6 +91,14 @@ func (w *LoginWindow) rebuild() {
 	if w.password != nil {
 		w.password.SetFocused(passwordFocused)
 	}
+	if w.keep != nil {
+		w.keep.SetFocused(keepFocused)
+	}
+}
+
+func (w *LoginWindow) Publish(ctx client.Context) {
+	w.Window.Publish(ctx)
+	w.restoreFocus(ctx)
 }
 
 func (w *LoginWindow) restoreFocus(ctx client.Context) {
@@ -108,16 +115,39 @@ func (w *LoginWindow) restoreFocus(ctx client.Context) {
 	}
 }
 
-func (w *LoginWindow) widgetTree() widget.Widget {
-	submit := func() {
-		if w.Offline && w.callbacks.OnOfflineSubmit != nil {
-			w.callbacks.OnOfflineSubmit()
-			return
-		}
-		if w.callbacks.OnSubmit != nil {
-			w.callbacks.OnSubmit()
-		}
+func (w *LoginWindow) focusPassword() {
+	if w == nil || w.password == nil {
+		return
 	}
+	if w.user != nil {
+		w.user.SetFocused(false)
+	}
+	w.password.SetFocused(true)
+	w.restoreFocus(w.ctx)
+}
+
+func (w *LoginWindow) submitField(passwordField bool) {
+	if w == nil {
+		return
+	}
+	if !passwordField {
+		w.focusPassword()
+		return
+	}
+	if !w.Offline && w.password != nil && w.password.Text() == "" {
+		w.focusPassword()
+		return
+	}
+	if w.Offline && w.callbacks.OnOfflineSubmit != nil {
+		w.callbacks.OnOfflineSubmit()
+		return
+	}
+	if w.callbacks.OnSubmit != nil {
+		w.callbacks.OnSubmit()
+	}
+}
+
+func (w *LoginWindow) widgetTree() widget.Widget {
 	userFocused, passwordFocused := w.fieldFocus()
 	keepFocused := w.keep != nil && w.keep.IsFocused()
 	username, passwordValue := w.fieldValues()
@@ -127,7 +157,7 @@ func (w *LoginWindow) widgetTree() widget.Widget {
 		func(v string) {
 			w.Username = v
 		},
-		func(string) { submit() },
+		func(string) { w.submitField(false) },
 	)
 	user.SetFocused(userFocused)
 	password := rotheme.TextField(
@@ -136,7 +166,7 @@ func (w *LoginWindow) widgetTree() widget.Widget {
 		func(v string) {
 			w.Password = v
 		},
-		func(string) { submit() },
+		func(string) { w.submitField(true) },
 	)
 	password.SetFocused(passwordFocused)
 	w.user = user
@@ -207,11 +237,7 @@ func (w *LoginWindow) widgetTree() widget.Widget {
 		Footer(
 			primitives.Expanded(primitives.Box()),
 			rotheme.Button("Login", func() {
-				if w.Offline && w.callbacks.OnOfflineSubmit != nil {
-					w.callbacks.OnOfflineSubmit()
-					return
-				}
-				submit()
+				w.submitField(true)
 			}),
 		),
 	)

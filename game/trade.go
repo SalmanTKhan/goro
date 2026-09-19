@@ -57,14 +57,10 @@ func (m *WorldMode) openTradeRequest(ctx client.Context, request network.TradeRe
 		mobileMessage = fmt.Sprintf("%s\nLv.%d", mobileMessage, request.Level)
 	}
 	m.ui.tradeRequest.Open(ctx, "Trade Request", mobileMessage, func() {
-		if m.respondTradeRequest(ctx, true) {
-			m.ui.tradeWindow.Open(ctx, name)
-		}
-		if err := ctx.Network.SendTradeAck(true); err != nil {
-			glog.Warnf("trade request accept failed name=%q: %v", request.Name, err)
-			return
-		}
-		m.pendingTradeName = name
+		// respondTradeRequest owns acknowledgement, state cleanup, and opening
+		// the mobile trade model. Keeping that transaction in one guarded path
+		// prevents a nil network panic and duplicate ACKs after merges.
+		m.respondTradeRequest(ctx, true)
 
 	}, func() {
 		m.respondTradeRequest(ctx, false)

@@ -127,6 +127,75 @@ func TestResolveActionsSupportsTriggerShortcutLayers(t *testing.T) {
 	}
 }
 
+func TestResolveActionsMapsDPadAndCameraWithoutTriggerZoom(t *testing.T) {
+	state := NewState()
+	state.SetController(ControllerSnapshot{
+		Connected:    true,
+		RightX:       0.8,
+		RightY:       -0.4,
+		LeftTrigger:  0.7,
+		RightTrigger: 0.9,
+		Buttons:      buttonsWith(ControllerButtonDPadUp, ControllerButtonDPadRight),
+	})
+	actions := ResolveActions(state, DefaultControllerSettings())
+	if actions.Move != DirectionNorthEast {
+		t.Fatalf("D-pad movement = %v, want northeast", actions.Move)
+	}
+	if actions.CameraX <= 0 || actions.CameraY >= 0 {
+		t.Fatalf("camera = (%v,%v), want right/up SDL-space response", actions.CameraX, actions.CameraY)
+	}
+	if actions.ZoomDelta != 0 {
+		t.Fatalf("zoom delta = %v, want trigger zoom disabled", actions.ZoomDelta)
+	}
+	if actions.Source != InputSourceController {
+		t.Fatalf("source = %v, want controller", actions.Source)
+	}
+}
+
+func TestResolveActionsReportsControllerReleases(t *testing.T) {
+	state := NewState()
+	state.SetController(ControllerSnapshot{Connected: true, Buttons: buttonsWith(ControllerButtonEast)})
+	ResolveActions(state, DefaultControllerSettings())
+	state.EndFrame()
+	state.SetController(ControllerSnapshot{Connected: true})
+	actions := ResolveActions(state, DefaultControllerSettings())
+	if !actions.Released.Has(ActionCancel) || actions.Held.Has(ActionCancel) {
+		t.Fatalf("cancel release = %#v, want released without held", actions)
+	}
+}
+
+func TestDefaultControllerBindingsCoverSteamDeckAndDualSenseActions(t *testing.T) {
+	cases := []struct {
+		name   string
+		button ControllerButton
+		action Action
+	}{
+		{"confirm", ControllerButtonSouth, ActionConfirm},
+		{"cancel", ControllerButtonEast, ActionCancel},
+		{"attack", ControllerButtonWest, ActionAttack},
+		{"loot", ControllerButtonNorth, ActionLoot},
+		{"previous target", ControllerButtonLeftShoulder, ActionTargetPrevious},
+		{"next target", ControllerButtonRightShoulder, ActionTargetNext},
+		{"menu", ControllerButtonStart, ActionMenu},
+		{"map", ControllerButtonTouchpad, ActionMap},
+		{"reset camera", ControllerButtonRightStick, ActionResetCamera},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			state := NewState()
+			state.SetController(ControllerSnapshot{
+				Connected: true,
+				Buttons:   buttonsWith(tc.button),
+			})
+			actions := ResolveActions(state, DefaultControllerSettings())
+			if !actions.Pressed.Has(tc.action) || !actions.Held.Has(tc.action) {
+				t.Fatalf("button %v actions = %#v, want pressed and held %s", tc.button, actions, tc.action.Name())
+			}
+		})
+	}
+}
+
 func buttonsWith(list ...ControllerButton) ControllerButtons {
 	var buttons ControllerButtons
 	for _, button := range list {
@@ -214,5 +283,29 @@ func TestControllerModeRoundTrip(t *testing.T) {
 	}
 	if got := ControllerMoveCursor.String(); got != "Cursor" {
 		t.Fatalf("move mode string = %q", got)
+	}
+}
+
+func TestInputSourceSwitchesBetweenControllerKeyboardAndTouch(t *testing.T) {
+	state := NewState()
+	state.SetController(ControllerSnapshot{Connected: true, Buttons: buttonsWith(ControllerButtonSouth)})
+	if state.InputSource() != InputSourceController {
+		t.Fatalf("controller source = %v", state.InputSource())
+	}
+	keyW, ok := KeyCodeFromName("KeyW")
+	if !ok {
+		t.Fatal("KeyW mapping unavailable")
+	}
+	state.SetKeyCode(keyW, true)
+	if state.InputSource() != InputSourceKeyboard {
+		t.Fatalf("keyboard source = %v", state.InputSource())
+	}
+	state.SetTouch(1, 10, 20, true)
+	if state.InputSource() != InputSourceTouch {
+		t.Fatalf("touch source = %v", state.InputSource())
+	}
+	state.SetTouch(1, 10, 20, false)
+	if state.InputSource() != InputSourceTouch {
+		t.Fatalf("touch release source = %v", state.InputSource())
 	}
 }

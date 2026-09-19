@@ -52,8 +52,10 @@ type CharacterWindow struct {
 func (w *CharacterWindow) Update(ctx Context) bool {
 	w.EnsureWindow(characterWindowWidth, w.windowHeight())
 	w.SetControllerNavigationPassthrough(true)
-	_, basicMenuHeight := basicMenuSize(false)
-	w.dragBottom = basicMenuFollowGap + basicMenuHeight
+	if w.dragBottom == 0 {
+		_, basicMenuHeight := basicMenuSize(false)
+		w.dragBottom = basicMenuFollowGap + basicMenuHeight
+	}
 	w.CloseOnEsc = false
 
 	if ctx.Session == nil {

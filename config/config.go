@@ -17,8 +17,8 @@ import (
 
 type Config struct {
 	// ConfigPath is the absolute file path selected by LoadConfig for saving settings.
-	ConfigPath    string
-	Headless      bool
+	ConfigPath string
+	Headless   bool
 
 	DataDir       string
 	Window        WindowConfig
@@ -364,6 +364,7 @@ func controllerINIValues(settings input.ControllerSettings) map[string]string {
 	controller := settings.Normalized()
 	return map[string]string{
 		"enabled":             formatINIValueBool(controller.Enabled),
+		"scheme":              formatINIControllerScheme(controller.Scheme),
 		"deadzone":            formatINIValueFloat(float64(controller.Deadzone)),
 		"outer_deadzone":      formatINIValueFloat(float64(controller.OuterDeadzone)),
 		"camera_sensitivity":  formatINIValueFloat(float64(controller.CameraSensitivity)),
@@ -804,6 +805,8 @@ func applyConfigValue(cfg *Config, section, key, value string) error {
 		return setBool(value, &cfg.Gameplay.ForceUserAI)
 	case "controller.enabled":
 		return setBool(value, &cfg.Controller.Enabled)
+	case "controller.scheme":
+		return setControllerScheme(value, &cfg.Controller.Scheme)
 	case "controller.deadzone":
 		return setFloat32(value, &cfg.Controller.Deadzone)
 	case "controller.outerdeadzone", "controller.outer_deadzone":
@@ -1189,6 +1192,17 @@ func formatINIControllerMoveMode(value input.ControllerMoveMode) string {
 	return "character"
 }
 
+func formatINIControllerScheme(value input.ControllerScheme) string {
+	switch value {
+	case input.ControllerSchemeTwinStick:
+		return "twin-stick"
+	case input.ControllerSchemeKeyboardParity:
+		return "keyboard-parity"
+	default:
+		return "classic"
+	}
+}
+
 func formatINIControllerUINavMode(value input.ControllerUINavMode) string {
 	if value == input.ControllerUINavFocus {
 		return "focus"
@@ -1202,6 +1216,15 @@ func setControllerMoveMode(raw string, dst *input.ControllerMoveMode) error {
 		return fmt.Errorf("invalid controller move mode %q", raw)
 	}
 	*dst = mode
+	return nil
+}
+
+func setControllerScheme(raw string, dst *input.ControllerScheme) error {
+	scheme, ok := input.ParseControllerScheme(raw)
+	if !ok {
+		return fmt.Errorf("invalid controller scheme %q", raw)
+	}
+	*dst = scheme
 	return nil
 }
 

@@ -35,17 +35,19 @@ func (m *WorldMode) updateControllerInput(ctx client.Context, dead, blocked bool
 		return
 	}
 	settings := ctx.ControllerSettings()
-	actions := input.ResolveActions(ctx.Input, settings)
+	actions := ctx.ControllerActions
+	if !ctx.ControllerActionsValid {
+		// Headless/unit callers may not run the renderer; production updates
+		// always receive the renderer-owned result.
+		actions = input.ResolveActions(ctx.Input, settings)
+	}
 
 	// Movement is released rather than merely skipped whenever the pad can no
 	// longer own it: a disconnect, a switch away from character move mode, or
 	// the controller being turned off must never leave the player walking.
 	movementOwned := settings.MoveMode == input.ControllerMoveCharacter
-	if !movementOwned || dead || blocked || ctx.Input.ControllerMovementConsumed() {
+	if !movementOwned || dead || blocked || (!ctx.ControllerActionsValid && ctx.Input.ControllerMovementConsumed()) {
 		m.stopControllerMovement(ctx, "controller movement released")
-	} else if m.mapPointerBlocked(ctx) {
-		// Aiming at the UI must not also walk the player into it.
-		m.stopControllerMovement(ctx, "pointer over ui")
 	} else {
 		m.applyControllerMovement(ctx, actions)
 	}
@@ -63,8 +65,11 @@ func (m *WorldMode) applyControllerMovement(ctx client.Context, actions input.Ac
 		m.controllerStopPending = false
 		m.controllerStopWaitForAck = false
 		m.ApplyPlayerCommand(ctx, input.PlayerCommand{
-			Kind:      input.CommandMoveDirection,
-			Direction: actions.Move,
+			Kind:          input.CommandMoveDirection,
+			Direction:     actions.Move,
+			MoveX:         actions.MoveX,
+			MoveY:         actions.MoveY,
+			MoveMagnitude: actions.MoveMagnitude,
 		})
 	} else if m.controllerMoveDir != input.DirectionNone || m.controllerStopPending {
 		m.ApplyPlayerCommand(ctx, input.PlayerCommand{Kind: input.CommandMoveDirection})
@@ -72,62 +77,64 @@ func (m *WorldMode) applyControllerMovement(ctx client.Context, actions input.Ac
 }
 
 func (m *WorldMode) applyControllerActions(ctx client.Context, actions input.ActionState) {
-	if (actions.CameraX != 0 || actions.CameraY != 0) && !ctx.Input.ControllerCameraConsumed() {
+	if actions.CameraX != 0 || actions.CameraY != 0 {
+		now := time.Now()
+		dt := time.Second / 60
+		if !m.controllerCameraAt.IsZero() {
+			dt = now.Sub(m.controllerCameraAt)
+			if dt < 0 || dt > 100*time.Millisecond {
+				dt = 100 * time.Millisecond
+			}
+		}
+		m.controllerCameraAt = now
 		m.ApplyPlayerCommand(ctx, input.PlayerCommand{
 			Kind:   input.CommandRotateCamera,
-			DeltaX: float64(actions.CameraX * controllerCameraScale),
-			DeltaY: float64(actions.CameraY * controllerCameraScale),
+			DeltaX: float64(actions.CameraX*controllerCameraScale) * dt.Seconds(),
+			DeltaY: float64(actions.CameraY*controllerCameraScale) * dt.Seconds(),
 		})
+	} else {
+		m.controllerCameraAt = time.Time{}
 	}
 
 	// The triggers double as shortcut modifiers, so zoom is suppressed on any
 	// frame a shortcut fires: shortcuts are face-button edges, zoom is the
 	// continuous analog reading.
-	if actions.ZoomDelta != 0 && !actions.ShortcutPressed() && !ctx.Input.ControllerZoomConsumed() && !m.mapPointerBlocked(ctx) {
-		now := time.Now()
-		if m.controllerZoomAt.IsZero() || now.Sub(m.controllerZoomAt) >= controllerZoomInterval {
-			m.controllerZoomAt = now
-			m.ApplyPlayerCommand(ctx, input.PlayerCommand{
-				Kind:   input.CommandZoomCamera,
-				DeltaY: float64(actions.ZoomDelta * controllerZoomScale),
-			})
-		}
-	} else if actions.ZoomDelta == 0 {
-		m.controllerZoomAt = time.Time{}
-	}
+	// LT/RT are reserved for shortcut layers in the recommended layout;
+	// controller trigger zoom is intentionally disabled.
+	m.controllerZoomAt = time.Time{}
 
 	pressed := actions.Pressed
-	if pressed.Has(input.ActionTargetPrevious) && !ctx.Input.ControllerActionConsumed(input.ActionTargetPrevious) {
+	if pressed.Has(input.ActionTargetPrevious) {
 		m.ApplyPlayerCommand(ctx, input.PlayerCommand{Kind: input.CommandTargetPrevious})
 	}
-	if pressed.Has(input.ActionTargetNext) && !ctx.Input.ControllerActionConsumed(input.ActionTargetNext) {
+	if pressed.Has(input.ActionTargetNext) {
 		m.ApplyPlayerCommand(ctx, input.PlayerCommand{Kind: input.CommandTargetNext})
 	}
-	if pressed.Has(input.ActionConfirm) && !ctx.Input.ControllerActionConsumed(input.ActionConfirm) {
+	if pressed.Has(input.ActionConfirm) {
 		m.ApplyPlayerCommand(ctx, input.PlayerCommand{Kind: input.CommandInteractFocused})
 	}
 	// Confirm is the interaction button. If an unusual controller report or a
 	// custom binding makes both face actions edge in one sample, interaction
 	// wins so Cross can never silently turn into an attack as well.
-	if pressed.Has(input.ActionAttack) && !pressed.Has(input.ActionConfirm) && !ctx.Input.ControllerActionConsumed(input.ActionAttack) {
+	if pressed.Has(input.ActionAttack) && !pressed.Has(input.ActionConfirm) {
 		m.ApplyPlayerCommand(ctx, input.PlayerCommand{Kind: input.CommandAttackFocused})
 	}
-	if pressed.Has(input.ActionLoot) && !ctx.Input.ControllerActionConsumed(input.ActionLoot) {
+	if pressed.Has(input.ActionLoot) {
 		m.ApplyPlayerCommand(ctx, input.PlayerCommand{Kind: input.CommandLootFocused})
 	}
-	if pressed.Has(input.ActionCancel) && !ctx.Input.ControllerActionConsumed(input.ActionCancel) {
+	if pressed.Has(input.ActionCancel) {
 		m.ApplyPlayerCommand(ctx, input.PlayerCommand{Kind: input.CommandCancelAction})
 	}
 	m.updateControllerMenuChord(ctx, actions)
-	if pressed.Has(input.ActionMap) && !ctx.Input.ControllerActionConsumed(input.ActionMap) {
+	if pressed.Has(input.ActionMap) {
 		m.ui.minimap.Toggle(ctx)
 	}
-	if pressed.Has(input.ActionResetCamera) && !ctx.Input.ControllerActionConsumed(input.ActionResetCamera) && !m.mapPointerBlocked(ctx) {
+	if pressed.Has(input.ActionResetCamera) && !m.mapPointerBlocked(ctx) {
 		m.ApplyPlayerCommand(ctx, input.PlayerCommand{Kind: input.CommandResetCamera})
 	}
 	for slot := 0; slot < 8; slot++ {
 		action := input.ActionShortcut1 + input.Action(slot)
-		if pressed.Has(action) && !ctx.Input.ControllerActionConsumed(action) {
+		if pressed.Has(action) {
 			m.ApplyPlayerCommand(ctx, input.PlayerCommand{
 				Kind: input.CommandUseShortcut,
 				Slot: uint16(slot),
@@ -145,9 +152,12 @@ func (m *WorldMode) preemptControllerCombat(ctx client.Context) {
 	if m == nil || ctx.Input == nil || !ctx.ControllerSettings().Enabled || strings.TrimSpace(ctx.Config.Script.Path) != "" {
 		return
 	}
-	actions := input.ResolveActions(ctx.Input, ctx.ControllerSettings())
+	actions := ctx.ControllerActions
+	if !ctx.ControllerActionsValid {
+		actions = input.ResolveActions(ctx.Input, ctx.ControllerSettings())
+	}
 	for _, action := range []input.Action{input.ActionConfirm, input.ActionLoot, input.ActionCancel} {
-		if actions.Pressed.Has(action) && !ctx.Input.ControllerActionConsumed(action) {
+		if actions.Pressed.Has(action) && (ctx.ControllerActionsValid || !ctx.Input.ControllerActionConsumed(action)) {
 			m.clearControllerCombatIntent()
 			return
 		}
@@ -212,6 +222,11 @@ func (m *WorldMode) clearControllerMovementState() {
 }
 
 func (m *WorldMode) moveController(ctx client.Context, direction input.Direction8) bool {
+	dx, dy := direction.Vector()
+	return m.moveControllerVector(ctx, direction, float32(dx), float32(dy), 1)
+}
+
+func (m *WorldMode) moveControllerVector(ctx client.Context, direction input.Direction8, vectorX, vectorY, magnitude float32) bool {
 	if direction == input.DirectionNone {
 		m.stopControllerMovement(ctx, "controller release")
 		return true
@@ -223,9 +238,12 @@ func (m *WorldMode) moveController(ctx client.Context, direction input.Direction
 	if ctx.World == nil || playerIsDead(ctx) {
 		return false
 	}
-	dx, dy := direction.Vector()
-	if dx == 0 && dy == 0 {
-		return false
+	if vectorX == 0 && vectorY == 0 {
+		// Keyboard/D-pad compatibility callers may provide only Direction.
+		// Preserve that digital command while analog callers retain their
+		// vector and magnitude above.
+		dx, dy := direction.Vector()
+		vectorX, vectorY = float32(dx), float32(dy)
 	}
 	now := time.Now()
 	playerX, playerY := currentPlayerCell(ctx, now)
@@ -237,8 +255,26 @@ func (m *WorldMode) moveController(ctx client.Context, direction input.Direction
 	if !needsTarget {
 		return true
 	}
-	for distance := controllerWalkHorizon; distance >= 1; distance-- {
-		targetX, targetY := playerX+dx*distance, playerY+dy*distance
+	if magnitude <= 0 {
+		magnitude = 1
+	}
+	if magnitude > 1 {
+		magnitude = 1
+	}
+	distance := int(math.Round(2 + float64(magnitude)*float64(controllerWalkHorizon-2)))
+	if distance < 1 {
+		distance = 1
+	}
+	norm := float32(math.Hypot(float64(vectorX), float64(vectorY)))
+	if norm == 0 {
+		return false
+	}
+	targetX, targetY := playerX+int(math.Round(float64(vectorX/norm)*float64(distance))), playerY+int(math.Round(float64(vectorY/norm)*float64(distance)))
+	if targetX == playerX && targetY == playerY {
+		return false
+	}
+	for _, candidate := range [][2]int{{targetX, targetY}, {playerX + int(math.Round(float64(vectorX/norm)*float64(distance-1))), playerY + int(math.Round(float64(vectorY/norm)*float64(distance-1)))}} {
+		targetX, targetY = candidate[0], candidate[1]
 		if !walkTargetInBounds(ctx, targetX, targetY) {
 			continue
 		}
@@ -560,7 +596,7 @@ const controllerMenuHoldDuration = 500 * time.Millisecond
 // on release so a hold can pre-empt it, and controllerMenuSuppressed stops the
 // long press from also firing the short one when the button comes back up.
 func (m *WorldMode) updateControllerMenuChord(ctx client.Context, actions input.ActionState) {
-	if ctx.Input.ControllerActionConsumed(input.ActionMenu) {
+	if !ctx.ControllerActionsValid && ctx.Input.ControllerActionConsumed(input.ActionMenu) {
 		m.controllerMenuHeldAt = time.Time{}
 		m.controllerMenuSuppressed = false
 		return

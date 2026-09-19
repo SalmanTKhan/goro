@@ -1,6 +1,6 @@
 module github.com/kivutar/goro
 
-go 1.26.4
+go 1.26.5
 
 require (
 	github.com/Zyko0/go-sdl3 v0.1.1
@@ -20,15 +20,17 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 )
 
+replace github.com/Zyko0/go-sdl3 => D:/Projects/go-sdl3
+
 require (
-	github.com/Zyko0/purego-gen v0.0.0-20250727121216-3bcd331a1e0c // indirect
+	github.com/Zyko0/purego-gen v0.0.1 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/charmbracelet/colorprofile v0.2.3-0.20250311203215-f60798e515dc // indirect
 	github.com/charmbracelet/lipgloss v1.1.0 // indirect
 	github.com/charmbracelet/x/ansi v0.8.0 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.13-0.20250311204145-2c3ea96c31dd // indirect
 	github.com/charmbracelet/x/term v0.2.1 // indirect
-	github.com/ebitengine/purego v0.10.1 // indirect
+	github.com/ebitengine/purego v0.10.2 // indirect
 	github.com/go-logfmt/logfmt v0.6.1 // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect

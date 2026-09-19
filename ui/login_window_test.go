@@ -137,9 +137,36 @@ func TestLoginWindowKeepToggleSurvivesResize(t *testing.T) {
 	if !window.KeepID {
 		t.Fatal("rebuilt checkbox did not retain its unchecked state")
 	}
+	window.password.SetText("secret")
 	app.HandleEvent(event.NewKeyEvent(event.KeyPress, event.KeyTab, 0, event.ModShift))
 	app.HandleEvent(event.NewKeyEvent(event.KeyPress, event.KeyEnter, 0, event.ModNone))
 	if !submitted {
 		t.Fatal("returning to Password did not allow login submission")
+	}
+}
+
+func TestLoginWindowEnterMovesToPasswordAndRejectsEmptyPassword(t *testing.T) {
+	app := uiapp.New()
+	bridge := loginWindowTestApp{basicMenuTestApp{app: app}}
+	manager := NewManager()
+	manager.SetUIApp(bridge)
+	ctx := client.Context{ScreenW: 800, ScreenH: 600, UIApp: bridge, UIManager: manager}
+	submitted := false
+	window := NewLoginWindow(ctx, "account", "", false, LoginWindowCallbacks{
+		OnSubmit: func() { submitted = true },
+	})
+	window.Publish(ctx)
+	window.submitField(false)
+	if !window.password.IsFocused() || window.user.IsFocused() {
+		t.Fatal("account submit did not move focus to Password")
+	}
+	window.submitField(true)
+	if submitted {
+		t.Fatal("empty password was submitted")
+	}
+	window.password.SetText("secret")
+	window.submitField(true)
+	if !submitted {
+		t.Fatal("non-empty password was not submitted")
 	}
 }

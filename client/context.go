@@ -40,6 +40,10 @@ type Context struct {
 	MobileSettingsHost       MobileSettingsHost
 	UISettingsHost           UISettingsHost
 	ControllerSettingsHost   ControllerSettingsHost
+	// ControllerActions is the one routed controller result for this update.
+	// The renderer publishes it before mode Update runs.
+	ControllerActions      input.ActionState
+	ControllerActionsValid bool
 }
 
 // ControllerSettings resolves the live controller policy, preferring the

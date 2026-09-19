@@ -42,6 +42,12 @@ const (
 	ControllerButtonTouchpad
 	ControllerButtonLeftTrigger
 	ControllerButtonRightTrigger
+	ControllerButtonGuide
+	ControllerButtonMisc1
+	ControllerButtonRightPaddle1
+	ControllerButtonLeftPaddle1
+	ControllerButtonRightPaddle2
+	ControllerButtonLeftPaddle2
 )
 
 // ControllerButtons is a compact set of currently held controller buttons.
@@ -81,6 +87,7 @@ const (
 	ControllerKindPlayStation4
 	ControllerKindPlayStation5
 	ControllerKindSwitch
+	ControllerKindSteamDeck
 )
 
 func (k ControllerKind) String() string {
@@ -95,6 +102,8 @@ func (k ControllerKind) String() string {
 		return "DualSense"
 	case ControllerKindSwitch:
 		return "Switch"
+	case ControllerKindSteamDeck:
+		return "Steam Deck"
 	default:
 		return "Unknown"
 	}
@@ -112,6 +121,14 @@ type ControllerSnapshot struct {
 	RightY       float32
 	LeftTrigger  float32
 	RightTrigger float32
+	Touchpads    [2]ControllerTouch
+}
+
+type ControllerTouch struct {
+	Down     bool
+	X        float32
+	Y        float32
+	Pressure float32
 }
 
 const controllerTriggerButtonThreshold = 0.5
@@ -138,7 +155,8 @@ func (s ControllerSnapshot) Active() bool {
 	return s.Connected && (s.Buttons != 0 ||
 		math.Hypot(float64(s.LeftX), float64(s.LeftY)) >= 0.01 ||
 		math.Hypot(float64(s.RightX), float64(s.RightY)) >= 0.01 ||
-		s.LeftTrigger >= 0.01 || s.RightTrigger >= 0.01)
+		s.LeftTrigger >= 0.01 || s.RightTrigger >= 0.01 ||
+		s.Touchpads[0].Down || s.Touchpads[1].Down)
 }
 
 // ControllerBackend is implemented by desktop platform adapters. The
@@ -356,15 +374,15 @@ func (s *ActionSet) Set(action Action, active bool) {
 // ActionState is the device-neutral action frame consumed by gameplay and
 // controller UI routing.
 type ActionState struct {
-	Source  InputSource
-	Move    Direction8
-	CameraX float32
-	CameraY float32
-	// ZoomDelta is the analog trigger differential, negative for the left
-	// trigger and positive for the right. It coexists with the trigger shortcut
-	// layers because shortcuts fire on a face-button edge while zoom is a
-	// continuous analog reading; the consumer suppresses zoom on any frame a
-	// shortcut fires.
+	Source        InputSource
+	Move          Direction8
+	MoveX         float32
+	MoveY         float32
+	MoveMagnitude float32
+	CameraX       float32
+	CameraY       float32
+	// ZoomDelta is retained for compatibility but is not produced by the
+	// recommended controller resolver; triggers are reserved for skill layers.
 	ZoomDelta float32
 	Held      ActionSet
 	Pressed   ActionSet
@@ -567,6 +585,40 @@ func (m ControllerUINavMode) String() string {
 	return "Cursor"
 }
 
+// ControllerScheme selects a named baseline mapping. Individual bindings
+// remain editable after a preset is applied.
+type ControllerScheme uint8
+
+const (
+	ControllerSchemeClassic ControllerScheme = iota
+	ControllerSchemeTwinStick
+	ControllerSchemeKeyboardParity
+)
+
+func (s ControllerScheme) String() string {
+	switch s {
+	case ControllerSchemeTwinStick:
+		return "Twin-stick action"
+	case ControllerSchemeKeyboardParity:
+		return "Keyboard parity"
+	default:
+		return "Recommended Controller"
+	}
+}
+
+func ParseControllerScheme(raw string) (ControllerScheme, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "classic", "classic_qol", "classic+qol":
+		return ControllerSchemeClassic, true
+	case "twin_stick", "twin-stick", "twinstick":
+		return ControllerSchemeTwinStick, true
+	case "keyboard_parity", "keyboard-parity", "keyboard":
+		return ControllerSchemeKeyboardParity, true
+	default:
+		return ControllerSchemeClassic, false
+	}
+}
+
 func ParseControllerUINavMode(raw string) (ControllerUINavMode, bool) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "cursor", "pointer":
@@ -580,6 +632,7 @@ func ParseControllerUINavMode(raw string) (ControllerUINavMode, bool) {
 
 type ControllerSettings struct {
 	Enabled           bool
+	Scheme            ControllerScheme
 	Deadzone          float32
 	OuterDeadzone     float32
 	CameraSensitivity float32
@@ -602,6 +655,7 @@ type ControllerSettings struct {
 func DefaultControllerSettings() ControllerSettings {
 	return ControllerSettings{
 		Enabled:           true,
+		Scheme:            ControllerSchemeClassic,
 		Deadzone:          0.15,
 		OuterDeadzone:     0.95,
 		CameraSensitivity: 1,
@@ -614,6 +668,28 @@ func DefaultControllerSettings() ControllerSettings {
 		Rumble:            true,
 		Bindings:          DefaultControllerBindings(),
 	}
+}
+
+// ApplyControllerScheme applies only the scheme-owned defaults. Users can
+// continue to rebind individual actions and tune sensitivity afterward.
+func ApplyControllerScheme(settings ControllerSettings, scheme ControllerScheme) ControllerSettings {
+	settings.Scheme = scheme
+	settings.Bindings = DefaultControllerBindings()
+	switch scheme {
+	case ControllerSchemeTwinStick:
+		settings.MoveMode = ControllerMoveCharacter
+		settings.UINavMode = ControllerUINavCursor
+		settings.CameraSensitivity = 1.25
+	case ControllerSchemeKeyboardParity:
+		settings.MoveMode = ControllerMoveCharacter
+		settings.UINavMode = ControllerUINavFocus
+		settings.CameraSensitivity = 1
+	default:
+		settings.MoveMode = ControllerMoveCharacter
+		settings.UINavMode = ControllerUINavCursor
+		settings.CameraSensitivity = 1
+	}
+	return settings.Normalized()
 }
 
 // NavRepeatDelay and NavRepeatRate expose the normalized repeat timings as
@@ -639,6 +715,9 @@ func (s ControllerSettings) Normalized() ControllerSettings {
 	}
 	if s.MoveMode > ControllerMoveCursor {
 		s.MoveMode = defaults.MoveMode
+	}
+	if s.Scheme > ControllerSchemeKeyboardParity {
+		s.Scheme = defaults.Scheme
 	}
 	if s.UINavMode > ControllerUINavFocus {
 		s.UINavMode = defaults.UINavMode
@@ -732,17 +811,9 @@ func ResolveActions(state *State, settings ControllerSettings) ActionState {
 		actions.Source = InputSourceController
 	}
 
-	leftTrigger, rightTrigger := snapshot.LeftTrigger, snapshot.RightTrigger
-	if leftTrigger < settings.TriggerDeadzone {
-		leftTrigger = 0
-	}
-	if rightTrigger < settings.TriggerDeadzone {
-		rightTrigger = 0
-	}
-	actions.ZoomDelta = rightTrigger - leftTrigger
-	if actions.ZoomDelta != 0 {
-		actions.Source = InputSourceController
-	}
+	// Triggers are reserved for the exclusive shortcut banks. They are not
+	// camera zoom controls in the recommended controller layout.
+	actions.ZoomDelta = 0
 
 	bindings := settings.Bindings
 	previous := state.prevController

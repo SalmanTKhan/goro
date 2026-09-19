@@ -117,6 +117,7 @@ type WorldMode struct {
 	controllerStopPending      bool
 	controllerStopWaitForAck   bool
 	controllerZoomAt           time.Time
+	controllerCameraAt         time.Time
 	controllerMenuHeldAt       time.Time
 	controllerMenuSuppressed   bool
 	controllerFocusItemStart   time.Time
@@ -717,6 +718,13 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 	m.removeExpiredStatusEffects(ctx.Session, now)
 	m.updateMail(ctx, now)
 	progressBlocksActions := m.updateServerProgress(ctx, now)
+	// Controller actions are already sampled, resolved, and routed by the
+	// renderer. Consume the one gameplay result before pending combat/pickup
+	// processing so a controller edge cannot disappear behind UI update returns.
+	if !progressBlocksActions {
+		m.preemptControllerCombat(ctx)
+	}
+	m.updateControllerInput(ctx, playerIsDead(ctx), progressBlocksActions)
 	if !ctx.Config.Headless {
 		m.ui.statusIcons.Update(ctx, now)
 		m.ui.pvpCounter.Update(ctx)
