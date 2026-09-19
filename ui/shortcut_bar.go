@@ -539,6 +539,20 @@ func (w *shortcutSlotButton) drawContent(canvas widget.Canvas, bounds geometry.R
 			)
 		}
 	}
+	// Controller shortcut actions currently address absolute slots 0..7. Show
+	// the prompt only on those slots so the UI never advertises an inactive
+	// binding when a different keyboard row is visible.
+	if prompt := controllerShortcutPrompt(w.bar.ctx, w.slot); prompt != "" {
+		rotheme.DrawText(
+			canvas,
+			prompt,
+			geometry.NewRect(bounds.Min.X+1, bounds.Max.Y-11, shortcutSlot-2, 10),
+			8,
+			rotheme.Default.Colors.TitleText,
+			true,
+			widget.TextAlignCenter,
+		)
+	}
 }
 
 func (w *shortcutSlotButton) Event(ctx widget.Context, e event.Event) bool {
@@ -606,6 +620,12 @@ func (b *ShortcutBar) tooltipText(slot int) string {
 		return ""
 	}
 	label := shortcutLabelForSlot(slot, b.activeRow, b.ctx.Session != nil && b.ctx.Session.BattleMode)
+	if prompt := controllerShortcutPrompt(b.ctx, slot); prompt != "" {
+		if label != "" {
+			label += " / "
+		}
+		label += prompt
+	}
 	entry := b.slots[slot]
 	if entry.kind == shortcutEmpty {
 		return label
