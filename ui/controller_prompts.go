@@ -34,6 +34,26 @@ func controllerPromptFamilyForKind(kind input.ControllerKind) controllerPromptFa
 	}
 }
 
+type controllerPromptContextKey struct {
+	Source    input.InputSource
+	Connected bool
+	Kind      input.ControllerKind
+	Bindings  input.ControllerBindings
+}
+
+func controllerPromptContextFor(ctx client.Context) controllerPromptContextKey {
+	if ctx.Input == nil {
+		return controllerPromptContextKey{}
+	}
+	snapshot := ctx.Input.Controller()
+	return controllerPromptContextKey{
+		Source:    ctx.Input.InputSource(),
+		Connected: snapshot.Connected,
+		Kind:      snapshot.Kind,
+		Bindings:  ctx.ControllerSettings().Bindings,
+	}
+}
+
 func controllerPromptsVisible(ctx client.Context) bool {
 	if ctx.Input == nil {
 		return false
