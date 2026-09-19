@@ -16,6 +16,7 @@ import (
 	"github.com/kivutar/goro/render"
 	"github.com/kivutar/goro/res"
 	"github.com/kivutar/goro/session"
+	"github.com/kivutar/goro/ui/inputprompt"
 	"github.com/kivutar/goro/ui/rotheme"
 )
 
@@ -86,6 +87,8 @@ type ShortcutBar struct {
 	assets        AssetProvider
 	icons         map[shortcutItemIconKey]image.Image
 	iconMiss      map[shortcutItemIconKey]struct{}
+	prompts       *inputprompt.Resolver
+	promptContext string
 	tooltip       tooltipState
 }
 
@@ -147,6 +150,25 @@ func (b *ShortcutBar) Publish(ctx Context, actions GameActions, assets AssetProv
 	b.ctx = ctx
 	b.actions = actions
 	b.assets = assets
+	if b.prompts == nil {
+		b.prompts = inputprompt.NewResolver()
+	}
+	state := "none"
+	if ctx.Input != nil {
+		s := ctx.Input.Controller()
+		settings := ctx.ControllerSettings()
+		state = fmt.Sprintf("%d/%t/%d/%d/%d/%d/%d/%d/%d/%d", ctx.Input.InputSource(), s.Connected, s.Kind,
+			settings.Bindings.Confirm, settings.Bindings.Cancel, settings.Bindings.Attack, settings.Bindings.Loot,
+			settings.Bindings.LeftModifier, settings.Bindings.RightModifier, settings.Bindings.Menu)
+	}
+	if b.promptContext != state {
+		changed := b.promptContext != ""
+		b.promptContext = state
+		b.redraw()
+		if changed {
+			b.invalidate(ctx)
+		}
+	}
 	b.ensureContent()
 	x, y := b.bounds(ctx)
 	w, h := shortcutBarWidth(), shortcutBarHeightForRows(b.visibleRowCount())
@@ -267,6 +289,43 @@ func (b *ShortcutBar) AcceptSkillDrop(ctx Context, skill session.Skill, mx, my i
 	b.redraw()
 	b.invalidate(ctx)
 	return true
+}
+
+// AssignSkillController places a usable skill in the first empty shortcut
+// slot, providing the controller equivalent of dragging a skill onto the bar.
+func (b *ShortcutBar) AssignSkillController(ctx Context, skill session.Skill) bool {
+	if b == nil || !skillCanUseShortcut(skill) {
+		return false
+	}
+	for slot := range b.slots {
+		if b.slots[slot].kind == shortcutEmpty {
+			b.ctx = ctx
+			b.slots[slot] = shortcutSlotState{kind: shortcutSkill, skillID: skill.ID, skillLevel: skill.Level}
+			b.sendSlotChange(ctx, slot)
+			b.redraw()
+			b.invalidate(ctx)
+			return true
+		}
+	}
+	return false
+}
+
+// AssignItemController places an item in the first empty shortcut slot.
+func (b *ShortcutBar) AssignItemController(ctx Context, item session.InventoryItem) bool {
+	if b == nil || item.ItemID == 0 {
+		return false
+	}
+	for slot := range b.slots {
+		if b.slots[slot].kind == shortcutEmpty {
+			b.ctx = ctx
+			b.slots[slot] = shortcutSlotState{kind: shortcutItem, itemIndex: item.Index, itemID: item.ItemID, identified: item.Identified}
+			b.sendSlotChange(ctx, slot)
+			b.redraw()
+			b.invalidate(ctx)
+			return true
+		}
+	}
+	return false
 }
 
 func skillCanUseShortcut(skill session.Skill) bool {
@@ -497,6 +556,7 @@ func (w *shortcutSlotButton) Draw(ctx widget.Context, canvas widget.Canvas) {
 
 func (w *shortcutSlotButton) drawContent(canvas widget.Canvas, bounds geometry.Rect) {
 	entry := w.bar.slots[w.slot]
+	w.drawControllerPrompt(canvas, bounds)
 	switch entry.kind {
 	case shortcutItem:
 		item := session.InventoryItem{ItemID: entry.itemID, Index: entry.itemIndex, Identified: entry.identified, Amount: 1}
@@ -537,6 +597,31 @@ func (w *shortcutSlotButton) drawContent(canvas widget.Canvas, bounds geometry.R
 				false,
 				widget.TextAlignLeft,
 			)
+		}
+	}
+}
+
+func (w *shortcutSlotButton) drawControllerPrompt(canvas widget.Canvas, bounds geometry.Rect) {
+	if w == nil || w.bar == nil || w.bar.prompts == nil || w.bar.ctx.Input == nil ||
+		w.bar.ctx.Input.InputSource() != input.InputSourceController || !w.bar.ctx.Input.Controller().Connected {
+		return
+	}
+	settings := w.bar.ctx.ControllerSettings()
+	prompts := w.bar.prompts.ForShortcut(settings, w.bar.ctx.Input.Controller().Kind, w.slot)
+	const badgeSize = 15
+	const badgeGap = 2
+	totalWidth := float32(len(prompts)*badgeSize + (len(prompts)-1)*badgeGap)
+	startX := bounds.Min.X + (bounds.Size().Width-totalWidth)/2
+	y := bounds.Max.Y - badgeSize - 2
+	for i, prompt := range prompts {
+		x := startX + float32(i*(badgeSize+badgeGap))
+		badge := geometry.NewRect(x, y, badgeSize, badgeSize)
+		canvas.DrawRect(badge, widget.RGBA8(18, 22, 32, 235))
+		canvas.StrokeRect(badge, widget.RGBA8(235, 240, 248, 220), 1)
+		if prompt.Image != nil {
+			canvas.DrawImage(centeredPromptImage(prompt.Image, 12), geometry.Pt(x+1, y+1))
+		} else {
+			rotheme.DrawText(canvas, prompt.Text, badge, 8, widget.RGBA8(255, 255, 255, 255), true, widget.TextAlignCenter)
 		}
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/gogpu/ui/widget"
 	"github.com/kivutar/goro/client"
 	"github.com/kivutar/goro/db"
+	"github.com/kivutar/goro/input"
 	"github.com/kivutar/goro/session"
 	"github.com/kivutar/goro/ui/rotheme"
 )
@@ -34,8 +35,10 @@ type CharacterSelectWindowCallbacks struct {
 
 type CharacterSelectWindow struct {
 	Window
-	opts      CharacterSelectWindowOptions
-	callbacks CharacterSelectWindowCallbacks
+	ctx             client.Context
+	opts            CharacterSelectWindowOptions
+	callbacks       CharacterSelectWindowCallbacks
+	promptSignature string
 }
 
 const (
@@ -63,9 +66,12 @@ var characterSelectSelectedBG = widget.RGBA8(222, 237, 252, 255)
 func NewCharacterSelectWindow(ctx client.Context, opts CharacterSelectWindowOptions, callbacks CharacterSelectWindowCallbacks) *CharacterSelectWindow {
 	x, y, width, height := characterSelectWindowRect(ctx)
 	w := &CharacterSelectWindow{
-		opts:      opts,
-		callbacks: callbacks,
+		ctx:             ctx,
+		opts:            opts,
+		callbacks:       callbacks,
+		promptSignature: controllerPromptSignature(ctx),
 	}
+	w.ctx = ctx
 	w.Window = NewWindow(width, height)
 	w.OpenAt(x, y, w.widgetTree())
 	return w
@@ -89,6 +95,10 @@ func (w *CharacterSelectWindow) SetOptions(ctx client.Context, opts CharacterSel
 func (w *CharacterSelectWindow) Update(ctx client.Context) bool {
 	if w == nil {
 		return false
+	}
+	if sig := controllerPromptSignature(ctx); sig != w.promptSignature {
+		w.promptSignature = sig
+		w.SetContent(w.widgetTree())
 	}
 	return w.Window.Update(ctx)
 }
@@ -159,17 +169,17 @@ func (w *CharacterSelectWindow) widgetTree() widget.Widget {
 				}
 			}),
 			primitives.Expanded(primitives.Box()),
-			rotheme.ButtonDisabled("Make", makeDisabled, func() {
+			rotheme.ButtonDisabled(contextualControllerButtonLabel(w.ctx, "Make", input.ActionConfirm), makeDisabled, func() {
 				if w.callbacks.OnMake != nil {
 					w.callbacks.OnMake()
 				}
 			}),
-			rotheme.Button("OK", func() {
+			contextualControllerButton(w.ctx, "OK", input.ActionConfirm, func() {
 				if w.callbacks.OnOK != nil {
 					w.callbacks.OnOK()
 				}
 			}),
-			rotheme.Button("Cancel", func() {
+			contextualControllerButton(w.ctx, "Cancel", input.ActionCancel, func() {
 				if w.callbacks.OnCancel != nil {
 					w.callbacks.OnCancel()
 				}

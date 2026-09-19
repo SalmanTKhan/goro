@@ -839,6 +839,7 @@ func (m *WorldMode) drawSceneActorOverlays(screen *render.Frame, ctx client.Cont
 	m.drawSpeechBubbles(screen, entries, now)
 	m.drawHoveredLocalPlayerNameLabel(screen, ctx, entries)
 	m.drawHoveredActorNameLabel(screen, ctx, projection, now)
+	m.drawControllerFocusedTargetNameLabel(screen, ctx, projection, now)
 }
 
 func (m *WorldMode) drawHoveredLocalPlayerNameLabel(screen *render.Frame, ctx client.Context, entries []sceneActorDrawEntry) {

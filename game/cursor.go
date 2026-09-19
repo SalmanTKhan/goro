@@ -65,8 +65,22 @@ func (m *WorldMode) drawROCursor(screen *render.Frame, ctx client.Context, proje
 	render.SetCursorMode(render.CursorModeHidden)
 	action := m.cursorDesiredAction(ctx, projection, now)
 	magnetX, magnetY := m.cursorMagnetOffset(ctx, projection, action, now)
+	cursorX, cursorY := float64(ctx.Input.MouseX), float64(ctx.Input.MouseY)
+	// Controller target selection has no physical mouse position to follow;
+	// anchor its cast cursor to the focused actor. Preserve the original mouse
+	// cursor behavior for keyboard/mouse skill targeting.
+	if m.pendingSkill.skill.ID != 0 &&
+		ctx.Input.InputSource() == input.InputSourceController &&
+		m.attackFocusID != 0 {
+		if actor, ok := m.focusedControllerActor(ctx); ok {
+			ax, ay := actorRenderPosition(actor, now)
+			az := terrainHeightAt(ctx.World, ax, ay)
+			point := projection.Project(cellCenter(ax), cellCenter(ay), az)
+			cursorX, cursorY = float64(point.x), float64(point.y)
+		}
+	}
 	state := m.cursorState()
-	state.draw(screen, ctx, action, now, magnetX, magnetY)
+	state.drawAt(screen, ctx, action, now, magnetX, magnetY, cursorX, cursorY)
 	m.storeCursorState(state)
 	m.drawPendingSkillCursorLevel(screen, ctx, m.pendingSkill.skill, magnetX, magnetY)
 }
@@ -113,6 +127,13 @@ func (s *roCursorState) ensureLoaded(ctx client.Context) {
 }
 
 func (s *roCursorState) draw(screen *render.Frame, ctx client.Context, action int, now time.Time, magnetX, magnetY float64) {
+	if ctx.Input == nil {
+		return
+	}
+	s.drawAt(screen, ctx, action, now, magnetX, magnetY, float64(ctx.Input.MouseX), float64(ctx.Input.MouseY))
+}
+
+func (s *roCursorState) drawAt(screen *render.Frame, ctx client.Context, action int, now time.Time, magnetX, magnetY, cursorX, cursorY float64) {
 	if s == nil || screen == nil || ctx.Input == nil {
 		return
 	}
@@ -126,11 +147,11 @@ func (s *roCursorState) draw(screen *render.Frame, ctx client.Context, action in
 	}
 	frame, ok := s.frame(action, cursorInfo(action), now)
 	if !ok {
-		drawFallbackROCursor(screen, s.fallbackTexture(), ctx.Input.MouseX, ctx.Input.MouseY)
+		drawFallbackROCursor(screen, s.fallbackTexture(), int(cursorX), int(cursorY))
 		return
 	}
 	var opts render.DrawImageOptions
-	opts.GeoM.Translate(float64(ctx.Input.MouseX)-frame.anchorX-magnetX, float64(ctx.Input.MouseY)-frame.anchorY-magnetY)
+	opts.GeoM.Translate(cursorX-frame.anchorX-magnetX, cursorY-frame.anchorY-magnetY)
 	opts.Filter = spriteDrawFilter()
 	screen.DrawImage(frame.image, &opts)
 }

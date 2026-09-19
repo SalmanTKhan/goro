@@ -652,7 +652,7 @@ func (d *NPCDialog) dialogTree(ctx Context, width, height int) widget.Widget {
 		}
 		footer = []widget.Widget{
 			primitives.Expanded(primitives.Box()),
-			rotheme.Button(label, func() {
+			contextualControllerButton(ctx, label, input.ActionConfirm, func() {
 				action(ctx)
 			}).Width(npcDialogButtonW),
 		}
@@ -794,12 +794,12 @@ func (d *NPCDialog) menuTree(ctx Context, width, height int) widget.Widget {
 		),
 		Footer(
 			primitives.Expanded(primitives.Box()),
-			rotheme.ButtonDisabledFn("OK", func() bool {
+			rotheme.ButtonDisabledFn(contextualControllerButtonLabel(ctx, "OK", input.ActionConfirm), func() bool {
 				return d.menuRow < 0 || d.menuRow >= len(d.options)
 			}, func() {
 				d.chooseSelected(ctx)
 			}),
-			rotheme.Button("Cancel", func() {
+			contextualControllerButton(ctx, "Cancel", input.ActionCancel, func() {
 				d.choose(ctx, 255)
 			}),
 		),

@@ -111,7 +111,11 @@ func (m *WorldMode) applyControllerActions(ctx client.Context, actions input.Act
 		m.ApplyPlayerCommand(ctx, input.PlayerCommand{Kind: input.CommandTargetNext})
 	}
 	if pressed.Has(input.ActionConfirm) {
-		m.ApplyPlayerCommand(ctx, input.PlayerCommand{Kind: input.CommandInteractFocused})
+		if m.pendingSkill.skill.ID != 0 {
+			m.confirmControllerPendingSkill(ctx)
+		} else {
+			m.ApplyPlayerCommand(ctx, input.PlayerCommand{Kind: input.CommandInteractFocused})
+		}
 	}
 	// Confirm is the interaction button. If an unusual controller report or a
 	// custom binding makes both face actions edge in one sample, interaction
@@ -123,7 +127,11 @@ func (m *WorldMode) applyControllerActions(ctx client.Context, actions input.Act
 		m.ApplyPlayerCommand(ctx, input.PlayerCommand{Kind: input.CommandLootFocused})
 	}
 	if pressed.Has(input.ActionCancel) {
-		m.ApplyPlayerCommand(ctx, input.PlayerCommand{Kind: input.CommandCancelAction})
+		if m.pendingSkill.skill.ID != 0 {
+			m.skills().Cancel("controller")
+		} else {
+			m.ApplyPlayerCommand(ctx, input.PlayerCommand{Kind: input.CommandCancelAction})
+		}
 	}
 	m.updateControllerMenuChord(ctx, actions)
 	if pressed.Has(input.ActionMap) {
@@ -141,6 +149,22 @@ func (m *WorldMode) applyControllerActions(ctx client.Context, actions input.Act
 			})
 		}
 	}
+}
+
+// confirmControllerPendingSkill completes the explicit controller cast flow:
+// shortcut selects the skill, LB/RB selects an actor, and Confirm casts it.
+func (m *WorldMode) confirmControllerPendingSkill(ctx client.Context) {
+	if m == nil || m.pendingSkill.skill.ID == 0 || m.pendingSkill.targetID != 0 || isGroundTargetSkill(m.pendingSkill.skill) || isSelfTargetSkill(m.pendingSkill.skill) {
+		return
+	}
+	actor, ok := m.focusedControllerActor(ctx)
+	if !ok || !actorCanBeSkillTargeted(ctx, m.pendingSkill.skill, actor) {
+		return
+	}
+	if err := m.skills().SendToID(ctx, m.pendingSkill.skill, actor.ID, "controller target"); err != nil {
+		return
+	}
+	m.pendingSkill = pendingSkillTarget{}
 }
 
 // preemptControllerCombat handles the intent switch before the normal combat

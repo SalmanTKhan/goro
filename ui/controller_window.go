@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/gogpu/ui/primitives"
 	"github.com/gogpu/ui/widget"
@@ -9,6 +10,7 @@ import (
 	"github.com/kivutar/goro/config"
 	"github.com/kivutar/goro/glog"
 	"github.com/kivutar/goro/input"
+	"github.com/kivutar/goro/ui/inputprompt"
 	"github.com/kivutar/goro/ui/rotheme"
 )
 
@@ -161,7 +163,7 @@ func (w *ControllerWindow) contentTree(ctx client.Context) widget.Widget {
 }
 
 func (w *ControllerWindow) bindingRow(ctx client.Context, action input.Action, settings input.ControllerSettings) widget.Widget {
-	label := fmt.Sprintf("%s: %s", action.Name(), controllerButtonLabel(settings.Bindings.Get(action)))
+	label := fmt.Sprintf("%s: %s", action.Name(), controllerButtonLabel(controllerSnapshot(ctx).Kind, settings.Bindings.Get(action)))
 	if w.captureOpen && w.capturing == action {
 		label = action.Name() + ": press a button…"
 	}
@@ -212,7 +214,7 @@ func controllerButtonSummary(ctx client.Context) string {
 		if held != "" {
 			held += " "
 		}
-		held += controllerButtonLabel(button)
+		held += controllerButtonLabel(snapshot.Kind, button)
 	}
 	if held == "" {
 		return "Buttons: none"
@@ -220,7 +222,10 @@ func controllerButtonSummary(ctx client.Context) string {
 	return "Buttons: " + held
 }
 
-func controllerButtonLabel(button input.ControllerButton) string {
+func controllerButtonLabel(kind input.ControllerKind, button input.ControllerButton) string {
+	if text := inputprompt.NewResolver().ForButton(inputprompt.FamilyForKind(kind), button).Text; text != "" && !strings.HasPrefix(text, "Button ") {
+		return text
+	}
 	switch button {
 	case input.ControllerButtonSouth:
 		return "South"

@@ -12,6 +12,7 @@ import (
 	"github.com/gogpu/ui/primitives"
 	"github.com/gogpu/ui/widget"
 	"github.com/kivutar/goro/client"
+	"github.com/kivutar/goro/input"
 	"github.com/kivutar/goro/ui/rotheme"
 )
 
@@ -78,9 +79,11 @@ type CharacterCreateWindowCallbacks struct {
 
 type CharacterCreateWindow struct {
 	Window
-	opts      CharacterCreateWindowOptions
-	callbacks CharacterCreateWindowCallbacks
-	name      *textfield.Widget
+	ctx             client.Context
+	opts            CharacterCreateWindowOptions
+	callbacks       CharacterCreateWindowCallbacks
+	name            *textfield.Widget
+	promptSignature string
 }
 
 const (
@@ -91,9 +94,12 @@ const (
 func NewCharacterCreateWindow(ctx client.Context, opts CharacterCreateWindowOptions, callbacks CharacterCreateWindowCallbacks) *CharacterCreateWindow {
 	x, y, width, height := characterCreateWindowRect(ctx)
 	w := &CharacterCreateWindow{
-		opts:      opts,
-		callbacks: callbacks,
+		ctx:             ctx,
+		opts:            opts,
+		callbacks:       callbacks,
+		promptSignature: controllerPromptSignature(ctx),
 	}
+	w.ctx = ctx
 	w.Window = NewWindow(width, height)
 	w.OpenAt(x, y, w.widgetTree())
 	return w
@@ -121,6 +127,14 @@ func (w *CharacterCreateWindow) SetOptions(ctx client.Context, opts CharacterCre
 func (w *CharacterCreateWindow) Update(ctx client.Context) bool {
 	if w == nil {
 		return false
+	}
+	if sig := controllerPromptSignature(ctx); sig != w.promptSignature {
+		w.promptSignature = sig
+		focused := w.name != nil && w.name.IsFocused()
+		w.SetContent(w.widgetTree())
+		if w.name != nil {
+			w.name.SetFocused(focused)
+		}
 	}
 	return w.Window.Update(ctx)
 }
@@ -223,12 +237,12 @@ func (w *CharacterCreateWindow) footerWidgets() []widget.Widget {
 	}
 	return append(footer,
 		primitives.Expanded(primitives.Box()),
-		rotheme.Button("Make", func() {
+		contextualControllerButton(w.ctx, "Make", input.ActionConfirm, func() {
 			if w.callbacks.OnSubmit != nil {
 				w.callbacks.OnSubmit()
 			}
 		}),
-		rotheme.Button("Cancel", func() {
+		contextualControllerButton(w.ctx, "Cancel", input.ActionCancel, func() {
 			if w.callbacks.OnCancel != nil {
 				w.callbacks.OnCancel()
 			}

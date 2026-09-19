@@ -1549,7 +1549,7 @@ func (r *runner) pollController() {
 	pointerX, pointerY, _ := controllerCursorAxes(snapshot, settings, false)
 	if !controllerUI {
 		r.controllerPointerMode = false
-	} else if snapshot.Touchpads[1].Down || pointerX != 0 || pointerY != 0 {
+	} else if snapshot.Touchpads[1].Down {
 		r.controllerPointerMode = true
 	}
 	pointerOverride := r.controllerPointerMode || r.cursorLeftDown

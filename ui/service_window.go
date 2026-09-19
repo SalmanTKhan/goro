@@ -33,13 +33,15 @@ type ServiceWindowOptions struct {
 
 type ServiceWindow struct {
 	Window
-	title        string
-	services     []string
-	selected     state.Signal[int]
-	scrollY      state.Signal[float32]
-	callbacks    ServiceWindowCallbacks
-	lastClickAt  time.Time
-	lastClickRow int
+	ctx             client.Context
+	title           string
+	services        []string
+	selected        state.Signal[int]
+	scrollY         state.Signal[float32]
+	callbacks       ServiceWindowCallbacks
+	lastClickAt     time.Time
+	lastClickRow    int
+	promptSignature string
 }
 
 func NewServiceWindow(ctx client.Context, services []string, options ServiceWindowOptions, callbacks ServiceWindowCallbacks) *ServiceWindow {
@@ -49,12 +51,14 @@ func NewServiceWindow(ctx client.Context, services []string, options ServiceWind
 		title = "Service"
 	}
 	w := &ServiceWindow{
-		title:        title,
-		services:     append([]string(nil), services...),
-		selected:     state.NewSignal(selected),
-		scrollY:      state.NewSignal[float32](0),
-		callbacks:    callbacks,
-		lastClickRow: -1,
+		ctx:             ctx,
+		title:           title,
+		services:        append([]string(nil), services...),
+		selected:        state.NewSignal(selected),
+		scrollY:         state.NewSignal[float32](0),
+		callbacks:       callbacks,
+		lastClickRow:    -1,
+		promptSignature: controllerPromptSignature(ctx),
 	}
 	w.Window = NewWindow(serviceWindowWidth, serviceWindowHeight)
 	w.CloseOnEsc = false
@@ -66,6 +70,11 @@ func NewServiceWindow(ctx client.Context, services []string, options ServiceWind
 func (w *ServiceWindow) SetContext(ctx client.Context) {
 	if w == nil {
 		return
+	}
+	w.ctx = ctx
+	if sig := controllerPromptSignature(ctx); sig != w.promptSignature {
+		w.promptSignature = sig
+		w.SetContent(w.widgetTree())
 	}
 	x, y := serviceWindowPosition(ctx)
 	w.SetAutoPosition(x, y)
@@ -120,10 +129,8 @@ func (w *ServiceWindow) widgetTree() widget.Widget {
 		),
 		Footer(
 			primitives.Expanded(primitives.Box()),
-			rotheme.ButtonDisabledFn("OK", func() bool {
-				return w.SelectedIndex() < 0
-			}, w.confirm),
-			rotheme.Button("Cancel", w.cancel),
+			contextualControllerButtonDisabled(w.ctx, "OK", input.ActionConfirm, w.SelectedIndex() < 0, w.confirm),
+			contextualControllerButton(w.ctx, "Cancel", input.ActionCancel, w.cancel),
 		),
 	)
 }

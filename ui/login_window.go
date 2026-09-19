@@ -6,6 +6,7 @@ import (
 	"github.com/gogpu/ui/primitives"
 	"github.com/gogpu/ui/widget"
 	"github.com/kivutar/goro/client"
+	"github.com/kivutar/goro/input"
 	"github.com/kivutar/goro/ui/rotheme"
 )
 
@@ -25,12 +26,13 @@ type LoginWindow struct {
 	KeepID   bool
 
 	Window
-	layout    loginWindowLayout
-	callbacks LoginWindowCallbacks
-	user      *textfield.Widget
-	password  *textfield.Widget
-	offline   *checkbox.Widget
-	keep      *checkbox.Widget
+	layout          loginWindowLayout
+	callbacks       LoginWindowCallbacks
+	user            *textfield.Widget
+	password        *textfield.Widget
+	offline         *checkbox.Widget
+	keep            *checkbox.Widget
+	promptSignature string
 }
 
 const (
@@ -55,6 +57,7 @@ func NewLoginWindow(ctx client.Context, username, password string, keepID bool, 
 		callbacks: callbacks,
 	}
 	w.Window = NewWindow(layout.W, layout.H)
+	w.promptSignature = controllerPromptSignature(ctx)
 	w.OpenAt(layout.X, layout.Y, w.widgetTree())
 	return w
 }
@@ -77,6 +80,10 @@ func (w *LoginWindow) SetContext(ctx client.Context) {
 func (w *LoginWindow) Update(ctx client.Context) bool {
 	if w == nil {
 		return false
+	}
+	if sig := controllerPromptSignature(ctx); sig != w.promptSignature {
+		w.promptSignature = sig
+		w.rebuild()
 	}
 	return w.Window.Update(ctx)
 }
@@ -183,6 +190,8 @@ func (w *LoginWindow) widgetTree() widget.Widget {
 		checkbox.OnToggle(func(enabled bool) { w.Offline = enabled }),
 	)
 	w.offline = offline
+	footer := []widget.Widget{primitives.Expanded(primitives.Box())}
+	footer = append(footer, contextualControllerButton(w.ctx, "Login", input.ActionConfirm, func() { w.submitField(true) }))
 	labelW := float32(loginWindowLabelW)
 	fieldW := float32(w.layout.W - loginWindowFormLeftPad - loginWindowFormRightPad - loginWindowLabelW - loginWindowLabelGap - loginWindowKeepW - loginWindowKeepGap)
 	fieldH := float32(loginWindowFieldH)
@@ -235,10 +244,7 @@ func (w *LoginWindow) widgetTree() widget.Widget {
 				Gap(loginWindowKeepGap),
 		),
 		Footer(
-			primitives.Expanded(primitives.Box()),
-			rotheme.Button("Login", func() {
-				w.submitField(true)
-			}),
+			footer...,
 		),
 	)
 }

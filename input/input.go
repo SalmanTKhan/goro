@@ -257,6 +257,9 @@ func (s *State) SetControllerFrame(frame ControllerFrame) {
 	}
 	s.controllerFrame = frame
 	s.controller = frame.Current
+	if frame.Current.Active() {
+		s.source = InputSourceController
+	}
 }
 
 func (s *State) ControllerFrame() ControllerFrame {

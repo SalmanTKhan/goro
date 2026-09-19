@@ -63,23 +63,23 @@ var inventoryBagTabs = []struct {
 
 type InventoryBagWindow struct {
 	Window
-	tab           int
-	scrollY       state.Signal[float32]
-	snapshot      string
-	itemInfo      *ItemWindows
-	lastClickItem uint16
-	lastClickAt   time.Time
-	dragItem      session.InventoryItem
-	dragActive    bool
-	dragFrom      time.Time
-	amountPrompt  amountPrompt
-	pendingCard   uint16
-	tooltip       tooltipState
-	icons         map[inventoryBagIconKey]image.Image
-	iconMiss      map[inventoryBagIconKey]struct{}
+	shortcuts      *ShortcutBar
+	tab            int
+	scrollY        state.Signal[float32]
+	snapshot       string
+	itemInfo       *ItemWindows
+	lastClickItem  uint16
+	lastClickAt    time.Time
+	dragItem       session.InventoryItem
+	dragActive     bool
+	dragFrom       time.Time
+	amountPrompt   amountPrompt
+	pendingCard    uint16
+	tooltip        tooltipState
+	icons          map[inventoryBagIconKey]image.Image
+	iconMiss       map[inventoryBagIconKey]struct{}
 	controllerGrid *inventoryGridWidget
 	controllerTabs []*tabWidget
-
 }
 
 type inventoryBagIconKey struct {
@@ -107,6 +107,7 @@ func (w *InventoryBagWindow) Toggle(ctx Context) {
 }
 
 func (w *InventoryBagWindow) Update(ctx Context, shortcuts *ShortcutBar, storage *StorageWindow, cart *CartWindow, trade *TradeWindow, equipment *EquipmentWindow, itemInfo *ItemWindows, dropTargets ...InventoryDropTarget) bool {
+	w.shortcuts = shortcuts
 	w.EnsureWindow(inventoryBagWidth, inventoryBagHeight)
 	w.configureControllerNavigation()
 	if !w.IsOpen() || ctx.Input == nil {
@@ -352,6 +353,10 @@ func (w *InventoryBagWindow) handleControllerAction(action input.UIAction) bool 
 		w.Close()
 		return true
 	case input.UIActionContext:
+		if item, ok := w.controllerGrid.focusedItem(); ok && w.shortcuts != nil {
+			_ = w.shortcuts.AssignItemController(ctx, item)
+			return true
+		}
 		if item, ok := w.controllerGrid.focusedItem(); ok && w.itemInfo != nil {
 			w.itemInfo.openItem(ctx, item, w.x+inventoryBagTabRail+w.controllerGrid.cellSize()/2, w.y+ROWindowTitleHeight+inventoryBagCell/2)
 		}

@@ -67,6 +67,7 @@ var skillTabs = [...]struct {
 
 type SkillWindow struct {
 	Window
+	shortcuts              *ShortcutBar
 	tab                    int
 	scrollY                state.Signal[float32]
 	snapshot               string
@@ -125,6 +126,7 @@ func (w *SkillWindow) OpenWindow(ctx Context) {
 }
 
 func (w *SkillWindow) Update(ctx Context, shortcuts *ShortcutBar, actions GameActions) bool {
+	w.shortcuts = shortcuts
 	w.EnsureWindow(skillWindowWidth, skillWindowHeight)
 	w.ctx = ctx
 	w.configureControllerNavigation()
@@ -448,6 +450,16 @@ func (w *SkillWindow) handleControllerAction(action input.UIAction) bool {
 		w.showControllerSkillTooltip(w.ctx, row)
 		w.activateControllerSkill(w.ctx, w.actions, skills, row)
 		return true
+	case input.UIActionContext:
+		if w.table == nil || !w.table.IsFocused() || w.shortcuts == nil {
+			return true
+		}
+		skills := w.activeSkills()
+		row := w.ensureSelectedRowSignal().Get()
+		if row >= 0 && row < len(skills) {
+			_ = w.shortcuts.AssignSkillController(w.ctx, skills[row])
+		}
+		return true
 	case input.UIActionNextFocus, input.UIActionPreviousFocus:
 		if len(w.controllerTabs) < 2 {
 			return false
@@ -471,7 +483,7 @@ func (w *SkillWindow) handleControllerAction(action input.UIAction) bool {
 			app.FocusControllerWidget(w.controllerTabs[next])
 		}
 		return true
-	case input.UIActionContext, input.UIActionSecondary:
+	case input.UIActionSecondary:
 		return w.adjustSelectedControllerSkill(action == input.UIActionSecondary)
 	default:
 		return false
