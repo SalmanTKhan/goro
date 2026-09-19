@@ -20,7 +20,7 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 )
 
-replace github.com/Zyko0/go-sdl3 => D:/Projects/go-sdl3
+replace github.com/Zyko0/go-sdl3 => github.com/SalmanTKhan/go-sdl3 v0.0.0-20260919172135-f8dde09b95af
 
 require (
 	github.com/Zyko0/purego-gen v0.0.1 // indirect
