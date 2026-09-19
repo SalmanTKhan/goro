@@ -28,6 +28,7 @@ type LoginMode struct {
 	autoAttempted       bool
 	autoCharAttempted   bool
 	loginPending        bool
+	charSelectPending   bool
 	fade                loginFadeState
 	username            string
 	password            string
@@ -218,6 +219,11 @@ func (m *LoginMode) Update(ctx client.Context) (Mode, error) {
 			continue
 		}
 		m.packets = append(m.packets, pkt.String())
+		if pkt.ID == 0x006C {
+			// HC_REFUSE_ENTER can also reject a selection without disconnecting.
+			m.charSelectPending = false
+			continue
+		}
 		if pkt.ID == 0x006A {
 			refusal, err := network.ParseAccountRefuseLogin(pkt)
 			if err != nil {
@@ -799,6 +805,9 @@ func (m *LoginMode) moveToNextCharacterSlot() {
 }
 
 func (m *LoginMode) submitSelectedCharacter(ctx client.Context) {
+	if m.charSelectPending {
+		return
+	}
 	character, ok := characterBySlot(ctx.Session.Characters, m.selectedSlot)
 	if !ok {
 		m.status = "empty character slot"
@@ -812,6 +821,7 @@ func (m *LoginMode) submitSelectedCharacter(ctx client.Context) {
 		m.status = "select character failed: " + err.Error()
 		return
 	}
+	m.charSelectPending = true
 	m.playConfirmSFX(ctx)
 	ctx.Session.SelectCharacter(character)
 	m.status = fmt.Sprintf("selected character %s", character.Name)
@@ -1098,6 +1108,9 @@ func (m *LoginMode) maybeSendCharServerPing(ctx client.Context, now time.Time) {
 }
 
 func (m *LoginMode) connectCharServer(ctx client.Context, server network.CharServer) bool {
+	// A new character-server connection allows selection again. Keep the guard
+	// set during the map-server handoff, while the old selection UI is visible.
+	m.charSelectPending = false
 	m.disableLoginServerPing()
 	m.disableCharServerPing()
 	if ctx.Network == nil {
