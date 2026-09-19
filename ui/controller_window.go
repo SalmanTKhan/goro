@@ -212,7 +212,7 @@ func controllerButtonSummary(ctx client.Context) string {
 		if held != "" {
 			held += " "
 		}
-		held += controllerButtonLabel(button)
+		held += controllerPromptButtonLabel(snapshot.Kind, button)
 	}
 	if held == "" {
 		return "Buttons: none"
