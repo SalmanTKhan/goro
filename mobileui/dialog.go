@@ -291,22 +291,28 @@ func LayoutDialog(viewport Viewport, model MobileDialogModel) DialogLayout {
 
 	if len(model.Messages) > 0 {
 		cursorY := layout.Message.Y
+		messageBottom := layout.Message.Bottom()
 		previousSpeaker := strings.TrimSpace(model.Title)
 		for i, message := range messages {
 			speaker := strings.TrimSpace(message.Speaker)
+			block := DialogMessageLayout{Speaker: speaker, Text: message.Text}
 			if speaker != "" && speaker != previousSpeaker {
-				speakerRect := Rect{X: layout.Message.X, Y: cursorY, W: layout.Message.W, H: 24}
-				layout.MessageBlocks = append(layout.MessageBlocks, DialogMessageLayout{Speaker: speaker, Text: message.Text, SpeakerRect: speakerRect})
-				cursorY = speakerRect.Bottom() + 4
-			} else {
-				if i > 0 {
-					cursorY += 3
+				speakerH := minf(24, maxf(0, messageBottom-cursorY))
+				if speakerH > 0 {
+					block.SpeakerRect = Rect{X: layout.Message.X, Y: cursorY, W: layout.Message.W, H: speakerH}
+					cursorY = block.SpeakerRect.Bottom() + 4
 				}
-				layout.MessageBlocks = append(layout.MessageBlocks, DialogMessageLayout{Speaker: speaker, Text: message.Text})
+			} else if i > 0 {
+				cursorY += 3
 			}
-			block := &layout.MessageBlocks[len(layout.MessageBlocks)-1]
-			block.TextRect = Rect{X: layout.Message.X, Y: cursorY, W: layout.Message.W, H: maxf(24, float32(dialogLineCount(message.Text, messageMaxChars))*lineAdvance)}
-			cursorY = block.TextRect.Bottom()
+
+			textH := maxf(24, float32(dialogLineCount(message.Text, messageMaxChars))*lineAdvance)
+			textH = minf(textH, maxf(0, messageBottom-cursorY))
+			if textH > 0 {
+				block.TextRect = Rect{X: layout.Message.X, Y: cursorY, W: layout.Message.W, H: textH}
+				cursorY = block.TextRect.Bottom()
+			}
+			layout.MessageBlocks = append(layout.MessageBlocks, block)
 			previousSpeaker = speaker
 		}
 	}
@@ -347,7 +353,10 @@ func dialogActionColumns(width float32, actionCount int, gap float32, portrait b
 	}
 	minButtonW := float32(220)
 	if portrait {
-		minButtonW = 180
+		// Even a 390px-class phone has ~338 logical px of dialog action
+		// width after padding. Two ~164px touch targets remain comfortably
+		// usable and avoid starving the message viewport with a tall menu.
+		minButtonW = 156
 	}
 	columns := maxInt(1, int((width+gap)/(minButtonW+gap)))
 	columns = minInt(columns, actionCount)
