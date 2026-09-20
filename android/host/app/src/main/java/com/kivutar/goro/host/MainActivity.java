@@ -172,6 +172,19 @@ public final class MainActivity extends Activity {
         }
     }
 
+    // Dismissing the Android IME does not change the Go-side text-input mode.
+    // The next tap is therefore the explicit request to show it again.
+    private void reopenNativeKeyboard() {
+        if (chatInput == null || !chatInputActive) return;
+        chatInput.setVisibility(EditText.VISIBLE);
+        chatInput.requestFocus();
+        chatInput.postDelayed(() -> {
+            if (!chatInputActive || isFinishing()) return;
+            InputMethodManager inputMethod = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+            if (inputMethod != null) inputMethod.showSoftInput(chatInput, InputMethodManager.SHOW_IMPLICIT);
+        }, 50);
+    }
+
     private File installMobileAssetsFromFile(File sourceRoot) throws Exception {
         byte[] manifest = readFileBytes(new File(sourceRoot, "mobile-assets.json"));
         return installMobileAssets(manifest, new File(getFilesDir(), "goro-mobile-installed"), (relative, target) -> {
@@ -617,6 +630,7 @@ public final class MainActivity extends Activity {
             final int index = event.getActionIndex();
             final boolean pressed = action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_POINTER_DOWN;
             final boolean released = action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_POINTER_UP;
+            if (pressed && nativeTextInputMode() != 0) reopenNativeKeyboard();
             if (pressed || released) {
                 nativeTouch(action, event.getPointerId(index), event.getX(index), event.getY(index), pressed);
             }

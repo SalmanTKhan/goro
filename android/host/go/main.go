@@ -484,7 +484,16 @@ func (h *host) renderLoop() {
 			} else {
 				androidLog(fmt.Sprintf("stage=mobile-config path=%s home=%s", configPath, os.Getenv("HOME")))
 			}
-			cfg, configErr := config.LoadConfig(nil)
+			// Load the config staged beside the selected resource root. The
+			// Android process working directory is not the resource root, so
+			// LoadConfig(nil) would otherwise silently use its default config and
+			// discard online settings pushed by the deployment helper.
+			configArgs := []string(nil)
+			resourceConfigPath := filepath.Join(currentResourceRoot(), "goro", "goro.ini")
+			if _, statErr := os.Stat(resourceConfigPath); statErr == nil {
+				configArgs = []string{"--config", resourceConfigPath}
+			}
+			cfg, configErr := config.LoadConfig(configArgs)
 			if configErr != nil {
 				androidLog(fmt.Sprintf("stage=mobile-config load-error=%v", configErr))
 				return fmt.Errorf("mobile config: %w", configErr)
@@ -976,7 +985,6 @@ func renderFrame(surface *wgpu.Surface, device *wgpu.Device, renderer *render.GP
 		view.Release()
 		return
 	}
-	androidLog("stage=render-pass begin")
 	_, err = renderer.DrawTarget(render.FrameTarget{View: view, Texture: texture.AsTexture(), Width: width, Height: height, Format: format}, frame)
 	if err != nil {
 		view.Release()
@@ -984,7 +992,6 @@ func renderFrame(surface *wgpu.Surface, device *wgpu.Device, renderer *render.GP
 		androidLog(fmt.Sprintf("stage=render-pass error=%v", err))
 		return
 	}
-	androidLog("stage=submit frame=1")
 	err = surface.Present(texture)
 	view.Release()
 	if err != nil {

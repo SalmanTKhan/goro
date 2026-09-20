@@ -88,7 +88,12 @@ func New(cfg config.Config) (*Game, error) {
 	if cfg.MobileSession.Mode == config.SessionModeOnline && server.ClientDate != 0 {
 		packetDate = server.ClientDate
 	}
-	if cfg.MobileSession.Mode == config.SessionModeOnline && server.Host != "" {
+	// Preserve a real clientinfo.xml server catalog when the mobile config did
+	// not explicitly select a non-default host. This keeps the desktop Android
+	// login flow's server selector intact. A configured non-default host still
+	// provides the single-server mobile deployment path.
+	useConfiguredServer := server.Host != "" && server.Host != "127.0.0.1"
+	if cfg.MobileSession.Mode == config.SessionModeOnline && useConfiguredServer {
 		// A mobile build may not ship clientinfo.xml. Inject the explicitly
 		// selected server while retaining the existing resource-driven desktop
 		// discovery path when no mobile server is configured.

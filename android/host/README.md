@@ -47,8 +47,8 @@ local offline authority; it does not connect to a server.
 
 ## Dependencies
 
-The host uses a nested module so the Phase 0 experiment can consume the
-released WGPU Android preview (`github.com/gogpu/wgpu@v0.31.6`) without
+The host uses a nested module so the Android build can consume the
+released WGPU Android preview (`github.com/gogpu/wgpu@v0.34.3`) without
 changing the root Goro dependency graph. The root module is used only for the
 existing `input.State` package.
 
@@ -101,6 +101,25 @@ adb shell am force-stop com.kivutar.goro.host
 adb shell monkey -p com.kivutar.goro.host 1
 adb logcat -s GoroAndroidHost GoroAndroidGo
 ```
+
+## Deploying real online client data
+
+The APK should not contain a full production `data.grf`. Use the repository
+helper to build the APK, install it, and push the selected client's GRFs and
+`clientinfo.xml` into the app external data root:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\deploy-android-online.ps1 `
+  -ClientRoot 'D:\Spel\OldROClean\OldRO' `
+  -ServerIndex 0 `
+  -UiMode desktop
+```
+
+The helper validates the first `<connection>` by default and enables online
+mode while preserving the complete `clientinfo.xml` server list for the
+desktop login selector. Use `-ServerIndex 1` or `2` to validate another
+connection. The device must be able to reach the selected server address after
+you choose it in the UI; no credentials are written by the helper.
 
 The host prefers an embedded `goro-fixture/data.pak` asset. At startup it
 extracts that archive to the app-private files directory, logs its size, and

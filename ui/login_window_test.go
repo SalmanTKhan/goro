@@ -170,3 +170,19 @@ func TestLoginWindowEnterMovesToPasswordAndRejectsEmptyPassword(t *testing.T) {
 		t.Fatal("non-empty password was not submitted")
 	}
 }
+
+func TestLoginWindowValuesReadProgrammaticTextFieldUpdates(t *testing.T) {
+	app := uiapp.New()
+	bridge := loginWindowTestApp{basicMenuTestApp{app: app}}
+	manager := NewManager()
+	manager.SetUIApp(bridge)
+	ctx := client.Context{ScreenW: 800, ScreenH: 600, UIApp: bridge, UIManager: manager}
+	window := NewLoginWindow(ctx, "", "", false, LoginWindowCallbacks{})
+	window.user.SetText("android-account")
+	window.password.SetText("android-password")
+
+	username, password := window.Values()
+	if username != "android-account" || password != "android-password" {
+		t.Fatalf("Values() = %q/%q, want Android text-field values", username, password)
+	}
+}

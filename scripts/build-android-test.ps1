@@ -40,7 +40,7 @@ function Prepare-ModuleOverlay([string]$name, [string]$source, [string]$destinat
 }
 
 $moduleCache = Join-Path (go env GOPATH) 'pkg\mod'
-Prepare-ModuleOverlay 'wgpu' (Join-Path $moduleCache 'github.com\gogpu\wgpu@v0.31.6') (Join-Path $goRoot '.emulator-wgpu')
+Prepare-ModuleOverlay 'wgpu' (Join-Path $moduleCache 'github.com\gogpu\wgpu@v0.34.3') (Join-Path $goRoot '.emulator-wgpu')
 Get-ChildItem -LiteralPath (Join-Path $goRoot '.emulator-wgpu') -Recurse -Force -File | ForEach-Object { $_.IsReadOnly = $false }
 Get-ChildItem -LiteralPath (Join-Path $goRoot '.emulator-wgpu') -Recurse -Force -File | ForEach-Object {
     $text = Get-Content -LiteralPath $_.FullName -Raw
@@ -77,6 +77,11 @@ foreach ($path in @($armCc,$armCxx,$x86Cc,$x86Cxx)) { if (!(Test-Path $path)) { 
 New-Item -ItemType Directory -Force -Path $armOut,$x86Out | Out-Null
 Push-Location $goRoot
 try {
+	# The emulator ABI uses a separate module file because its WGPU/goffi
+	# overlays are patched above. Keep that module's sums synchronized too;
+	# otherwise Go refuses the x86_64 build with "updates to go.mod needed".
+	go mod tidy -modfile .\go.emulator.mod
+	if ($LASTEXITCODE -ne 0) { throw "emulator Go module tidy failed with exit code $LASTEXITCODE" }
     $env:GOOS = 'android'; $env:GOARCH = 'arm64'; $env:CC = $armCc; $env:CXX = $armCxx
     go build -tags nofakecgo -buildmode=c-shared -trimpath -o (Join-Path $armOut 'libgoro_android.so') .
     if ($LASTEXITCODE -ne 0) { throw "arm64 Go build failed with exit code $LASTEXITCODE" }

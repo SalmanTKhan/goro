@@ -63,7 +63,13 @@ func (m *WorldMode) ControllerTargetingActive() bool {
 }
 
 func (m *WorldMode) applyControllerMovement(ctx client.Context, actions input.ActionState) {
-	if ctx.World != nil && (ctx.World.Player.Sitting || m.pendingSkill.skill.ID != 0) {
+	if ctx.World != nil && ctx.World.Player.Sitting {
+		if actions.Move != input.DirectionNone {
+			m.rotateSittingController(ctx, actions.Move)
+		}
+		return
+	}
+	if ctx.World != nil && m.pendingSkill.skill.ID != 0 {
 		return
 	}
 	if actions.Move != input.DirectionNone {
@@ -212,6 +218,24 @@ func (m *WorldMode) applyControllerActions(ctx client.Context, actions input.Act
 			})
 		}
 	}
+}
+
+// rotateSittingController shares the mouse sitting behavior: the first valid
+// request changes the character's head direction and the next request changes
+// the body direction. The existing resolver and network command remain the
+// authority for that two-step turn.
+func (m *WorldMode) rotateSittingController(ctx client.Context, direction input.Direction8) {
+	if m == nil || ctx.World == nil || !ctx.World.Player.Sitting || !m.walkReady(time.Now()) {
+		return
+	}
+	playerX, playerY := currentPlayerCell(ctx, time.Now())
+	dx, dy := direction.Vector()
+	targetX := playerX + dx
+	targetY := playerY + dy
+	if targetX == playerX && targetY == playerY {
+		return
+	}
+	m.requestChangeDirection(ctx, targetX, targetY, "controller sitting turn")
 }
 
 func (m *WorldMode) updateControllerGroundReticle(ctx client.Context, actions input.ActionState) {

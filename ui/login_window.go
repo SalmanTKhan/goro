@@ -272,6 +272,17 @@ func (w *LoginWindow) fieldValues() (string, string) {
 	return username, password
 }
 
+// Values returns the values currently held by the form controls.  This is
+// intentionally read from the widgets rather than only from Username and
+// Password: platform IMEs update a text field programmatically, and that path
+// does not necessarily invoke the widget's OnChange callback.
+func (w *LoginWindow) Values() (string, string) {
+	if w == nil {
+		return "", ""
+	}
+	return w.fieldValues()
+}
+
 func loginWindowLayoutEqual(a, b loginWindowLayout) bool {
 	return a.W == b.W &&
 		a.H == b.H &&

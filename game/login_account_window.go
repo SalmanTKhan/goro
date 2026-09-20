@@ -54,8 +54,7 @@ func (m *LoginMode) updateLoginWindow(ctx client.Context) {
 	if m.loginWindow == nil {
 		m.loginWindow = gameui.NewLoginWindow(ctx, m.username, m.password, m.keepID, gameui.LoginWindowCallbacks{
 			OnSubmit: func() {
-				m.username = m.loginWindow.Username
-				m.password = m.loginWindow.Password
+				m.username, m.password = m.loginWindow.Values()
 				m.keepID = m.loginWindow.KeepID
 				m.saveLoginID(ctx)
 				if conn, ok := m.selectedLoginConnection(ctx); ok {
@@ -63,8 +62,7 @@ func (m *LoginMode) updateLoginWindow(ctx client.Context) {
 				}
 			},
 			OnOfflineSubmit: func() {
-				m.username = m.loginWindow.Username
-				m.password = m.loginWindow.Password
+				m.username, m.password = m.loginWindow.Values()
 				m.offline = true
 				m.phase = loginPhaseCharacter
 				m.accountStep = loginAccountCredentials
@@ -77,8 +75,7 @@ func (m *LoginMode) updateLoginWindow(ctx client.Context) {
 		return
 	}
 	m.loginWindow.SetContext(ctx)
-	m.username = m.loginWindow.Username
-	m.password = m.loginWindow.Password
+	m.username, m.password = m.loginWindow.Values()
 	m.loginWindow.Publish(ctx)
 }
 
