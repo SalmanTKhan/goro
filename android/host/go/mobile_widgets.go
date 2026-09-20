@@ -125,25 +125,25 @@ func (p *mobilePresentation) tree(k uimobile.Kit) (widget.Widget, sprites) {
 		if c.Tab == mobileui.ShopSellTab {
 			items = c.Shop.SellItems
 		}
-		var art []uimobile.IconPlacement
-		if !c.Quantity.Open {
-			// Item art is composited after the retained widget raster. While the
-			// quantity modal is open, suppress the underlying list/cart sprites
-			// so they cannot punch through the modal and scrim.
-			art = uimobile.ShopIconRects(items, c.Layout)
-			art = append(art, uimobile.ShopCartIconRects(c.Shop.Cart, c.Layout)...)
+		art := uimobile.ShopIconRects(items, c.Layout)
+		art = append(art, uimobile.ShopCartIconRects(c.Shop.Cart, c.Layout)...)
+		quantity := c.Quantity
+		if quantity.Open {
+			// The quantity modal is drawn after live item art in drawWidgets so
+			// it can stay topmost without hiding the underlying shop sprites.
+			quantity = mobileui.EconomyQuantityState{}
 		}
-		return k.ShopTree(c.Shop, c.Layout, c.Tab, c.Quantity),
+		return k.ShopTree(c.Shop, c.Layout, c.Tab, quantity),
 			sprites{items: art}
 
 	case p.economyController != nil && p.economyController.Screen == mobileui.EconomyStorage:
 		c := p.economyController
-		var art []uimobile.IconPlacement
-		if !c.Quantity.Open {
-			art = uimobile.StorageIconRects(c.Storage, c.Layout)
+		quantity := c.Quantity
+		if quantity.Open {
+			quantity = mobileui.EconomyQuantityState{}
 		}
-		return k.StorageTree(c.Storage, c.Layout, c.Quantity),
-			sprites{items: art}
+		return k.StorageTree(c.Storage, c.Layout, quantity),
+			sprites{items: uimobile.StorageIconRects(c.Storage, c.Layout)}
 
 	case p.characterSkills != nil && p.navigation.Screen == mobileui.ScreenCharacter:
 		c := p.characterSkills
@@ -353,6 +353,13 @@ func (m *mobileWidgets) drawWidgets(p *mobilePresentation, frame *render.Frame) 
 			continue
 		}
 		p.game.DrawMobileStatusIcon(frame, placement.Status, int(placement.Rect.X), int(placement.Rect.Y), side)
+	}
+	if p.economyController != nil && p.economyController.Quantity.Open &&
+		(p.economyController.Screen == mobileui.EconomyShop || p.economyController.Screen == mobileui.EconomyStorage) {
+		// Economy item sprites are live art composited over the retained raster.
+		// Draw the modal last so the shop remains visible beneath the scrim
+		// while no sprite can bleed through the modal itself.
+		p.drawEconomyQuantity(frame)
 	}
 	return true
 }
