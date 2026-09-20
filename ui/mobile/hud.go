@@ -26,11 +26,12 @@ func (k Kit) HUDTree(
 
 	k.placePlayerPanel(c, model.Player, layout.PlayerPanel)
 	k.placeTargetPanel(c, model.Target, layout.TargetPanel)
-	k.placeStatusEffects(c, model.Statuses, layout.StatusArea)
+	k.placeStatusEffects(c, model.Statuses, layout.StatusSlots)
 	k.placeMinimap(c, model.Minimap, layout.Minimap)
 	k.placeLoot(c, model.Loot, layout)
 	k.placeSkillBar(c, model.Skills, layout, nav)
 	k.placePrimaryAction(c, model.Target, layout.PrimaryAction)
+	k.placeWorldUtilities(c, model, layout, nav)
 	k.placeChatBar(c, layout)
 	k.placeCombatBanner(c, layout, nav)
 	k.placeMenu(c, layout, nav)
@@ -143,19 +144,17 @@ func (k Kit) placePrimaryAction(c *Canvas, target mobileui.TargetHUDModel, area 
 }
 
 // placeStatusEffects lays buffs and debuffs out as a row of small squares.
-func (k Kit) placeStatusEffects(c *Canvas, statuses []mobileui.StatusEffectModel, area mobileui.Rect) {
-	if len(statuses) == 0 || area.W <= 0 || area.H <= 0 {
+// Retail artwork is composited by the Android host after this retained HUD
+// raster, using the exact same StatusSlots geometry.
+func (k Kit) placeStatusEffects(c *Canvas, statuses []mobileui.StatusEffectModel, slots []mobileui.Rect) {
+	if len(statuses) == 0 || len(slots) == 0 {
 		return
 	}
-	side := min32(area.H, area.W)
-	gap := k.Theme.Metrics.TableGap * 2
-	x := area.X
-	for range statuses {
-		if x+side > area.Right() {
-			return
+	for i, slot := range slots {
+		if i >= len(statuses) || slot.W <= 0 || slot.H <= 0 {
+			break
 		}
-		c.Place(k.Slot(true, false), mobileui.Rect{X: x, Y: area.Y, W: side, H: side})
-		x += side + gap
+		c.Place(k.Slot(true, false), slot)
 	}
 }
 
@@ -244,6 +243,40 @@ func (k Kit) placeSkillBar(
 	}
 }
 
+func (k Kit) placeWorldUtilities(c *Canvas, model mobileui.MobileHUDModel, layout mobileui.HUDLayout, nav mobileui.Navigation) {
+	if layout.SitAction.W > 0 {
+		label := "Sit"
+		if model.Player.Sitting {
+			label = "Stand"
+		}
+		c.Place(k.Button(label, ButtonNormal), layout.SitAction)
+	}
+	if layout.LootAction.W > 0 {
+		state := ButtonDisabled
+		if len(model.Loot) > 0 {
+			state = ButtonNormal
+		}
+		c.Place(k.Button("Loot", state), layout.LootAction)
+	}
+	if layout.EmoteAction.W > 0 {
+		c.Place(k.Button("Emote", buttonStateForOpen(nav.EmoteOpen)), layout.EmoteAction)
+	}
+	if !nav.EmoteOpen || layout.EmotePanel.W <= 0 {
+		return
+	}
+	c.Place(k.Panel(), layout.EmotePanel)
+	for i, row := range layout.EmoteRows {
+		if i >= len(model.Emotes) {
+			break
+		}
+		label := model.Emotes[i].Label
+		if label != "!" && label != "?" && label != "$" && label != "..." {
+			label = "/" + label
+		}
+		c.Place(k.Button(label, ButtonNormal), row)
+	}
+}
+
 func (k Kit) placeChatBar(c *Canvas, layout mobileui.HUDLayout) {
 	if layout.ChatBar.W <= 0 || layout.ChatBar.H <= 0 {
 		return
@@ -315,6 +348,22 @@ func buttonStateForOpen(active bool) ButtonState {
 }
 
 // HUDIconRects reports where the host must draw skill and loot sprites.
+type StatusIconPlacement struct {
+	Status mobileui.StatusEffectModel
+	Rect   mobileui.Rect
+}
+
+func HUDStatusIconRects(model mobileui.MobileHUDModel, layout mobileui.HUDLayout) []StatusIconPlacement {
+	out := make([]StatusIconPlacement, 0, len(layout.StatusSlots))
+	for i, rect := range layout.StatusSlots {
+		if i >= len(model.Statuses) || rect.W <= 0 || rect.H <= 0 || model.Statuses[i].IconKey == "" {
+			continue
+		}
+		out = append(out, StatusIconPlacement{Status: model.Statuses[i], Rect: rect})
+	}
+	return out
+}
+
 func HUDIconRects(
 	model mobileui.MobileHUDModel,
 	layout mobileui.HUDLayout,
