@@ -1116,7 +1116,7 @@ func (p *mobilePresentation) Release(id input.TouchID, x, y int) {
 			p.chatController.Open(p.game.MobileChatModel())
 			p.navigation.OpenLayer(mobileui.ScreenWorldHUD, mobileui.NavigationDetailSheet, "chat")
 		}
-	case mobileui.ControlSkill, mobileui.ControlLootItem, mobileui.ControlSkillPagePrev, mobileui.ControlSkillPageNext:
+	case mobileui.ControlSkill, mobileui.ControlLootItem, mobileui.ControlSkillPagePrev, mobileui.ControlSkillPageNext, mobileui.ControlPrimaryAction, mobileui.ControlTarget:
 		if p.hudController != nil {
 			p.hudController.Model = p.hudModel
 			p.hudController.Navigation = p.navigation
@@ -1124,7 +1124,16 @@ func (p *mobilePresentation) Release(id input.TouchID, x, y int) {
 			p.hudController.Tap(float32(x), float32(y))
 			p.navigation = p.hudController.Navigation
 		}
-	case mobileui.ControlTarget, mobileui.ControlMinimap, mobileui.ControlStatus:
+	case mobileui.ControlMinimap:
+		if p.mapController != nil {
+			p.mapController.SetModel(p.game.MobileMapModel())
+			p.navigation.Open(mobileui.ScreenMap)
+		}
+	case mobileui.ControlStatus:
+		if p.characterSkills != nil {
+			p.characterSkills.Open(mobileui.ScreenCharacter)
+			p.navigation.Open(mobileui.ScreenCharacter)
+		}
 	}
 	p.hud = mobileui.LayoutHUD(p.viewport, mobileui.DefaultTokens(), p.hudModel, p.navigation)
 }
