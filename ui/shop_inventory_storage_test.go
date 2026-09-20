@@ -12,6 +12,7 @@ import (
 	"github.com/gogpu/ui/widget"
 	"github.com/kivutar/goro/db"
 	"github.com/kivutar/goro/input"
+	"github.com/kivutar/goro/mobileui"
 	"github.com/kivutar/goro/network"
 	"github.com/kivutar/goro/res"
 	"github.com/kivutar/goro/session"
@@ -793,5 +794,62 @@ func TestMakingItemWindowOpensServerList(t *testing.T) {
 	window.OpenList(Context{ScreenW: 800, ScreenH: 600}, network.MakingItemList{})
 	if window.IsOpen() {
 		t.Fatal("making item window stayed open for empty list")
+	}
+}
+
+
+func TestMobileShopCartSharesDesktopBuyState(t *testing.T) {
+	window := ShopWindow{
+		mode:      shopModeBuy,
+		dealNPCID: 42,
+		buyItems: []network.ShopBuyItem{
+			{ItemID: 501, Type: db.ItemTypeHealing, Price: 100},
+		},
+	}
+	ctx := Context{Session: &session.Session{Inventory: session.Inventory{Zeny: 500}}}
+	if !window.MobileStage(ctx, 0, 2) {
+		t.Fatal("mobile buy stage was rejected")
+	}
+	model := window.MobileModel(ctx.Session, nil)
+	if !model.Open || !model.CartEnabled || !model.ModeReady || model.ActiveTab != mobileui.ShopBuyTab {
+		t.Fatalf("unexpected mobile shop flags: %+v", model)
+	}
+	if len(model.Cart) != 1 || model.Cart[0].ItemID != 501 || model.Cart[0].Quantity != 2 || model.CartTotal != 200 {
+		t.Fatalf("mobile buy cart projection=%+v total=%d", model.Cart, model.CartTotal)
+	}
+	if len(model.Items) != 1 || model.Items[0].MaxQuantity != 3 {
+		t.Fatalf("remaining buy capacity did not account for cart: %+v", model.Items)
+	}
+	if !window.MobileRemoveCart(0) || len(window.buyCart) != 0 {
+		t.Fatalf("mobile cart removal failed: %+v", window.buyCart)
+	}
+	if !window.MobileClose(ctx) || window.MobileModel(ctx.Session, nil).Open {
+		t.Fatal("mobile close did not close authoritative shop state")
+	}
+}
+
+func TestMobileShopSellProjectionUsesInventoryAndStagedRemainder(t *testing.T) {
+	window := ShopWindow{
+		mode:      shopModeSell,
+		dealNPCID: 42,
+		sellable: map[uint16]network.ShopSellItem{
+			8: {Index: 8, Price: 10, OverchargePrice: 12},
+		},
+	}
+	ctx := Context{Session: &session.Session{Inventory: session.Inventory{Items: []session.InventoryItem{
+		{Index: 8, ItemID: 938, Type: db.ItemTypeEtc, Amount: 9, Identified: true},
+	}}}}
+	if !window.MobileStage(ctx, 8, 4) {
+		t.Fatal("mobile sell stage was rejected")
+	}
+	model := window.MobileModel(ctx.Session, nil)
+	if model.ActiveTab != mobileui.ShopSellTab || len(model.SellItems) != 1 {
+		t.Fatalf("sell model=%+v", model)
+	}
+	if model.SellItems[0].Quantity != 5 || model.SellItems[0].MaxQuantity != 5 {
+		t.Fatalf("sellable remainder=%+v, want 5", model.SellItems[0])
+	}
+	if len(model.Cart) != 1 || model.Cart[0].Quantity != 4 || model.CartTotal != 48 {
+		t.Fatalf("sell cart=%+v total=%d", model.Cart, model.CartTotal)
 	}
 }
