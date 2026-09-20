@@ -100,6 +100,16 @@ func TestCharacterSkillsControllerSelectionNavigationAndScroll(t *testing.T) {
 	if c.SkillOffset > float32(len(c.Skills.Skills)*64) {
 		t.Fatalf("skill scroll was not clamped: offset=%f", c.SkillOffset)
 	}
+	atBottom := c.SkillOffset
+	if c.ScrollBy(10_000) || c.SkillOffset != atBottom {
+		t.Fatalf("skill scroll should report no visual change at clamp: before=%f after=%f", atBottom, c.SkillOffset)
+	}
+	if !c.ScrollBy(-10_000) || c.SkillOffset != 0 {
+		t.Fatalf("skill scroll did not return to top: offset=%f", c.SkillOffset)
+	}
+	if c.ScrollBy(-1) {
+		t.Fatal("skill scroll reported a change while already clamped at top")
+	}
 	if !c.Tap(c.SkillsLayout.CharacterButton.X+1, c.SkillsLayout.CharacterButton.Y+1) || c.Screen != ScreenCharacter {
 		t.Fatal("skills to character navigation failed")
 	}
