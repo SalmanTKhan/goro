@@ -47,6 +47,12 @@ func (q *EconomyQuantityState) Decrement() {
 	}
 }
 
+func (q *EconomyQuantityState) SetMaximum() {
+	if q != nil {
+		q.SetValue(q.Maximum)
+	}
+}
+
 func (q *EconomyQuantityState) SetValue(value int) {
 	if q == nil {
 		return
