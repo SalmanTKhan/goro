@@ -399,6 +399,12 @@ func (g *Game) MobileHUDModel() mobileui.MobileHUDModel {
 		}
 	}
 	model := mobileui.ProjectSession(g.session, target)
+	if g.world != nil {
+		model.Player.Sitting = g.world.Player.Sitting
+	}
+	enrichMobileStatuses(&model, g.session)
+	model.Emotes = mobileQuickEmotes()
+
 	if g.resource != nil {
 		for i := range model.Skills {
 			if name, ok := g.resource.SkillDisplayName(int(model.Skills[i].SkillID)); ok {
@@ -431,11 +437,22 @@ func (g *Game) MobileHUDModel() mobileui.MobileHUDModel {
 				Kind: mobileui.MinimapMarkerWarp, Selected: warp.ID == g.offline.TargetID,
 			})
 		}
+	}
+
+	// World floor items are authoritative in both online and offline sessions.
+	// Project them uniformly so Android gets the same nearby-loot affordances
+	// instead of requiring precise sprite taps online.
+	if g.world != nil {
 		playerX, playerY := g.session.PlayerX, g.session.PlayerY
-		for _, drop := range g.offline.Drops() {
+		if g.world.Player.ID != 0 {
+			playerX, playerY = g.world.Player.X, g.world.Player.Y
+		}
+		for _, drop := range g.world.Items {
 			name := fmt.Sprintf("Item %d", drop.ItemID)
-			if definition, ok := g.offline.Item(drop.ItemID); ok && strings.TrimSpace(definition.Name) != "" {
-				name = definition.Name
+			if g.offline != nil {
+				if definition, ok := g.offline.Item(drop.ItemID); ok && strings.TrimSpace(definition.Name) != "" {
+					name = definition.Name
+				}
 			}
 			if g.resource != nil {
 				if resolved, ok := g.resource.ItemDisplayName(int(drop.ItemID), drop.Identified); ok && strings.TrimSpace(resolved) != "" {
@@ -444,7 +461,7 @@ func (g *Game) MobileHUDModel() mobileui.MobileHUDModel {
 			}
 			distance := mobileLootDistance(playerX, playerY, drop.X, drop.Y)
 			model.Loot = append(model.Loot, mobileui.LootItemModel{
-				DropID: drop.ID, ItemID: drop.ItemID, Identified: drop.Identified, Name: name, Quantity: drop.Amount,
+				DropID: drop.ID, ItemID: drop.ItemID, Identified: drop.Identified, Name: name, Quantity: int(drop.Amount),
 				X: drop.X, Y: drop.Y, Distance: distance, PickupReady: distance <= 1,
 			})
 			model.Minimap.Markers = append(model.Minimap.Markers, mobileui.MinimapMarkerModel{
@@ -459,6 +476,61 @@ func (g *Game) MobileHUDModel() mobileui.MobileHUDModel {
 		})
 	}
 	return model
+}
+
+func enrichMobileStatuses(model *mobileui.MobileHUDModel, s *session.Session) {
+	if model == nil || s == nil {
+		return
+	}
+
+	// The server normally publishes EFST_WEIGHTOVER50/90, but weight itself is
+	// already authoritative session state. Derive the threshold as a fallback
+	// so a missed status packet cannot make the mobile HUD hide a gameplay-
+	// significant restriction the inventory numbers already prove.
+	if s.Inventory.MaxWeight > 0 {
+		filtered := model.Statuses[:0]
+		for _, status := range model.Statuses {
+			if status.ID != db.StatusWeightover50 && status.ID != db.StatusWeightover90 {
+				filtered = append(filtered, status)
+			}
+		}
+		model.Statuses = filtered
+		switch {
+		case s.Inventory.Weight*100 >= s.Inventory.MaxWeight*90:
+			model.Statuses = append(model.Statuses, mobileui.StatusEffectModel{ID: db.StatusWeightover90})
+		case s.Inventory.Weight*100 >= s.Inventory.MaxWeight*50:
+			model.Statuses = append(model.Statuses, mobileui.StatusEffectModel{ID: db.StatusWeightover50})
+		}
+	}
+
+	for i := range model.Statuses {
+		status := &model.Statuses[i]
+		info, ok := db.StatusIconInfoByID(status.ID)
+		if !ok || strings.TrimSpace(info.Icon) == "" {
+			continue
+		}
+		status.IconKey = info.Icon
+		status.Beneficial = info.Category != db.StatusIconDebuff
+		for _, line := range info.Lines {
+			label := strings.TrimSpace(line.Text)
+			if label != "" && label != "%s" {
+				status.Name = label
+				break
+			}
+		}
+	}
+	sort.SliceStable(model.Statuses, func(i, j int) bool { return model.Statuses[i].ID < model.Statuses[j].ID })
+}
+
+func mobileQuickEmotes() []mobileui.EmoteModel {
+	commands := []string{"!", "?", "ho", "lv", "thx", "sry", "gg", "sob", "ok", "no1", "hlp", "go"}
+	emotes := make([]mobileui.EmoteModel, 0, len(commands))
+	for _, command := range commands {
+		if id, ok := db.EmotionCommandID(command); ok {
+			emotes = append(emotes, mobileui.EmoteModel{ID: id, Label: command})
+		}
+	}
+	return emotes
 }
 
 func mobileLootDistance(playerX, playerY, itemX, itemY int) int {
