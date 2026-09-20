@@ -518,6 +518,11 @@ func enrichMobileStatuses(model *mobileui.MobileHUDModel, s *session.Session) {
 		}
 		status.IconKey = info.Icon
 		status.Beneficial = info.Category != db.StatusIconDebuff
+		// The target client presents these as icons without a countdown. Keeping
+		// a continuously changing time.Until value in the mobile HUD would make
+		// the retained Android surface rerasterize every frame for no visual
+		// change.
+		status.Remaining = 0
 		for _, line := range info.Lines {
 			label := strings.TrimSpace(line.Text)
 			if label != "" && label != "%s" {
