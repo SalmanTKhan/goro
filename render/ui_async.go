@@ -33,10 +33,10 @@ type AsyncHostUIRasterizer struct {
 
 type AsyncHostUIResult struct {
 	Drawn      bool
-	RasterMS   float64
-	CanvasMS   float64
-	FlushMS    float64
-	ImageMS    float64
+	Raster     time.Duration
+	Canvas     time.Duration
+	Flush      time.Duration
+	Image      time.Duration
 	Generation uint64
 }
 
@@ -119,10 +119,10 @@ func (r *AsyncHostUIRasterizer) Poll(dst *Image) (*Image, AsyncHostUIResult, err
 		}
 		return dst, AsyncHostUIResult{
 			Drawn:      result.image != nil,
-			RasterMS:   result.rasterDur.Seconds() * 1000,
-			CanvasMS:   result.canvasDur.Seconds() * 1000,
-			FlushMS:    result.flushDur.Seconds() * 1000,
-			ImageMS:    result.imageDur.Seconds() * 1000,
+			Raster:     result.rasterDur,
+			Canvas:     result.canvasDur,
+			Flush:      result.flushDur,
+			Image:      result.imageDur,
 			Generation: result.generation,
 		}, nil
 	default:
