@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"time"
 
 	uiapp "github.com/gogpu/ui/app"
 	"github.com/gogpu/ui/widget"
@@ -25,8 +26,9 @@ type mobileWidgets struct {
 	kit   uimobile.Kit
 	baked *render.Image
 	w, h  int
-	key   string
-	dirty bool
+	key        string
+	dirty      bool
+	lastRaster time.Time
 	// logged keeps the one-shot diagnostic from repeating every frame.
 	logged bool
 }
@@ -209,11 +211,22 @@ func (m *mobileWidgets) drawWidgets(p *mobilePresentation, frame *render.Frame) 
 
 	m.win.width, m.win.height = w, h
 	key := p.widgetStateKey()
-	if key != m.key || m.w != w || m.h != h {
+	keyChanged := key != m.key || m.w != w || m.h != h
+	if keyChanged {
 		m.dirty = true
 	}
 	drawn := false
-	if m.dirty || m.baked == nil {
+	shouldRaster := m.dirty || m.baked == nil
+	if shouldRaster && !keyChanged && m.baked != nil && p.widgetHUDActive() && time.Since(m.lastRaster) < 100*time.Millisecond {
+		// The world HUD contains fast-changing values (cooldowns, HP/SP, target
+		// state), but rasterizing and uploading a full-screen RGBA texture for
+		// every simulation tick is disproportionately expensive on mobile GPUs.
+		// Cap retained HUD refresh to 10 Hz while world rendering, input, and
+		// network/game updates continue at their normal cadence. Navigation and
+		// size changes bypass this throttle so taps still produce immediate UI.
+		shouldRaster = false
+	}
+	if shouldRaster {
 		m.ui.SetRoot(tree)
 		// SetRoot only replaces the retained tree. Frame performs the framework
 		// layout/update pass that gives the absolute Canvas and its children
@@ -227,6 +240,7 @@ func (m *mobileWidgets) drawWidgets(p *mobilePresentation, frame *render.Frame) 
 		}
 		if rasterDrawn {
 			m.baked, m.w, m.h = image, w, h
+			m.lastRaster = time.Now()
 			drawn = true
 		}
 		m.key = key
