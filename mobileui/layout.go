@@ -358,10 +358,10 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 	// this strip, so hide the utilities while its Cancel banner is active.
 	if navigation.Targeting.Mode == input.SkillTargetIdle && !navigation.MenuOpen {
 		utilityH := maxf(tokens.MinTouchTarget, 52)
-		utilityW := float32(88)
-		if portrait {
-			utilityW = 84
-		}
+		// "Emote" is the widest authored label. 110 logical pixels leaves
+		// enough room for the real 28px mobile font while still fitting all
+		// three actions across the narrow 390px qualification viewport.
+		utilityW := float32(110)
 		utilityGap := maxf(8, tokens.Gap)
 		utilityRight := safe.Right() - tokens.Edge
 		if l.SkillBar.Right() > safe.X {
