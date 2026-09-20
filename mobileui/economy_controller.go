@@ -254,7 +254,7 @@ func (c *MobileEconomyController) relayout() {
 		c.Layout = EconomyLayout{Safe: c.Viewport.SafeRect()}
 	}
 	if c.Quantity.Open {
-		c.Layout.QuantityModal, c.Layout.QuantityMinus, c.Layout.QuantityPlus, c.Layout.QuantityConfirm, c.Layout.QuantityCancel = LayoutEconomyQuantity(c.Viewport)
+		c.Layout.QuantityModal, c.Layout.QuantityMinus, c.Layout.QuantityPlus, c.Layout.QuantityMax, c.Layout.QuantityConfirm, c.Layout.QuantityCancel = LayoutEconomyQuantity(c.Viewport)
 	}
 }
 
@@ -266,6 +266,8 @@ func (c *MobileEconomyController) tapQuantity(x, y float32) bool {
 		c.Quantity.Decrement()
 	case c.Layout.QuantityPlus.Contains(x, y):
 		c.Quantity.Increment()
+	case c.Layout.QuantityMax.Contains(x, y):
+		c.Quantity.SetMaximum()
 	case c.Layout.QuantityConfirm.Contains(x, y):
 		if c.Shop.CartEnabled && (c.Quantity.Action == EconomyQuantityBuy || c.Quantity.Action == EconomyQuantitySell) {
 			command := input.PlayerCommand{
