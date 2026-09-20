@@ -35,6 +35,7 @@ type frameSubmittedMode interface {
 type Manager struct {
 	ctx  client.Context
 	mode Mode
+	loginPreviewTextures map[uint32]*render.Image
 }
 
 func NewManager(ctx client.Context, mode Mode) *Manager {
@@ -262,6 +263,50 @@ func (m *Manager) DrawMobileEquipmentPreview(screen *render.Frame, x, y, width, 
 	if mode, ok := m.mode.(*WorldMode); ok {
 		mode.DrawMobileEquipmentPreview(screen, m.ctx, x, y, width, height)
 	}
+}
+
+func (m *Manager) DrawMobileLoginCharacterPreview(screen *render.Frame, slot int, x, y, width, height int) {
+	if m == nil || screen == nil || width <= 0 || height <= 0 {
+		return
+	}
+	mode, ok := m.mode.(*LoginMode)
+	if !ok || m.ctx.Session == nil {
+		return
+	}
+	character, ok := characterBySlot(m.ctx.Session.Characters, slot)
+	if !ok || character.ID == 0 {
+		return
+	}
+	if m.loginPreviewTextures == nil {
+		m.loginPreviewTextures = make(map[uint32]*render.Image)
+	}
+	texture := m.loginPreviewTextures[character.ID]
+	if texture == nil {
+		img := mode.characterPreviewImage(m.ctx, character)
+		if img == nil {
+			return
+		}
+		texture = render.NewImageFromImage(img)
+		m.loginPreviewTextures[character.ID] = texture
+	}
+	bounds := texture.Bounds()
+	if bounds.Dx() <= 0 || bounds.Dy() <= 0 {
+		return
+	}
+	scaleX := float64(width) / float64(bounds.Dx())
+	scaleY := float64(height) / float64(bounds.Dy())
+	scale := scaleX
+	if scaleY < scale {
+		scale = scaleY
+	}
+	// Preserve pixel-art proportions and center the paper doll in the slot.
+	drawW := float64(bounds.Dx()) * scale
+	drawH := float64(bounds.Dy()) * scale
+	var opts render.DrawImageOptions
+	opts.Filter = render.FilterNearest
+	opts.GeoM.Scale(scale, scale)
+	opts.GeoM.Translate(float64(x)+(float64(width)-drawW)/2, float64(y)+(float64(height)-drawH)/2)
+	screen.DrawImage(texture, &opts)
 }
 
 func (m *Manager) DrawMobileProfilePreview(screen *render.Frame, character session.Character, sex byte, x, y, width, height int) {
