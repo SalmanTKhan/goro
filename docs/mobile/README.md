@@ -19,6 +19,8 @@ Android, JNI, WGPU, renderer, or packet dependency.
 - [renderer-core-extraction.md](renderer-core-extraction.md) — raw WGPU
   device/frame interface that lets the Android host drive the production
   renderer.
+- [performance.md](performance.md) — measurable FPS/memory budgets, the first
+  frame-loop optimizations, and the device profiling roadmap.
 - [input.md](input.md) — semantic input boundary, gesture recognition, and
   UI/world touch ownership.
 - [ui.md](ui.md) — HUD architecture, deterministic layout, the

@@ -2,6 +2,12 @@ package mobileui
 
 import "github.com/kivutar/goro/input"
 
+// DefaultTouchSlop is the logical distance a pointer may drift before a tap
+// becomes a drag. Real fingers move a few pixels even when the player intends
+// to tap; treating any non-zero motion as a drag made compact HUD controls and
+// list rows unnecessarily difficult to activate.
+const DefaultTouchSlop float32 = 12
+
 // TouchOwner identifies the screen-level consumer that owns a drag. Once a
 // drag is claimed, sibling screens and the world cannot also scroll from the
 // same pointer stream.
@@ -49,12 +55,18 @@ func (s *TouchSession) Move(point input.TouchPoint) (dx, dy float32, owned bool)
 	if s == nil || !s.Active || s.ID != point.ID {
 		return 0, 0, false
 	}
-	dx, dy = float32(point.X-s.Last.X), float32(point.Y-s.Last.Y)
+	previous := s.Last
 	s.Last = point
-	if dx != 0 || dy != 0 {
+	if !s.Moved {
+		dx = float32(point.X - s.Start.X)
+		dy = float32(point.Y - s.Start.Y)
+		if dx*dx+dy*dy < DefaultTouchSlop*DefaultTouchSlop {
+			return 0, 0, true
+		}
 		s.Moved = true
+		return dx, dy, true
 	}
-	return dx, dy, true
+	return float32(point.X - previous.X), float32(point.Y - previous.Y), true
 }
 
 func (s *TouchSession) End(id input.TouchID) (owner TouchOwner, moved bool) {

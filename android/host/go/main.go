@@ -112,6 +112,7 @@ type androidRuntimeMetrics struct {
 	TextureUploadCount         int      `json:"texture_upload_count"`
 	TextureUploadedBytes       int64    `json:"texture_uploaded_bytes"`
 	EstimatedTextureGPUBytes   int64    `json:"estimated_texture_gpu_bytes"`
+	FrameBufferAllocations     int      `json:"frame_buffer_allocations"`
 	LastFrameAt                string   `json:"last_frame_at"`
 }
 
@@ -370,6 +371,7 @@ func (h *host) renderLoop() {
 	var adapter *wgpu.Adapter
 	var device *wgpu.Device
 	var surface *wgpu.Surface
+	var surfaceFormat gputypes.TextureFormat
 	var state = input.NewState()
 	var goroRenderer *render.GPURenderer
 	var offlineGame *app.Game
@@ -381,6 +383,8 @@ func (h *host) renderLoop() {
 	var safeLeft, safeTop, safeRight, safeBottom int
 	var surfaceStartedAt, mapReadyAt, firstMapFrameAt time.Time
 	var renderedFrames int
+	var frameBuffer *render.Frame
+	var frameBufferAllocations int
 	var cpuFrameTotal time.Duration
 	var peakRSS int64
 	var runtimeMetricsPath string
@@ -420,6 +424,8 @@ func (h *host) renderLoop() {
 		mapReadyAt = time.Time{}
 		firstMapFrameAt = time.Time{}
 		renderedFrames = 0
+		frameBuffer = nil
+		frameBufferAllocations = 0
 		cpuFrameTotal = 0
 		peakRSS = 0
 		androidLog("stage=instance begin backend=vulkan")
@@ -456,11 +462,12 @@ func (h *host) renderLoop() {
 		}
 		log.Printf("stage=device acquired")
 		androidLog("stage=device acquired")
-		if err := configureSurface(surface, adapter, device, width, height, surfaceVSync); err != nil {
+		surfaceFormat, err = configureSurface(surface, adapter, device, width, height, surfaceVSync)
+		if err != nil {
 			return err
 		}
 		androidLog("stage=goro-renderer begin")
-		context, err := render.NewRawGPUContext(device, device.Queue(), configuredFormat(surface, adapter))
+		context, err := render.NewRawGPUContext(device, device.Queue(), surfaceFormat)
 		if err != nil {
 			androidLog(fmt.Sprintf("stage=goro-renderer device-bound error=%v", err))
 			return err
@@ -519,7 +526,8 @@ func (h *host) renderLoop() {
 			cfg.Render.GraphicsAPI = "vulkan"
 			cfg.Render.NoUI = mobileSettings.Display.Presentation != input.MobilePresentationDesktop
 			surfaceVSync = cfg.Render.VSync
-			if err := configureSurface(surface, adapter, device, width, height, surfaceVSync); err != nil {
+			surfaceFormat, err = configureSurface(surface, adapter, device, width, height, surfaceVSync)
+			if err != nil {
 				return err
 			}
 			cfg.Render.Stats = false
@@ -688,7 +696,8 @@ func (h *host) renderLoop() {
 			case commandSurfaceChanged:
 				width, height = cmd.width, cmd.height
 				if surface != nil && device != nil && adapter != nil {
-					err = configureSurface(surface, adapter, device, width, height, surfaceVSync)
+					surfaceFormat, err = configureSurface(surface, adapter, device, width, height, surfaceVSync)
+					frameBuffer = nil
 					if offlineGame != nil {
 						offlineGame.Resize(width, height)
 					}
@@ -848,27 +857,32 @@ func (h *host) renderLoop() {
 						androidLog(fmt.Sprintf("stage=online-tick login=%s network=%s playing=%t", offlineGame.LoginStatus(), offlineGame.NetworkStatus(), offlineGame.SessionPlaying()))
 					}
 					offlineGame.Resize(width, height)
-					frame := render.NewFrame(width, height)
-					offlineGame.Draw(frame)
+					if frameBuffer == nil || frameBuffer.Bounds().Dx() != width || frameBuffer.Bounds().Dy() != height {
+						frameBuffer = render.NewFrame(width, height)
+						frameBufferAllocations++
+					} else {
+						frameBuffer.BeginFrame()
+					}
+					offlineGame.Draw(frameBuffer)
 					if mobile != nil && len(state.TouchPoints) == 1 && mobile.WorldTouchAvailable(state.TouchPoints[0]) {
 						touch := state.TouchPoints[0]
 						if target, ok := offlineGame.PickMobileTarget(input.WorldPosition{X: float64(touch.X), Y: float64(touch.Y)}); ok && target.Kind == input.TargetGround {
-							offlineGame.DrawMobileTileCursor(target.Position, frame)
+							offlineGame.DrawMobileTileCursor(target.Position, frameBuffer)
 						}
 					}
 					if mobile != nil {
-						offlineGame.DrawOverlay(frame)
-						offlineGame.DrawUIOverlay(frame)
+						offlineGame.DrawOverlay(frameBuffer)
+						offlineGame.DrawUIOverlay(frameBuffer)
 						mobile.Refresh()
-						mobile.Draw(frame)
+						mobile.Draw(frameBuffer)
 					}
 					if desktop != nil {
-						desktop.Draw(frame)
-						offlineGame.DrawUIOverlay(frame)
-						offlineGame.DrawOverlay(frame)
+						desktop.Draw(frameBuffer)
+						offlineGame.DrawUIOverlay(frameBuffer)
+						offlineGame.DrawOverlay(frameBuffer)
 					}
 					offlineGame.FrameSubmitted()
-					renderFrame(surface, device, goroRenderer, frame, width, height, configuredFormat(surface, adapter))
+					renderFrame(surface, device, goroRenderer, frameBuffer, width, height, surfaceFormat)
 					frameDuration := time.Since(frameStarted)
 					renderedFrames++
 					cpuFrameTotal += frameDuration
@@ -892,9 +906,9 @@ func (h *host) renderLoop() {
 						if !firstMapFrameAt.IsZero() {
 							firstFrameMS = firstMapFrameAt.Sub(surfaceStartedAt).Seconds() * 1000
 						}
-						metrics := androidRuntimeMetrics{Format: "goro-mobile-runtime-metrics", Version: 1, Map: startMap, MapLoadMS: mapReadyAt.Sub(surfaceStartedAt).Seconds() * 1000, TimeToFirstMapFrameMS: firstFrameMS, SteadyFPS: fps, AverageCPUFrameMS: cpuFrameTotal.Seconds() * 1000 / float64(renderedFrames), PeakProcessRSSBytes: peakRSS, SteadyProcessRSSBytes: rss, TerrainBuildMS: worldMetrics.TerrainBuildDuration.Seconds() * 1000, TerrainChunkBuilds: worldMetrics.TerrainChunkBuilds, TerrainTextureFallbacks: worldMetrics.TerrainTextureFallbacks, RSMTextureFallbacks: worldMetrics.RSMTextureFallbacks, RSMEmptyTextureFallbacks: worldMetrics.RSMEmptyTextureFallbacks, RSMTextureFallbackExamples: worldMetrics.RSMTextureFallbackExamples, TextureDecodeMS: worldMetrics.TextureDecodeDuration.Seconds() * 1000, TextureDecodeCount: worldMetrics.TextureDecodeCount, TextureEncodedBytes: worldMetrics.TextureEncodedBytes, TextureDecodedRGBABytes: worldMetrics.TextureDecodedRGBABytes, TextureUploadMS: uploadMetrics.Duration.Seconds() * 1000, TextureUploadCount: uploadMetrics.Count, TextureUploadedBytes: uploadMetrics.UploadedBytes, EstimatedTextureGPUBytes: uploadMetrics.EstimatedGPUBytes, LastFrameAt: time.Now().UTC().Format(time.RFC3339Nano)}
+						metrics := androidRuntimeMetrics{Format: "goro-mobile-runtime-metrics", Version: 2, Map: startMap, MapLoadMS: mapReadyAt.Sub(surfaceStartedAt).Seconds() * 1000, TimeToFirstMapFrameMS: firstFrameMS, SteadyFPS: fps, AverageCPUFrameMS: cpuFrameTotal.Seconds() * 1000 / float64(renderedFrames), PeakProcessRSSBytes: peakRSS, SteadyProcessRSSBytes: rss, TerrainBuildMS: worldMetrics.TerrainBuildDuration.Seconds() * 1000, TerrainChunkBuilds: worldMetrics.TerrainChunkBuilds, TerrainTextureFallbacks: worldMetrics.TerrainTextureFallbacks, RSMTextureFallbacks: worldMetrics.RSMTextureFallbacks, RSMEmptyTextureFallbacks: worldMetrics.RSMEmptyTextureFallbacks, RSMTextureFallbackExamples: worldMetrics.RSMTextureFallbackExamples, TextureDecodeMS: worldMetrics.TextureDecodeDuration.Seconds() * 1000, TextureDecodeCount: worldMetrics.TextureDecodeCount, TextureEncodedBytes: worldMetrics.TextureEncodedBytes, TextureDecodedRGBABytes: worldMetrics.TextureDecodedRGBABytes, TextureUploadMS: uploadMetrics.Duration.Seconds() * 1000, TextureUploadCount: uploadMetrics.Count, TextureUploadedBytes: uploadMetrics.UploadedBytes, EstimatedTextureGPUBytes: uploadMetrics.EstimatedGPUBytes, FrameBufferAllocations: frameBufferAllocations, LastFrameAt: time.Now().UTC().Format(time.RFC3339Nano)}
 						writeAndroidRuntimeMetrics(runtimeMetricsPath, metrics)
-						androidLog(fmt.Sprintf("stage=mobile-metrics frames=%d fps=%.2f cpu-frame-ms=%.2f rss=%d terrain-ms=%.2f terrain-fallbacks=%d rsm-fallbacks=%d rsm-empty-fallbacks=%d rsm-examples=%q texture-decode-ms=%.2f texture-upload-ms=%.2f texture-gpu-bytes=%d", renderedFrames, fps, metrics.AverageCPUFrameMS, rss, metrics.TerrainBuildMS, metrics.TerrainTextureFallbacks, metrics.RSMTextureFallbacks, metrics.RSMEmptyTextureFallbacks, metrics.RSMTextureFallbackExamples, metrics.TextureDecodeMS, metrics.TextureUploadMS, metrics.EstimatedTextureGPUBytes))
+						androidLog(fmt.Sprintf("stage=mobile-metrics frames=%d fps=%.2f cpu-frame-ms=%.2f rss=%d frame-buffer-allocations=%d terrain-ms=%.2f terrain-fallbacks=%d rsm-fallbacks=%d rsm-empty-fallbacks=%d rsm-examples=%q texture-decode-ms=%.2f texture-upload-ms=%.2f texture-gpu-bytes=%d", renderedFrames, fps, metrics.AverageCPUFrameMS, rss, metrics.FrameBufferAllocations, metrics.TerrainBuildMS, metrics.TerrainTextureFallbacks, metrics.RSMTextureFallbacks, metrics.RSMEmptyTextureFallbacks, metrics.RSMTextureFallbackExamples, metrics.TextureDecodeMS, metrics.TextureUploadMS, metrics.EstimatedTextureGPUBytes))
 					}
 				}
 			}
@@ -902,14 +916,7 @@ func (h *host) renderLoop() {
 	}
 }
 
-func configuredFormat(surface *wgpu.Surface, adapter *wgpu.Adapter) gputypes.TextureFormat {
-	if caps := adapter.GetSurfaceCapabilities(surface); caps != nil && len(caps.Formats) > 0 {
-		return caps.Formats[0]
-	}
-	return gputypes.TextureFormatRGBA8Unorm
-}
-
-func configureSurface(surface *wgpu.Surface, adapter *wgpu.Adapter, device *wgpu.Device, width, height int, vsync bool) error {
+func configureSurface(surface *wgpu.Surface, adapter *wgpu.Adapter, device *wgpu.Device, width, height int, vsync bool) (gputypes.TextureFormat, error) {
 	caps := adapter.GetSurfaceCapabilities(surface)
 	format := gputypes.TextureFormatBGRA8Unorm
 	alphaMode := gputypes.CompositeAlphaModeAuto
@@ -936,11 +943,11 @@ func configureSurface(surface *wgpu.Surface, adapter *wgpu.Adapter, device *wgpu
 	}
 	if err := surface.Configure(device, &wgpu.SurfaceConfiguration{Format: format, Usage: gputypes.TextureUsageRenderAttachment, Width: uint32(width), Height: uint32(height), PresentMode: presentMode, AlphaMode: alphaMode}); err != nil {
 		androidLog(fmt.Sprintf("stage=surface configure error=%v", err))
-		return fmt.Errorf("configure: %w", err)
+		return 0, fmt.Errorf("configure: %w", err)
 	}
 	log.Printf("stage=surface configured format=%s size=%dx%d present=%s alpha=%s", format, width, height, presentName, alphaMode)
 	androidLog(fmt.Sprintf("stage=surface configured format=%s size=%dx%d present=%s alpha=%s", format, width, height, presentName, alphaMode))
-	return nil
+	return format, nil
 }
 
 func capsFormats(caps *wgpu.SurfaceCapabilities) []gputypes.TextureFormat {
