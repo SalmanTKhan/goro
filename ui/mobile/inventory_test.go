@@ -182,3 +182,21 @@ func TestGroupDigitsFormatsZeny(t *testing.T) {
 		}
 	}
 }
+
+
+func TestHUDIconRectsIncludeItemShortcuts(t *testing.T) {
+	model := mobileui.Fixture("normal")
+	model.Skills = nil
+	model.Shortcuts = []mobileui.ShortcutSlotModel{{
+		Kind: mobileui.ShortcutItem,
+		Item: mobileui.InventoryItemModel{Index: 4, ItemID: 501, Identified: true, Quantity: 7, Usable: true},
+	}}
+	layout := mobileui.LayoutHUD(mobileui.Viewport{Width: 840, Height: 2289}, mobileui.DefaultTokens(), model, mobileui.Navigation{})
+	skills, items := HUDIconRects(model, layout)
+	if len(skills) != 0 || len(items) != 1 {
+		t.Fatalf("mixed hotbar icons skills=%d items=%d", len(skills), len(items))
+	}
+	if !items[0].ShowQuantity || items[0].Item.ItemID != 501 || items[0].Item.Quantity != 7 {
+		t.Fatalf("item shortcut placement=%+v", items[0])
+	}
+}
