@@ -254,3 +254,43 @@ func TestEconomyQuantityFourButtonRowFitsPortrait(t *testing.T) {
 		}
 	}
 }
+
+
+func TestEconomyPortraitCartUsesQuarterPanelAndShopRowMetrics(t *testing.T) {
+	layout := LayoutShopCartScrolled(
+		Viewport{Width: 420, Height: 900, SafeTop: 24, SafeBottom: 24},
+		20, ShopBuyTab, 0, true, 2,
+	)
+	if layout.CartPanel.W <= 0 || layout.CartPanel.H <= 0 {
+		t.Fatalf("portrait transaction preview missing: %+v", layout.CartPanel)
+	}
+	ratio := layout.CartPanel.H / layout.Panel.H
+	if ratio < 0.24 || ratio > 0.26 {
+		t.Fatalf("portrait transaction preview ratio=%0.3f, want ~0.25: panel=%+v cart=%+v", ratio, layout.Panel, layout.CartPanel)
+	}
+	if len(layout.CartRows) == 0 {
+		t.Fatalf("portrait transaction preview cannot fit a full item row: %+v", layout)
+	}
+	if layout.CartRows[0].H != economyRowHeight {
+		t.Fatalf("portrait transaction row height=%v, want shop row height=%v", layout.CartRows[0].H, economyRowHeight)
+	}
+	if len(layout.Rows) > 0 && layout.Rows[0].H != layout.CartRows[0].H {
+		t.Fatalf("shop/cart row heights differ: shop=%v cart=%v", layout.Rows[0].H, layout.CartRows[0].H)
+	}
+}
+
+func TestEconomyLandscapeCartUsesShopRowMetrics(t *testing.T) {
+	layout := LayoutShopCartScrolled(
+		Viewport{Width: 1600, Height: 800},
+		20, ShopSellTab, 0, true, 3,
+	)
+	if len(layout.CartRows) == 0 || len(layout.Rows) == 0 {
+		t.Fatalf("landscape shop/cart rows missing: %+v", layout)
+	}
+	if layout.CartRows[0].H != economyRowHeight || layout.CartRows[0].H != layout.Rows[0].H {
+		t.Fatalf("landscape cart row=%v shop row=%v want=%v", layout.CartRows[0].H, layout.Rows[0].H, economyRowHeight)
+	}
+	if layout.CartRows[0].H < 48 {
+		t.Fatalf("landscape cart row is not touch-safe: %+v", layout.CartRows[0])
+	}
+}
