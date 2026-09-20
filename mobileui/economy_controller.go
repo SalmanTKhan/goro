@@ -33,6 +33,9 @@ func (c *MobileEconomyController) OpenShop(model MobileShopModel) {
 		return
 	}
 	c.Shop, c.Screen, c.Tab = model, EconomyShop, ShopBuyTab
+	if model.ModeReady {
+		c.Tab = model.ActiveTab
+	}
 	c.Scroll = InventoryScrollState{}
 	c.Quantity.Cancel()
 	c.relayout()
@@ -123,16 +126,33 @@ func (c *MobileEconomyController) Tap(x, y float32) bool {
 	if c.Screen == EconomyShop {
 		for _, tab := range c.Layout.Tabs {
 			if tab.Rect.Contains(x, y) {
+				if c.Tab == tab.Tab {
+					return true
+				}
 				c.Tab = tab.Tab
 				c.Scroll.Offset = 0
+				c.Quantity.Cancel()
 				c.relayout()
-				// An online NPC shop begins with a deal-type packet. The mobile
-				// surface has no desktop deal dialog, so selecting a tab is the
-				// explicit buy/sell request.
-				if c.Shop.NPCID != 0 && len(c.Shop.Items) == 0 && len(c.Shop.SellItems) == 0 {
+				// Buy and Sell are distinct server deal modes. Request the newly
+				// selected mode even when the previous tab already has rows.
+				if c.Shop.NPCID != 0 {
 					c.emit(input.PlayerCommand{Kind: input.CommandOpenShop, NPCID: c.Shop.NPCID, Tab: uint8(tab.Tab)})
 				}
 				return true
+			}
+		}
+		if c.Shop.CartEnabled && c.Layout.CartConfirm.Contains(x, y) {
+			if len(c.Shop.Cart) > 0 {
+				c.emit(input.PlayerCommand{Kind: input.CommandShopCartConfirm, NPCID: c.Shop.NPCID})
+			}
+			return true
+		}
+		if c.Shop.CartEnabled {
+			for rowNumber, row := range c.Layout.CartRows {
+				if row.Contains(x, y) && rowNumber < len(c.Shop.Cart) {
+					c.emit(input.PlayerCommand{Kind: input.CommandShopCartRemove, NPCID: c.Shop.NPCID, ItemIndex: uint16(rowNumber)})
+					return true
+				}
 			}
 		}
 		items := c.Shop.Items
@@ -194,7 +214,11 @@ func (c *MobileEconomyController) ScrollBy(delta float32) bool {
 	if c == nil || c.Screen == EconomyClosed || c.Quantity.Open {
 		return false
 	}
+	before := c.Scroll.Offset
 	c.Scroll.ScrollBy(delta)
+	if c.Scroll.Offset == before {
+		return false
+	}
 	c.relayout()
 	return true
 }
@@ -215,10 +239,10 @@ func (c *MobileEconomyController) relayout() {
 		if c.Tab == ShopSellTab {
 			rows = c.Shop.SellItems
 		}
-		base := LayoutShopScrolled(c.Viewport, len(rows), c.Tab, 0)
-		c.Scroll.ViewportExtent, c.Scroll.ContentExtent, c.Scroll.RowExtent = base.ListViewport.H, EconomyScrollExtent(base.ListViewport, len(rows)).ContentExtent, 64
+		base := LayoutShopCartScrolled(c.Viewport, len(rows), c.Tab, 0, c.Shop.CartEnabled, len(c.Shop.Cart))
+		c.Scroll.ViewportExtent, c.Scroll.ContentExtent, c.Scroll.RowExtent = base.ListViewport.H, EconomyScrollExtent(base.ListViewport, len(rows)).ContentExtent, economyRowExtent
 		c.Scroll.SetOffset(c.Scroll.Offset)
-		c.Layout = LayoutShopScrolled(c.Viewport, len(rows), c.Tab, c.Scroll.Offset)
+		c.Layout = LayoutShopCartScrolled(c.Viewport, len(rows), c.Tab, c.Scroll.Offset, c.Shop.CartEnabled, len(c.Shop.Cart))
 	case EconomyStorage:
 		base := LayoutStorageScrolled(c.Viewport, len(c.Storage.Items), 0)
 		c.Scroll.ViewportExtent, c.Scroll.ContentExtent, c.Scroll.RowExtent = base.ListViewport.H, EconomyScrollExtent(base.ListViewport, len(c.Storage.Items)).ContentExtent, 64
@@ -241,7 +265,14 @@ func (c *MobileEconomyController) tapQuantity(x, y float32) bool {
 	case c.Layout.QuantityPlus.Contains(x, y):
 		c.Quantity.Increment()
 	case c.Layout.QuantityConfirm.Contains(x, y):
-		if command, ok := c.Quantity.Confirm(); ok {
+		if c.Shop.CartEnabled && (c.Quantity.Action == EconomyQuantityBuy || c.Quantity.Action == EconomyQuantitySell) {
+			command := input.PlayerCommand{
+				Kind: input.CommandShopCartAdd, NPCID: c.Shop.NPCID,
+				ItemIndex: c.Quantity.ItemIndex, Quantity: c.Quantity.Value,
+			}
+			c.Quantity.Cancel()
+			c.emit(command)
+		} else if command, ok := c.Quantity.Confirm(); ok {
 			c.emit(command)
 		}
 	default:
