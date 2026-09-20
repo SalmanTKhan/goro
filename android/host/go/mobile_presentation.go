@@ -1640,7 +1640,9 @@ func (p *mobilePresentation) drawHUD(frame *render.Frame) {
 		drawMobileHeader(frame, l.Minimap, "MINI MAP", colors, textScale)
 		mapRect := mobileui.Rect{X: l.Minimap.X + 10, Y: l.Minimap.Y + 34, W: l.Minimap.W - 20, H: l.Minimap.H - 70}
 		render.DrawRect(frame, float64(mapRect.X), float64(mapRect.Y), float64(mapRect.W), float64(mapRect.H), colors.mapBackground)
-		p.drawMinimapTerrain(frame, mapRect)
+		if !p.game.DrawMobileMinimap(frame, mapRect) {
+			p.drawMinimapTerrain(frame, mapRect)
+		}
 		drawMobileText(frame, strings.ToUpper(trimText(p.hudModel.Minimap.MapName, 16)), l.Minimap.X+12, l.Minimap.Bottom()-30, colors.muted, textScale*0.72)
 		drawMobileTextFit(frame, fmt.Sprintf("X:%d  Y:%d", p.hudModel.Minimap.PlayerX, p.hudModel.Minimap.PlayerY), l.Minimap.X+l.Minimap.W*0.52, l.Minimap.Bottom()-30, l.Minimap.W*0.42, colors.muted, textScale*0.66)
 	}
@@ -1743,7 +1745,7 @@ func (p *mobilePresentation) drawMinimapTerrain(frame *render.Frame, rect mobile
 	mapX := clampMinimapCoordinate(float64(p.hudModel.Minimap.PlayerX)*0.5, raster.Width)
 	mapY := clampMinimapCoordinate(float64(p.hudModel.Minimap.PlayerY)*0.5, raster.Height)
 	markerX := drawX + (mapX+0.5)*drawWidth/imageWidth
-	markerY := drawY + (mapY+0.5)*drawHeight/imageHeight
+	markerY := drawY + drawHeight - (mapY+0.5)*drawHeight/imageHeight
 	colors := mobileColors()
 	p.drawMinimapMarkers(frame, mobileui.Rect{X: float32(drawX), Y: float32(drawY), W: float32(drawWidth), H: float32(drawHeight)}, raster, p.hudModel.Minimap.Markers)
 	// A larger crosshair/arrow remains readable on a phone and is distinct
@@ -1792,7 +1794,7 @@ func minimapPoint(rect mobileui.Rect, raster mobileui.MinimapRaster, x, y int) (
 	drawY := float64(rect.Y) + (float64(rect.H)-drawHeight)/2
 	mapX := clampMinimapCoordinate(float64(x)*0.5, raster.Width)
 	mapY := clampMinimapCoordinate(float64(y)*0.5, raster.Height)
-	return drawX + (mapX+0.5)*drawWidth/imageWidth, drawY + (mapY+0.5)*drawHeight/imageHeight
+	return drawX + (mapX+0.5)*drawWidth/imageWidth, drawY + drawHeight - (mapY+0.5)*drawHeight/imageHeight
 }
 
 func clampMinimapCoordinate(value float64, size int) float64 {
@@ -2223,7 +2225,9 @@ func (p *mobilePresentation) drawMap(frame *render.Frame) {
 	drawMobilePanel(frame, l.MapViewport)
 	mapRect := mobileui.Rect{X: l.MapViewport.X + 12, Y: l.MapViewport.Y + 12, W: l.MapViewport.W - 24, H: l.MapViewport.H - 24}
 	render.DrawRect(frame, float64(mapRect.X), float64(mapRect.Y), float64(mapRect.W), float64(mapRect.H), colors.mapBackground)
-	p.drawMinimapTerrain(frame, mapRect)
+	if !p.game.DrawMobileMinimap(frame, mapRect) {
+		p.drawMinimapTerrain(frame, mapRect)
+	}
 	for _, warp := range model.Warps {
 		markerX, markerY, ok := mapMarkerPosition(mapRect, model.Raster, warp.X, warp.Y)
 		if !ok {
