@@ -80,6 +80,20 @@ func (c *Controller) Tap(x, y float32) bool {
 		}
 		c.relayout()
 		return true
+	case ControlPrimaryAction, ControlTarget:
+		target := c.Model.Target
+		if !target.Visible || target.ID == 0 {
+			return true
+		}
+		switch target.Relation {
+		case TargetHostile:
+			c.emit(input.PlayerCommand{Kind: input.CommandAttackActor, ActorID: target.ID})
+		case TargetNPC:
+			c.emit(input.PlayerCommand{Kind: input.CommandInteractActor, ActorID: target.ID})
+		default:
+			c.emit(input.PlayerCommand{Kind: input.CommandSelectActor, ActorID: target.ID})
+		}
+		return true
 	case ControlLootItem:
 		if hit.LootIndex < 0 || hit.LootIndex >= len(c.Model.Loot) {
 			return true
