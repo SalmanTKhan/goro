@@ -282,6 +282,9 @@ func (k Kit) placeEconomyQuantity(c *Canvas, layout mobileui.EconomyLayout, stat
 	if layout.QuantityPlus.W > 0 {
 		c.Place(k.Button("+", ButtonNormal), layout.QuantityPlus)
 	}
+	if layout.QuantityMax.W > 0 {
+		c.Place(k.Button("Max", ButtonNormal), layout.QuantityMax)
+	}
 	if layout.QuantityConfirm.W > 0 {
 		label := "Confirm"
 		if state.Action == mobileui.EconomyQuantityBuy || state.Action == mobileui.EconomyQuantitySell {
