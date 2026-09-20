@@ -3186,24 +3186,32 @@ func (p *mobilePresentation) drawEconomyQuantity(frame *render.Frame) {
 	l := c.Layout
 	render.DrawRect(frame, float64(l.Safe.X), float64(l.Safe.Y), float64(l.Safe.W), float64(l.Safe.H), color.RGBA{R: 18, G: 38, B: 62, A: 140})
 	drawMobilePanel(frame, l.QuantityModal)
-	drawMobileHeader(frame, l.QuantityModal, "QUANTITY", colors, textScale)
-	action := "WITHDRAW"
+	title := "Withdraw"
 	switch c.Quantity.Action {
 	case mobileui.EconomyQuantityBuy:
-		action = "BUY"
+		title = "Buy"
 	case mobileui.EconomyQuantitySell:
-		action = "SELL"
+		title = "Sell"
 	}
-	drawMobileText(frame, fmt.Sprintf("%s   %d / %d", action, c.Quantity.Value, c.Quantity.Maximum), l.QuantityModal.X+20, l.QuantityModal.Y+76, colors.text, textScale*1.08)
+	drawMobileHeaderWithAction(frame, l.QuantityModal, title, l.QuantityCancel, colors, textScale)
+	drawMobileButton(frame, l.QuantityCancel, "Cancel", colors, textScale*0.72, false)
+
+	bodyTop := l.QuantityModal.Y + 36
+	bodyBottom := l.QuantityMinus.Y
+	bodyH := maxf32(0, bodyBottom-bodyTop)
+	labelRect := mobileui.Rect{X: l.QuantityModal.X, Y: bodyTop, W: l.QuantityModal.W, H: bodyH * 0.42}
+	valueRect := mobileui.Rect{X: l.QuantityModal.X, Y: bodyTop + bodyH*0.42, W: l.QuantityModal.W, H: bodyH * 0.58}
+	drawMobileTextCentered(frame, fmt.Sprintf("Max %d", c.Quantity.Maximum), labelRect, colors.muted, textScale*0.72)
+	drawMobileTextCentered(frame, fmt.Sprintf("%d", c.Quantity.Value), valueRect, colors.title, textScale*1.05)
+
 	drawMobileButton(frame, l.QuantityMinus, "−", colors, textScale*1.15, false)
 	drawMobileButton(frame, l.QuantityPlus, "+", colors, textScale*1.15, false)
-	drawMobileButton(frame, l.QuantityMax, "MAX", colors, textScale*0.72, false)
-	confirmLabel := "CONFIRM"
+	drawMobileButton(frame, l.QuantityMax, "Max", colors, textScale*0.72, false)
+	confirmLabel := "Confirm"
 	if c.Shop.CartEnabled && (c.Quantity.Action == mobileui.EconomyQuantityBuy || c.Quantity.Action == mobileui.EconomyQuantitySell) {
-		confirmLabel = "ADD"
+		confirmLabel = "Add"
 	}
 	drawMobileButton(frame, l.QuantityConfirm, confirmLabel, colors, textScale*0.72, true)
-	drawMobileButton(frame, l.QuantityCancel, "CANCEL", colors, textScale*0.72, false)
 }
 
 type mobilePalette struct {
