@@ -62,3 +62,28 @@ func TestOnlineLoginCharacterServiceUsesServerRows(t *testing.T) {
 		t.Fatalf("character-service layout leaked credential fields: user=%+v pass=%+v", layout.Username, layout.Password)
 	}
 }
+
+
+func TestOnlineLoginCharactersUsesThreeSlotsPerPage(t *testing.T) {
+	model := MobileOnlineLoginModel{Phase: OnlineLoginCharacters, SelectedSlot: 4}
+	for slot := 0; slot < 9; slot++ {
+		model.Characters = append(model.Characters, OnlineCharacterSlot{Slot: slot, Occupied: slot == 4, Name: "Mage", Level: 16})
+	}
+	for _, viewport := range []Viewport{{Width: 1280, Height: 720}, {Width: 720, Height: 1280}} {
+		layout := LayoutOnlineLogin(viewport, model)
+		if len(layout.Slots) != 3 {
+			t.Fatalf("viewport %+v: character page has %d slots, want 3", viewport, len(layout.Slots))
+		}
+		if layout.CharacterInfo.W <= 0 || layout.CharacterInfo.H <= 0 {
+			t.Fatalf("viewport %+v: selected-character info panel missing: %+v", viewport, layout.CharacterInfo)
+		}
+		if layout.PagePrev.W < DefaultTokens().MinTouchTarget || layout.PageNext.W < DefaultTokens().MinTouchTarget || layout.Create.W < DefaultTokens().MinTouchTarget {
+			t.Fatalf("viewport %+v: paging/action controls are not touch-safe: prev=%+v next=%+v action=%+v", viewport, layout.PagePrev, layout.PageNext, layout.Create)
+		}
+		for i, slot := range layout.Slots {
+			if slot.X < layout.Safe.X || slot.Y < layout.Safe.Y || slot.Right() > layout.Safe.Right() || slot.Bottom() > layout.Safe.Bottom() {
+				t.Fatalf("viewport %+v: slot %d escapes safe area: %+v", viewport, i, slot)
+			}
+		}
+	}
+}
