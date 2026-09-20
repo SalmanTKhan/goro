@@ -455,8 +455,11 @@ func nextMobileVolume(value float64) float64 {
 }
 
 func (p *mobilePresentation) layoutHUD() mobileui.HUDLayout {
+	if p == nil {
+		return mobileui.HUDLayout{}
+	}
 	layout := mobileui.LayoutHUD(p.viewport, mobileui.DefaultTokens(), p.hudModel, p.navigation)
-	if p == nil || p.game == nil || !p.game.Online() || len(layout.MenuActions) == 0 {
+	if p.game == nil || !p.game.Online() || len(layout.MenuActions) == 0 {
 		return layout
 	}
 	// Profile is an offline-authority feature. Removing it from the online
