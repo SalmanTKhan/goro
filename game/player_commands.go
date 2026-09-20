@@ -8,6 +8,7 @@ import (
 	"github.com/kivutar/goro/db"
 	"github.com/kivutar/goro/input"
 	"github.com/kivutar/goro/network"
+	"github.com/kivutar/goro/session"
 )
 
 // ApplyPlayerCommand is the narrow gameplay consumer for the platform-neutral
@@ -275,6 +276,54 @@ func (m *WorldMode) ApplyPlayerCommand(ctx client.Context, command input.PlayerC
 			return false
 		}
 		return ctx.Network.SendCloseStorage() == nil
+	case input.CommandUpgradeSkill:
+		if ctx.Session == nil || ctx.Network == nil || command.SkillID == 0 || ctx.Session.Skills.Points <= 0 {
+			return false
+		}
+		skill, ok := mobileSessionSkill(ctx.Session, command.SkillID)
+		if !ok || !skill.Upgradable || (skill.MaxLevel > 0 && skill.Level >= skill.MaxLevel) {
+			return false
+		}
+		return ctx.Network.SendSkillLevelUp(command.SkillID) == nil
+	case input.CommandAssignSkillHotkey:
+		if ctx.Session == nil || command.SkillID == 0 {
+			return false
+		}
+		skill, ok := mobileSessionSkill(ctx.Session, command.SkillID)
+		if !ok || skill.Level <= 0 || skill.Type == 0 {
+			return false
+		}
+		slot := -1
+		for i, hotkey := range ctx.Session.Hotkeys.Slots {
+			if hotkey.ID == uint32(skill.ID) && hotkey.Type == network.HotkeyTypeSkill {
+				slot = i
+				break
+			}
+			if slot < 0 && hotkey.ID == 0 {
+				slot = i
+			}
+		}
+		if slot < 0 && len(ctx.Session.Hotkeys.Slots) < network.HotkeyListSlots2008 {
+			slot = len(ctx.Session.Hotkeys.Slots)
+		}
+		if slot < 0 {
+			return false
+		}
+		hotkey := network.HotkeySlot{Type: network.HotkeyTypeSkill, ID: uint32(skill.ID), Level: uint16(skill.Level)}
+		if ctx.Network != nil && slot < network.HotkeyListSlots2008 {
+			if err := ctx.Network.SendHotkey(uint16(slot), hotkey); err != nil {
+				return false
+			}
+		}
+		if len(ctx.Session.Hotkeys.Slots) <= slot {
+			next := make([]session.HotkeySlot, slot+1)
+			copy(next, ctx.Session.Hotkeys.Slots)
+			ctx.Session.Hotkeys.Slots = next
+		}
+		ctx.Session.Hotkeys.Slots[slot] = session.HotkeySlot{Type: hotkey.Type, ID: hotkey.ID, Level: hotkey.Level}
+		ctx.Session.Hotkeys.Loaded = true
+		ctx.Session.Hotkeys.Version++
+		return true
 	case input.CommandUseSkill, input.CommandUseSkillOnActor, input.CommandUseSkillAtPosition,
 		input.CommandOpenShop, input.CommandBuyItem, input.CommandSellItem,
 		input.CommandOpenStorage, input.CommandDepositItem, input.CommandWithdrawItem:
