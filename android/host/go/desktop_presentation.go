@@ -83,7 +83,6 @@ type desktopPresentation struct {
 	rasterCount             int
 	rasterDeferred          int
 	rasterDuration          time.Duration
-	asyncRaster             render.AsyncHostUIRasterizer
 
 	// pointer queues touches for the polled input path, in logical UI
 	// coordinates. Widget events reach gogpu immediately, but large parts of the
@@ -109,9 +108,10 @@ func newDesktopPresentation(game *app.Game, width, height int) *desktopPresentat
 	d := &desktopPresentation{game: game, win: &androidUIWindow{width: desktopUIWidth, height: desktopUIHeight}, uiWidth: desktopUIWidth, uiHeight: desktopUIHeight, uiScale: game.UISettings().Normalized().Scale, dirty: true, urgentDirty: true}
 	theme := rotheme.Default.AsTheme()
 	theme.Colors.Background = widget.RGBA8(0, 0, 0, 0)
-	// Android owns publication of the UI image, so keep host-managed widget
-	// semantics. The render package records that complete host-managed frame on
-	// this goroutine and performs the expensive pixel raster asynchronously.
+	// RasterizeUI creates a fresh canvas for every redraw. Framework-managed
+	// rendering is incremental and assumes a persistent backing pixmap, so a
+	// touch would redraw only its dirty widget into an otherwise empty canvas.
+	// Host-managed mode redraws the complete widget tree into each fresh raster.
 	d.ui = uiapp.New(uiapp.WithWindowProvider(d.win), uiapp.WithTheme(theme), uiapp.WithRenderMode(uiapp.RenderModeHostManaged))
 	game.SetUIApp(d)
 	d.Resize(width, height)
@@ -229,54 +229,50 @@ func (d *desktopPresentation) Draw(frame *render.Frame) {
 	if d == nil || frame == nil {
 		return
 	}
-
 	needsRaster := d.dirty || d.ui.Window().NeedsRedraw() || d.ui.Window().NeedsAnimationFrame()
 	if needsRaster {
 		immediate := d.image == nil || d.urgentDirty
 		due := d.lastRaster.IsZero() || time.Since(d.lastRaster) >= desktopUIRasterInterval
 		if immediate || due {
-			if !d.debugLogged {
+			firstDraw := !d.debugLogged
+			if firstDraw {
 				if d.ui.Window().Root() == nil {
 					androidLog("stage=desktop-ui root=nil")
 				} else {
 					androidLog("stage=desktop-ui root=present")
 				}
-				d.debugLogged = true
 			}
-			if recorded, err := d.asyncRaster.Record(d.ui, d.uiWidth, d.uiHeight); err != nil {
-				androidLog(fmt.Sprintf("stage=desktop-ui record-error=%v", err))
-			} else if recorded {
-				// Cadence is measured from recording/submission now rather than
-				// from the end of a synchronous 50+ms raster. The worker can
-				// therefore run near the requested 15 Hz without blocking the
-				// game/render thread.
-				d.lastRaster = time.Now()
+			started := time.Now()
+			if image, rasterDrawn, err := render.RasterizeUI(d.ui, d.uiWidth, d.uiHeight, d.image); err == nil {
+				d.image = image
+				if rasterDrawn {
+					d.rasterCount++
+					d.rasterDuration += time.Since(started)
+					d.lastRaster = time.Now()
+				}
+				if d.image != nil && firstDraw {
+					nonzero := 0
+					for i := 3; i < len(d.image.RGBA().Pix); i += 4 {
+						if d.image.RGBA().Pix[i] != 0 {
+							nonzero++
+						}
+					}
+					androidLog(fmt.Sprintf("stage=desktop-ui raster size=%dx%d alpha-pixels=%d", d.image.Bounds().Dx(), d.image.Bounds().Dy(), nonzero))
+				}
+			} else {
+				androidLog(fmt.Sprintf("stage=desktop-ui raster-error=%v", err))
 			}
+			// Clear the animation request only when its new pixels have actually
+			// been published. A deferred request remains pending for the next
+			// cadence slot instead of being lost.
 			d.ui.Window().ClearAnimationFrame()
+			d.debugLogged = true
 			d.dirty = false
 			d.urgentDirty = false
 		} else {
 			d.rasterDeferred++
 		}
 	}
-
-	if image, result, err := d.asyncRaster.Poll(d.image); err != nil {
-		androidLog(fmt.Sprintf("stage=desktop-ui raster-error=%v", err))
-	} else if result.Drawn {
-		d.image = image
-		d.rasterCount++
-		d.rasterDuration += result.Raster
-		if d.rasterCount == 1 && d.image != nil {
-			nonzero := 0
-			for i := 3; i < len(d.image.RGBA().Pix); i += 4 {
-				if d.image.RGBA().Pix[i] != 0 {
-					nonzero++
-				}
-			}
-			androidLog(fmt.Sprintf("stage=desktop-ui raster size=%dx%d alpha-pixels=%d async=true raster-ms=%.2f canvas-ms=%.2f flush-ms=%.2f image-ms=%.2f", d.image.Bounds().Dx(), d.image.Bounds().Dy(), nonzero, result.Raster.Seconds()*1000, result.Canvas.Seconds()*1000, result.Flush.Seconds()*1000, result.Image.Seconds()*1000))
-		}
-	}
-
 	if d.image != nil {
 		frame.SetScreenTransform(d.scale, d.scale, d.offsetX, d.offsetY)
 		frame.DrawImage(d.image, nil)
