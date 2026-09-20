@@ -76,13 +76,22 @@ func TestPhase1REquipmentClusterAndSummaryAreBounded(t *testing.T) {
 	}
 }
 
-func TestPhase1RInventoryKeepsPortraitFourColumnGrid(t *testing.T) {
-	layout := LayoutInventory(Viewport{Width: 1080, Height: 2400}, DefaultInventoryTokens(), FixtureInventory("inventory-basic"), InventoryInteractionState{Screen: ScreenInventory})
-	if layout.GridColumns != 4 {
-		t.Fatalf("portrait inventory grid changed column contract: %d", layout.GridColumns)
+func TestPhase1RInventoryPortraitGridTracksVisibleDensity(t *testing.T) {
+	viewport := Viewport{Width: 1080, Height: 2400}
+	basic := LayoutInventory(viewport, DefaultInventoryTokens(), FixtureInventory("inventory-basic"), InventoryInteractionState{Screen: ScreenInventory, Category: InventoryCategoryAll})
+	if basic.GridColumns != 3 {
+		t.Fatalf("basic portrait inventory should use three columns: %d", basic.GridColumns)
 	}
-	for i, cell := range layout.Cells {
-		assertInsideRect(t, "inventory cell", i, cell.Rect, layout.GridViewport)
+	full := LayoutInventory(viewport, DefaultInventoryTokens(), FixtureInventory("inventory-full"), InventoryInteractionState{Screen: ScreenInventory, Category: InventoryCategoryAll})
+	if full.GridColumns != 4 {
+		t.Fatalf("large portrait inventory should use four columns: %d", full.GridColumns)
+	}
+	filtered := LayoutInventory(viewport, DefaultInventoryTokens(), FixtureInventory("inventory-basic"), InventoryInteractionState{Screen: ScreenInventory, Category: InventoryCategoryEtc})
+	if filtered.GridColumns != 2 || filtered.GridCellWidth <= basic.GridCellWidth {
+		t.Fatalf("filtered portrait inventory did not expand: basic=%+v filtered=%+v", basic, filtered)
+	}
+	for i, cell := range basic.Cells {
+		assertInsideRect(t, "inventory cell", i, cell.Rect, basic.GridViewport)
 		if cell.Rect.W < 48 || cell.Rect.H < 48 {
 			t.Fatalf("inventory cell below touch target: %+v", cell.Rect)
 		}
