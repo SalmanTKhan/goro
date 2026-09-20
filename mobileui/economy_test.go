@@ -112,3 +112,93 @@ func TestEconomyQuantityCancelAndScroll(t *testing.T) {
 		t.Fatalf("long storage did not create a bounded scroll surface: scroll=%+v rows=%d items=%d", c.Scroll, len(c.Layout.Rows), len(c.Storage.Items))
 	}
 }
+
+
+func TestEconomyShopTabAlwaysRequestsAuthoritativeDealMode(t *testing.T) {
+	var commands input.CommandBuffer
+	shop := FixtureShop("shop-sell")
+	shop.CartEnabled = true
+	c := NewEconomyController(Viewport{Width: 1200, Height: 700}, &commands)
+	c.OpenShop(shop)
+
+	sell := c.Layout.Tabs[1].Rect
+	if !c.Tap(sell.X+2, sell.Y+2) {
+		t.Fatal("sell tab tap was not consumed")
+	}
+	if c.Tab != ShopSellTab {
+		t.Fatalf("tab=%v, want Sell", c.Tab)
+	}
+	got := commands.Commands()
+	if len(got) != 1 || got[0].Kind != input.CommandOpenShop || got[0].NPCID != shop.NPCID || got[0].Tab != uint8(ShopSellTab) {
+		t.Fatalf("sell tab did not request server deal mode: %+v", got)
+	}
+}
+
+func TestEconomyOnlineCartStagesThenConfirms(t *testing.T) {
+	var commands input.CommandBuffer
+	shop := FixtureShop("shop-sell")
+	shop.CartEnabled = true
+	c := NewEconomyController(Viewport{Width: 1200, Height: 700}, &commands)
+	c.OpenShop(shop)
+
+	row := c.Layout.Rows[0]
+	c.Tap(row.X+2, row.Y+2)
+	if !c.Quantity.Open {
+		t.Fatal("buy row did not open quantity")
+	}
+	c.Quantity.SetValue(2)
+	c.Tap(c.Layout.QuantityConfirm.X+2, c.Layout.QuantityConfirm.Y+2)
+	got := commands.Commands()
+	if len(got) != 1 || got[0].Kind != input.CommandShopCartAdd || got[0].Quantity != 2 || got[0].ItemIndex != shop.Items[0].Index {
+		t.Fatalf("quantity confirm did not stage cart item: %+v", got)
+	}
+
+	shop.Cart = []ShopCartItemModel{{
+		ItemID: shop.Items[0].ItemID, Name: shop.Items[0].Name,
+		Quantity: 2, UnitPrice: shop.Items[0].Price, Total: shop.Items[0].Price * 2,
+	}}
+	shop.CartTotal = shop.Cart[0].Total
+	c.SetShop(shop)
+	if len(c.Layout.CartRows) == 0 || c.Layout.CartConfirm.W <= 0 {
+		t.Fatalf("cart tray was not laid out: %+v", c.Layout)
+	}
+	c.Tap(c.Layout.CartConfirm.X+2, c.Layout.CartConfirm.Y+2)
+	got = commands.Commands()
+	if len(got) != 2 || got[1].Kind != input.CommandShopCartConfirm || got[1].NPCID != shop.NPCID {
+		t.Fatalf("cart confirm command=%+v", got)
+	}
+}
+
+func TestEconomyCartTrayResponsivePlacement(t *testing.T) {
+	landscape := LayoutShopCartScrolled(
+		Viewport{Width: 1600, Height: 800}, 20, ShopBuyTab, 0, true, 3,
+	)
+	if landscape.CartPanel.W <= 0 || landscape.CartPanel.X <= landscape.ListViewport.Right() {
+		t.Fatalf("landscape cart is not beside list: list=%+v cart=%+v", landscape.ListViewport, landscape.CartPanel)
+	}
+	if landscape.CartPanel.Intersects(landscape.ListViewport) {
+		t.Fatalf("landscape cart overlaps list: list=%+v cart=%+v", landscape.ListViewport, landscape.CartPanel)
+	}
+
+	portrait := LayoutShopCartScrolled(
+		Viewport{Width: 420, Height: 900, SafeTop: 24, SafeBottom: 24}, 20, ShopBuyTab, 0, true, 3,
+	)
+	if portrait.CartPanel.W <= 0 || portrait.CartPanel.Y <= portrait.ListViewport.Bottom() {
+		t.Fatalf("portrait cart is not below list: list=%+v cart=%+v", portrait.ListViewport, portrait.CartPanel)
+	}
+	if portrait.CartPanel.Intersects(portrait.ListViewport) {
+		t.Fatalf("portrait cart overlaps list: list=%+v cart=%+v", portrait.ListViewport, portrait.CartPanel)
+	}
+}
+
+func TestEconomyScrollReportsOnlyVisualChanges(t *testing.T) {
+	c := NewEconomyController(FoldOuterViewport(), nil)
+	c.OpenShop(FixtureShop("shop-long"))
+	if !c.ScrollBy(100000) {
+		t.Fatal("scroll to bottom did not report a change")
+	}
+	atBottom := c.Scroll.Offset
+	if c.ScrollBy(100000) || c.Scroll.Offset != atBottom {
+		t.Fatalf("scroll past bottom reported a change: before=%f after=%f", atBottom, c.Scroll.Offset)
+	}
+}
