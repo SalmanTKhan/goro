@@ -104,6 +104,7 @@ type mobilePresentation struct {
 	onlineInputMode    uint32
 	onlineUsername     string
 	onlinePassword     string
+	onlineCharacterName string
 	settingsChanged    func(input.MobileSettings) bool
 	controlsChanged    func(input.MobileControls) bool
 	chatController     *mobileui.ChatController
@@ -223,6 +224,7 @@ const (
 	androidTextInputCharacter
 	androidTextInputLoginUsername
 	androidTextInputLoginPassword
+	androidTextInputLoginCharacterName
 )
 
 // SetTextInput routes the single host-native editor to the currently visible
@@ -246,6 +248,8 @@ func (p *mobilePresentation) SetTextInput(mode uint32, text string) {
 		p.onlineUsername = text
 	case androidTextInputLoginPassword:
 		p.onlinePassword = text
+	case androidTextInputLoginCharacterName:
+		p.onlineCharacterName = text
 	default:
 		p.SetChatDraft(text)
 	}
@@ -258,8 +262,10 @@ func (p *mobilePresentation) syncTextInputState() {
 		// this does not depend on being connected.
 		active = androidTextInputCharacter
 	} else if p != nil && p.game != nil && p.game.Online() && !p.game.SessionPlaying() &&
-		(p.onlineInputMode == androidTextInputLoginUsername || p.onlineInputMode == androidTextInputLoginPassword) {
-		if p.game.MobileLoginModel().Phase == mobileui.OnlineLoginCredentials {
+		(p.onlineInputMode == androidTextInputLoginUsername || p.onlineInputMode == androidTextInputLoginPassword || p.onlineInputMode == androidTextInputLoginCharacterName) {
+		phase := p.game.MobileLoginModel().Phase
+		if (phase == mobileui.OnlineLoginCredentials && (p.onlineInputMode == androidTextInputLoginUsername || p.onlineInputMode == androidTextInputLoginPassword)) ||
+			(phase == mobileui.OnlineLoginCreate && p.onlineInputMode == androidTextInputLoginCharacterName) {
 			active = p.onlineInputMode
 		} else {
 			p.onlineInputMode = androidTextInputNone
@@ -556,9 +562,14 @@ func (p *mobilePresentation) Back() bool {
 	if p == nil {
 		return false
 	}
-	if p.onlineInputMode == androidTextInputLoginUsername || p.onlineInputMode == androidTextInputLoginPassword {
+	if p.onlineInputMode == androidTextInputLoginUsername || p.onlineInputMode == androidTextInputLoginPassword || p.onlineInputMode == androidTextInputLoginCharacterName {
 		p.onlineInputMode = androidTextInputNone
 		p.syncTextInputState()
+		return true
+	}
+	if p.game != nil && p.game.Online() && !p.game.SessionPlaying() && p.game.MobileLoginModel().Phase == mobileui.OnlineLoginCreate {
+		p.emitMobileCommand(input.PlayerCommand{Kind: input.CommandOnlineCancelCharacterCreate})
+		p.onlineCharacterName = ""
 		return true
 	}
 	if p.tradeController != nil && p.tradeController.IsOpen() {
@@ -1328,6 +1339,55 @@ func (p *mobilePresentation) drawOnlineStatus(frame *render.Frame) {
 		drawMobileButton(frame, layout.Submit, "LOGIN", colors, scale*0.78, loginEnabled)
 		if model.CanSwitchMode {
 			drawMobileTextCentered(frame, "OFFLINE MODE", layout.Mode, colors.accent, scale*0.58)
+		}
+		return
+
+	case mobileui.OnlineLoginCreate:
+		name := p.onlineCharacterName
+		if strings.TrimSpace(name) == "" {
+			name = model.CreateName
+		}
+		if strings.TrimSpace(name) == "" {
+			name = "tap to enter character name"
+		}
+		drawMobileButton(frame, layout.Username, "Name   "+name, colors, scale*0.68, p.onlineInputMode == androidTextInputLoginCharacterName)
+		enabled := len([]byte(strings.TrimSpace(name))) >= 4 && name != "tap to enter character name"
+		drawMobileButton(frame, layout.Submit, "CREATE", colors, scale*0.74, enabled)
+		drawMobileButton(frame, layout.Cancel, "CANCEL", colors, scale*0.74, true)
+		return
+
+	case mobileui.OnlineLoginCreate:
+		if layout.Username.Contains(x, y) {
+			if strings.TrimSpace(p.onlineCharacterName) == "" {
+				p.onlineCharacterName = model.CreateName
+			}
+			p.onlineInputMode = androidTextInputLoginCharacterName
+			p.syncTextInputState()
+			return
+		}
+		if layout.Submit.Contains(x, y) {
+			name := strings.TrimSpace(p.onlineCharacterName)
+			if name == "" {
+				name = strings.TrimSpace(model.CreateName)
+			}
+			if len([]byte(name)) < 4 {
+				return
+			}
+			p.onlineInputMode = androidTextInputNone
+			p.syncTextInputState()
+			p.emitMobileCommand(input.PlayerCommand{Kind: input.CommandOnlineCreateCharacter, Slot: uint16(model.CreateSlot), Text: name})
+			return
+		}
+		if layout.Cancel.Contains(x, y) {
+			p.onlineInputMode = androidTextInputNone
+			p.onlineCharacterName = ""
+			p.syncTextInputState()
+			p.emitMobileCommand(input.PlayerCommand{Kind: input.CommandOnlineCancelCharacterCreate})
+			return
+		}
+		if p.onlineInputMode != androidTextInputNone {
+			p.onlineInputMode = androidTextInputNone
+			p.syncTextInputState()
 		}
 		return
 
