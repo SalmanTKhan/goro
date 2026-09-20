@@ -199,17 +199,18 @@ func (p *mobilePresentation) widgetStateKey() string {
 	if p.dialogController != nil {
 		dialog = p.dialogController.Model.Open
 	}
-	return fmt.Sprintf("%d|%#v|%t|%t|%t|%t|%t|%d|%d", phase, p.navigation, trade, vending, profile, chat, dialog, func() mobileui.EconomyScreen {
+	inventoryScreen := mobileui.ScreenWorldHUD
+	inventoryOffset := float32(0)
+	if p.inventory != nil {
+		inventoryScreen = p.inventory.State.Screen
+		inventoryOffset = p.inventory.State.Scroll.Offset
+	}
+	return fmt.Sprintf("%d|%#v|%t|%t|%t|%t|%t|%d|%d|%.2f", phase, p.navigation, trade, vending, profile, chat, dialog, func() mobileui.EconomyScreen {
 		if p.economyController != nil {
 			return p.economyController.Screen
 		}
 		return mobileui.EconomyClosed
-	}(), func() mobileui.Screen {
-		if p.inventory != nil {
-			return p.inventory.State.Screen
-		}
-		return mobileui.ScreenWorldHUD
-	}())
+	}(), inventoryScreen, inventoryOffset)
 }
 
 // drawWidgets renders the current screen through the widget layer. It reports
