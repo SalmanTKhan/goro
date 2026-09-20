@@ -256,6 +256,15 @@ func (m *Manager) DrawMobileSkillIcon(screen *render.Frame, skillID uint16, x, y
 	}
 }
 
+func (m *Manager) DrawMobileStatusIcon(screen *render.Frame, statusID uint16, x, y, size int) {
+	if m == nil {
+		return
+	}
+	if mode, ok := m.mode.(*WorldMode); ok {
+		mode.DrawMobileStatusIcon(screen, m.ctx.Resources, statusID, x, y, size)
+	}
+}
+
 func (m *Manager) DrawEquipmentPreview(screen *render.Frame, x, y, width, height int) {
 	if m == nil {
 		return
