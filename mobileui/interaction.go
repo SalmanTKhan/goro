@@ -73,6 +73,7 @@ func (c *Controller) Tap(x, y float32) bool {
 		if !skill.Usable || skill.SkillID == 0 || skill.CooldownRemaining > 0 {
 			return true
 		}
+		c.Navigation.EmoteOpen = false
 		switch skill.TargetMode {
 		case input.SkillTargetActor:
 			c.Navigation.Targeting.BeginActor(skill.SkillID, skill.Level)
