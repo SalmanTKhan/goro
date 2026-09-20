@@ -125,15 +125,25 @@ func (p *mobilePresentation) tree(k uimobile.Kit) (widget.Widget, sprites) {
 		if c.Tab == mobileui.ShopSellTab {
 			items = c.Shop.SellItems
 		}
-		art := uimobile.ShopIconRects(items, c.Layout)
-		art = append(art, uimobile.ShopCartIconRects(c.Shop.Cart, c.Layout)...)
+		var art []uimobile.IconPlacement
+		if !c.Quantity.Open {
+			// Item art is composited after the retained widget raster. While the
+			// quantity modal is open, suppress the underlying list/cart sprites
+			// so they cannot punch through the modal and scrim.
+			art = uimobile.ShopIconRects(items, c.Layout)
+			art = append(art, uimobile.ShopCartIconRects(c.Shop.Cart, c.Layout)...)
+		}
 		return k.ShopTree(c.Shop, c.Layout, c.Tab, c.Quantity),
 			sprites{items: art}
 
 	case p.economyController != nil && p.economyController.Screen == mobileui.EconomyStorage:
 		c := p.economyController
+		var art []uimobile.IconPlacement
+		if !c.Quantity.Open {
+			art = uimobile.StorageIconRects(c.Storage, c.Layout)
+		}
 		return k.StorageTree(c.Storage, c.Layout, c.Quantity),
-			sprites{items: uimobile.StorageIconRects(c.Storage, c.Layout)}
+			sprites{items: art}
 
 	case p.characterSkills != nil && p.navigation.Screen == mobileui.ScreenCharacter:
 		c := p.characterSkills
