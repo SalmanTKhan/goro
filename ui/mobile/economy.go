@@ -27,6 +27,7 @@ func (k Kit) ShopTree(
 		items = model.SellItems
 	}
 	k.placeShopRows(c, items, layout, tab)
+	k.placeShopCart(c, model, layout, tab)
 	k.placeEconomyQuantity(c, layout, quantity)
 	return c
 }
@@ -113,6 +114,14 @@ func (k Kit) placeShopRows(
 	if layout.ListViewport.W > 0 && layout.ListViewport.H > 0 {
 		c.Place(k.Panel(), listPanel(layout))
 	}
+	if len(items) == 0 && layout.ListViewport.W > 0 && layout.ListViewport.H > 0 {
+		label := "No items available"
+		if tab == mobileui.ShopSellTab {
+			label = "No sellable items"
+		}
+		c.Place(k.Centered(label, RoleMuted), layout.ListViewport)
+		return
+	}
 	pad := k.Theme.Metrics.TableCellPadX
 	for i, row := range layout.Rows {
 		index := rowIndex(layout, i)
@@ -168,6 +177,59 @@ func shopSubtitle(item mobileui.ShopItemModel, tab mobileui.ShopTab) string {
 	return ""
 }
 
+func (k Kit) placeShopCart(c *Canvas, model mobileui.MobileShopModel, layout mobileui.EconomyLayout, tab mobileui.ShopTab) {
+	if !model.CartEnabled || layout.CartPanel.W <= 0 || layout.CartPanel.H <= 0 {
+		return
+	}
+	c.Place(k.Panel(), layout.CartPanel)
+	title := "Buying"
+	if tab == mobileui.ShopSellTab {
+		title = "Selling"
+	}
+	titleRect := mobileui.Rect{X: layout.CartPanel.X + 10, Y: layout.CartPanel.Y + 4, W: layout.CartPanel.W - 20, H: 34}
+	c.Place(k.Content(title+" — tap line to remove", RoleTitle), titleRect)
+
+	if len(model.Cart) == 0 {
+		body := mobileui.Rect{
+			X: layout.CartPanel.X + 12, Y: titleRect.Bottom(),
+			W: layout.CartPanel.W - 24, H: max32(0, layout.CartSubtotal.Y-titleRect.Bottom()),
+		}
+		if body.H > 0 {
+			c.Place(k.Centered("No items selected", RoleMuted), body)
+		}
+	}
+	pad := k.Theme.Metrics.TableCellPadX
+	for i, row := range layout.CartRows {
+		if i >= len(model.Cart) {
+			break
+		}
+		item := model.Cart[i]
+		c.Place(k.Card(false), row)
+		iconW := row.H
+		textX := row.X + iconW + pad
+		textW := max32(0, row.Right()-pad-textX)
+		priceW := textW * 0.40
+		nameW := max32(0, textW-priceW)
+		c.Place(k.Content(item.Name, RoleValue), mobileui.Rect{X: textX, Y: row.Y, W: nameW, H: row.H * 0.55})
+		c.Place(k.Content("x"+strconv.Itoa(item.Quantity), RoleMuted), mobileui.Rect{X: textX, Y: row.Y + row.H*0.52, W: nameW, H: row.H * 0.44})
+		c.Place(k.RightAligned(zenyLabel(item.Total), RoleValue), mobileui.Rect{X: textX + nameW, Y: row.Y, W: priceW, H: row.H})
+	}
+	if layout.CartSubtotal.W > 0 {
+		c.Place(k.RightAligned("Subtotal "+zenyLabel(model.CartTotal), RoleValue), layout.CartSubtotal)
+	}
+	if layout.CartConfirm.W > 0 {
+		label := "Buy"
+		if tab == mobileui.ShopSellTab {
+			label = "Sell"
+		}
+		state := ButtonDisabled
+		if len(model.Cart) > 0 {
+			state = ButtonNormal
+		}
+		c.Place(k.Button(label, state), layout.CartConfirm)
+	}
+}
+
 // placeStorageRows lists stored items with their counts.
 func (k Kit) placeStorageRows(
 	c *Canvas,
@@ -216,7 +278,11 @@ func (k Kit) placeEconomyQuantity(c *Canvas, layout mobileui.EconomyLayout, stat
 		c.Place(k.Button("+", ButtonNormal), layout.QuantityPlus)
 	}
 	if layout.QuantityConfirm.W > 0 {
-		c.Place(k.Button("Confirm", ButtonNormal), layout.QuantityConfirm)
+		label := "Confirm"
+		if state.Action == mobileui.EconomyQuantityBuy || state.Action == mobileui.EconomyQuantitySell {
+			label = "Add"
+		}
+		c.Place(k.Button(label, ButtonNormal), layout.QuantityConfirm)
 	}
 	if layout.QuantityCancel.W > 0 {
 		c.Place(k.Button("Cancel", ButtonNormal), layout.QuantityCancel)
@@ -254,6 +320,9 @@ func quantityTitle(action mobileui.EconomyQuantityAction) string {
 func economyPanelSurface(layout mobileui.EconomyLayout) mobileui.Rect {
 	panel := layout.Panel
 	bottom := listPanel(layout).Bottom() + 12
+	if layout.CartPanel.W > 0 && layout.CartPanel.Bottom()+12 > bottom {
+		bottom = layout.CartPanel.Bottom() + 12
+	}
 	if bottom > panel.Y && bottom < panel.Bottom() {
 		panel.H = bottom - panel.Y
 	}
@@ -297,6 +366,24 @@ func ShopIconRects(items []mobileui.ShopItemModel, layout mobileui.EconomyLayout
 			continue
 		}
 		item := items[index]
+		out = append(out, IconPlacement{
+			Item: mobileui.InventoryItemModel{
+				ItemID: item.ItemID, Identified: true, DisplayName: item.Name, Quantity: item.Quantity,
+			},
+			Rect: mobileui.Rect{X: row.X, Y: row.Y, W: row.H, H: row.H},
+		})
+	}
+	return out
+}
+
+// ShopCartIconRects reports item sprites for the staged transaction tray.
+func ShopCartIconRects(cart []mobileui.ShopCartItemModel, layout mobileui.EconomyLayout) []IconPlacement {
+	out := make([]IconPlacement, 0, len(layout.CartRows))
+	for i, row := range layout.CartRows {
+		if i >= len(cart) || row.W <= 0 {
+			break
+		}
+		item := cart[i]
 		out = append(out, IconPlacement{
 			Item: mobileui.InventoryItemModel{
 				ItemID: item.ItemID, Identified: true, DisplayName: item.Name, Quantity: item.Quantity,
