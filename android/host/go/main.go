@@ -507,6 +507,45 @@ func (h *host) renderLoop() {
 		cpuFrameTotal = 0
 		phaseWindow.Reset()
 		peakRSS = 0
+
+		// Rotation/fold-posture changes can destroy and recreate only the Android
+		// Surface while the process, game, GPU device, and texture cache remain
+		// valid. Rebinding that new native window to the existing GPU context
+		// avoids replacing the device underneath already-resident game resources.
+		if instance != nil && adapter != nil && device != nil && goroRenderer != nil && offlineGame != nil {
+			androidLog(fmt.Sprintf("stage=surface-rebind begin size=%dx%d", width, height))
+			var rebindErr error
+			surface, rebindErr = instance.CreateSurfaceUnsafe(wgpu.SurfaceTargetFromAndroidNativeWindow(window))
+			if rebindErr != nil {
+				androidLog(fmt.Sprintf("stage=surface-rebind error=%v", rebindErr))
+				return fmt.Errorf("surface rebind: %w", rebindErr)
+			}
+			previousFormat := surfaceFormat
+			surfaceFormat, rebindErr = configureSurface(surface, adapter, device, width, height, surfaceVSync)
+			if rebindErr != nil {
+				surface.Release()
+				surface = nil
+				return rebindErr
+			}
+			if previousFormat != surfaceFormat {
+				// The existing renderer's pipelines target the previous swapchain
+				// format. A format change is exceptional on the same Android device;
+				// fail explicitly rather than drawing with incompatible pipelines.
+				surface.Release()
+				surface = nil
+				return fmt.Errorf("surface format changed during rebind: %s -> %s", previousFormat, surfaceFormat)
+			}
+			offlineGame.Resize(width, height)
+			if mobile != nil {
+				mobile.Resize(width, height)
+			}
+			if desktop != nil {
+				desktop.Resize(width, height)
+			}
+			androidLog(fmt.Sprintf("stage=surface-rebind ready size=%dx%d", width, height))
+			return nil
+		}
+
 		androidLog("stage=instance begin backend=vulkan")
 		log.Printf("stage=instance backend=vulkan")
 		var err error
@@ -685,10 +724,10 @@ func (h *host) renderLoop() {
 					cfg := mobileConfig
 					if online {
 						cfg.MobileSession.Mode = config.SessionModeOnline
-						// The Online button is an explicit mobile login request. Mobile
-						// has no desktop credential form, so use the configured
-						// credentials immediately after the mode handoff.
-						cfg.Login.AutoLogin = true
+						// Switching from offline into online mode is explicit user intent.
+						// The mobile login surface now owns server/account/service
+						// selection, so do not force desktop-style autologin here.
+						cfg.Login.AutoLogin = false
 					} else {
 						cfg.MobileSession.Mode = config.SessionModeOffline
 					}
