@@ -53,6 +53,13 @@ public final class MainActivity extends Activity {
     private boolean chatInputActive;
     private int chatInputMode;
     private boolean syncingChatInput;
+    // SurfaceView can remain logically available across an app switch without
+    // Android delivering a fresh surfaceCreated callback. Track callback
+    // generations so resume can explicitly rebind only when no new surface
+    // was created while the activity was paused.
+    private boolean surfaceAvailable;
+    private int surfaceGeneration;
+    private int pausedSurfaceGeneration = -1;
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
     private final Runnable chatInputPoll = new Runnable() {
         @Override public void run() {
@@ -602,6 +609,7 @@ public final class MainActivity extends Activity {
     }
 
     @Override protected void onPause() {
+        pausedSurfaceGeneration = surfaceGeneration;
         nativePause();
         super.onPause();
     }
@@ -609,6 +617,29 @@ public final class MainActivity extends Activity {
     @Override protected void onResume() {
         super.onResume();
         nativeResume();
+
+        final int generationAtPause = pausedSurfaceGeneration;
+        pausedSurfaceGeneration = -1;
+        if (generationAtPause < 0 || surfaceView == null) return;
+
+        // Some devices keep the same Surface across a short background/foreground
+        // cycle. WGPU's swapchain can still become stale even though SurfaceView
+        // emits no new surfaceCreated callback. Rebind that still-valid native
+        // window after the view has resumed. If Android created a replacement
+        // Surface in the meantime, surfaceGeneration changed and its callback
+        // already performed the authoritative bind.
+        surfaceView.post(() -> {
+            if (!surfaceAvailable || surfaceGeneration != generationAtPause) return;
+            android.view.Surface surface = surfaceView.getHolder().getSurface();
+            if (surface == null || !surface.isValid()) return;
+            Log.i("GoroAndroidHost", "resume rebind generation=" + surfaceGeneration
+                    + " size=" + surfaceView.getWidth() + "x" + surfaceView.getHeight());
+            nativeSurfaceCreated(surface);
+            int width = surfaceView.getWidth();
+            int height = surfaceView.getHeight();
+            if (width > 0 && height > 0) nativeSurfaceChanged(width, height);
+            surfaceView.requestApplyInsets();
+        });
     }
 
     private native void nativeSurfaceCreated(android.view.Surface surface);
@@ -629,9 +660,18 @@ public final class MainActivity extends Activity {
     private final class HostSurfaceView extends SurfaceView implements SurfaceHolder.Callback {
         HostSurfaceView() { super(MainActivity.this); getHolder().addCallback(this); setFocusable(true); }
 
-        @Override public void surfaceCreated(SurfaceHolder holder) { nativeSurfaceCreated(holder.getSurface()); }
-        @Override public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) { nativeSurfaceChanged(width, height); }
-        @Override public void surfaceDestroyed(SurfaceHolder holder) { nativeSurfaceDestroyed(); }
+        @Override public void surfaceCreated(SurfaceHolder holder) {
+            surfaceAvailable = true;
+            surfaceGeneration++;
+            nativeSurfaceCreated(holder.getSurface());
+        }
+        @Override public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
+            nativeSurfaceChanged(width, height);
+        }
+        @Override public void surfaceDestroyed(SurfaceHolder holder) {
+            surfaceAvailable = false;
+            nativeSurfaceDestroyed();
+        }
 
         @Override public boolean onTouchEvent(MotionEvent event) {
             final int action = event.getActionMasked();
