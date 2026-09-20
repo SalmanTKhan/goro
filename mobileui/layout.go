@@ -224,6 +224,9 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 		// bottom edge. The button opens the full chat surface, so collapse the
 		// HUD affordance to a single left-thumb control.
 		chatW = maxf(tokens.MinTouchTarget, 88)
+		if safe.W < 600 {
+			chatW = maxf(tokens.MinTouchTarget, 72)
+		}
 		chatHeight = maxf(tokens.MinTouchTarget, 56)
 	}
 	l.ChatBar = Rect{safe.X + tokens.Edge, safe.Bottom() - tokens.Edge - chatHeight, chatW, chatHeight}
