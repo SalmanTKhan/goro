@@ -24,15 +24,20 @@ func (c *CharacterSkillsController) SetModels(character MobileCharacterModel, sk
 	if c == nil {
 		return
 	}
+	// Selection is controller UI state, not session projection state. Preserve
+	// it across the per-frame model refresh so tapping a skill can actually
+	// open and keep its description/action sheet visible.
+	selection := c.Skills.Selection
 	c.Character, c.Skills = character, skills
-	if c.Skills.Selection.HasSelection {
-		index := c.Skills.Selection.SelectedIndex
+	if selection.HasSelection {
+		index := selection.SelectedIndex
 		if index < 0 || index >= len(skills.Skills) {
-			c.Skills.Selection = SkillSelectionModel{}
+			selection = SkillSelectionModel{}
 		} else {
-			c.Skills.Selection.Skill = skills.Skills[index]
+			selection.Skill = skills.Skills[index]
 		}
 	}
+	c.Skills.Selection = selection
 	c.relayout()
 }
 
