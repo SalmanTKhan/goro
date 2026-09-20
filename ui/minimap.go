@@ -883,6 +883,17 @@ func minimapWorldSize(world *worldstate.World) (int, int) {
 	return 0, 0
 }
 
+// LoadMinimapImage exposes the production desktop minimap resource lookup to
+// other presentation adapters. Mobile uses this rather than synthesizing a
+// terrain-color map so both UIs show the same RO minimap artwork.
+func LoadMinimapImage(manager *res.Manager, mapName string) (image.Image, error) {
+	if manager == nil {
+		return nil, fmt.Errorf("minimap: nil resource manager")
+	}
+	image, _, err := res.LoadImage(manager, minimapImageCandidates(mapName))
+	return image, err
+}
+
 func minimapImageCandidates(mapName string) []string {
 	base := normalizeMinimapMapName(mapName)
 	if base == "" {
