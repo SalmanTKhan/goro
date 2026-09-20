@@ -615,16 +615,26 @@ func (m *WorldMode) drawInventoryItemIconSizedWithFilter(screen *render.Frame, m
 		return
 	}
 	if icon := m.itemIconTexture(manager, item.ItemID, item.Identified); icon != nil {
-		bounds := icon.Bounds()
+		// Retail item icons can contain asymmetric transparent padding. Center
+		// the visible pixels, not the source bitmap, so mobile grid cells do not
+		// make otherwise-correct sprites look offset.
+		bounds := visibleImageBounds(icon)
+		if bounds.Empty() {
+			bounds = icon.Bounds()
+		}
 		width, height := float64(bounds.Dx()), float64(bounds.Dy())
 		if width > 0 && height > 0 {
-			scale := math.Min(float64(size)/width, float64(size)/height)
+			scale := math.Min(float64(size-2)/width, float64(size-2)/height)
 			dstW, dstH := width*scale, height*scale
-			var opts render.DrawImageOptions
-			opts.GeoM.Scale(scale, scale)
-			opts.GeoM.Translate(float64(x)+(float64(size)-dstW)/2, float64(y)+(float64(size)-dstH)/2)
-			opts.Filter = filter
-			screen.DrawImage(icon, &opts)
+			dstX := float64(x) + (float64(size)-dstW)/2
+			dstY := float64(y) + (float64(size)-dstH)/2
+			vertices := []render.Vertex{
+				{DstX: float32(dstX), DstY: float32(dstY), SrcX: float32(bounds.Min.X), SrcY: float32(bounds.Min.Y), ColorR: 1, ColorG: 1, ColorB: 1, ColorA: 1},
+				{DstX: float32(dstX + dstW), DstY: float32(dstY), SrcX: float32(bounds.Max.X), SrcY: float32(bounds.Min.Y), ColorR: 1, ColorG: 1, ColorB: 1, ColorA: 1},
+				{DstX: float32(dstX), DstY: float32(dstY + dstH), SrcX: float32(bounds.Min.X), SrcY: float32(bounds.Max.Y), ColorR: 1, ColorG: 1, ColorB: 1, ColorA: 1},
+				{DstX: float32(dstX + dstW), DstY: float32(dstY + dstH), SrcX: float32(bounds.Max.X), SrcY: float32(bounds.Max.Y), ColorR: 1, ColorG: 1, ColorB: 1, ColorA: 1},
+			}
+			screen.DrawTrianglesOwned(vertices, quadIndices012213, icon, &render.DrawTrianglesOptions{Filter: filter, Address: render.AddressClampToZero})
 			return
 		}
 	}
