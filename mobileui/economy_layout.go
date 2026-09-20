@@ -96,11 +96,18 @@ func LayoutShopCartScrolled(viewport Viewport, rowCount int, selected ShopTab, o
 	listBottom := layout.Panel.Bottom() - listBottomPad
 
 	if cartEnabled && layout.Portrait {
+		// Keep the phone shop visually stable: the transaction preview owns the
+		// bottom quarter of the shop panel, while Buy/Sell owns the upper
+		// three-quarters. This avoids the cart jumping in size with item count.
 		cartGap := float32(12)
-		cartH := minf(280, maxf(190, layout.Panel.H*0.24))
-		minListH := float32(180)
-		if listBottom-listY-cartGap-cartH < minListH {
-			cartH = maxf(150, listBottom-listY-cartGap-minListH)
+		cartH := layout.Panel.H * 0.25
+		minCartH := economyRowHeight + 96 // heading + one full row + footer
+		if cartH < minCartH {
+			cartH = minCartH
+		}
+		maxCartH := maxf(0, listBottom-listY-cartGap-180)
+		if cartH > maxCartH {
+			cartH = maxCartH
 		}
 		if cartH > 0 {
 			layout.CartPanel = Rect{
@@ -118,12 +125,12 @@ func LayoutShopCartScrolled(viewport Viewport, rowCount int, selected ShopTab, o
 
 	if layout.CartPanel.W > 0 && layout.CartPanel.H > 0 {
 		cartPad := float32(10)
-		titleH := float32(38)
+		titleH := float32(58)
 		footerH := float32(58)
 		bodyY := layout.CartPanel.Y + titleH
 		bodyBottom := layout.CartPanel.Bottom() - footerH
-		rowGap := float32(4)
-		rowH := float32(52)
+		rowGap := float32(8)
+		rowH := economyRowHeight
 		available := maxf(0, bodyBottom-bodyY)
 		maxRows := int((available + rowGap) / (rowH + rowGap))
 		if maxRows < 0 {
