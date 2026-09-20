@@ -972,9 +972,17 @@ func (p *mobilePresentation) Move(id input.TouchID, x, y int) {
 		// Profile editing is a bounded form. The on-screen keyboard and
 		// appearance controls own taps; dragging does not scroll the world.
 	case mobileui.TouchInventory:
+		before := p.inventory.State.Scroll.Offset
 		p.inventory.ScrollBy(-dy)
+		if p.widgets != nil && p.inventory.State.Scroll.Offset != before {
+			p.widgets.Invalidate()
+		}
 	case mobileui.TouchEquipment:
+		before := p.inventory.State.Scroll.Offset
 		p.inventory.ScrollBy(-dy)
+		if p.widgets != nil && p.inventory.State.Scroll.Offset != before {
+			p.widgets.Invalidate()
+		}
 	case mobileui.TouchEconomy:
 		p.economyController.ScrollBy(-dy)
 	case mobileui.TouchCharacter, mobileui.TouchSkills:
