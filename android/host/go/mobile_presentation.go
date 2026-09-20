@@ -1012,6 +1012,10 @@ func (p *mobilePresentation) Move(id input.TouchID, x, y int) {
 			p.vendingController.ScrollBy(-dy)
 		} else if p.chatController != nil && p.chatController.Model.Open {
 			p.chatController.ScrollBy(-dy)
+		} else if p.dialogController != nil && p.dialogController.Model.Open {
+			if p.dialogController.ScrollBy(-dy) && p.widgets != nil {
+				p.widgets.Invalidate()
+			}
 		} else if p.settingsController != nil && p.navigation.Screen == mobileui.ScreenSettings {
 			p.settingsController.ScrollBy(-dy)
 		}

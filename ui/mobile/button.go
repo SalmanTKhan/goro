@@ -97,11 +97,26 @@ func (b *buttonWidget) Draw(_ widget.Context, canvas widget.Canvas) {
 	if text.Width() <= 0 {
 		return
 	}
-	lines := wrapText(canvas, b.label, b.style, text.Width(), 1)
+	lineLimit := 1
+	if b.fromWorld {
+		lineLimit = 2
+	}
+	lines := wrapText(canvas, b.label, b.style, text.Width(), lineLimit)
 	if len(lines) == 0 {
 		return
 	}
-	drawStyled(canvas, lines[0], text, b.style)
+	if len(lines) == 1 {
+		drawStyled(canvas, lines[0], text, b.style)
+		return
+	}
+	lineH := b.style.FontSize
+	gap := float32(2)
+	totalH := float32(len(lines))*lineH + float32(len(lines)-1)*gap
+	y := text.Min.Y + (text.Height()-totalH)/2
+	for _, line := range lines {
+		drawStyled(canvas, line, geometry.NewRect(text.Min.X, y, text.Width(), lineH), b.style)
+		y += lineH + gap
+	}
 }
 
 // labelFits reports whether the label renders in full at the given width. The

@@ -117,7 +117,7 @@ func (p *mobilePresentation) tree(k uimobile.Kit) (widget.Widget, sprites) {
 
 	case p.dialogController != nil && p.dialogController.Model.Open:
 		c := p.dialogController
-		return k.DialogTree(c.Model, c.Layout), sprites{}
+		return k.DialogTreeScrolled(c.Model, c.Layout, c.ScrollOffset), sprites{}
 
 	case p.economyController != nil && p.economyController.Screen == mobileui.EconomyShop:
 		c := p.economyController

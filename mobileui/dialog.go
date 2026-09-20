@@ -60,6 +60,7 @@ type DialogLayout struct {
 	Safe, Panel, Header, Message, Notice, Actions, Close Rect
 	Options                                              []Rect
 	MessageBlocks                                        []DialogMessageLayout
+	MessageContentHeight                                 float32
 	Portrait                                             bool
 }
 
@@ -215,15 +216,20 @@ func LayoutDialog(viewport Viewport, model MobileDialogModel) DialogLayout {
 	messageW := maxf(0, panelW-2*pad)
 	actionCount := len(model.Options)
 	buttonH := float32(52)
+	if actionCount > 1 {
+		// Script menu labels are content, not authored chrome. Give them enough
+		// vertical room to wrap to two lines instead of ellipsizing the choice.
+		buttonH = 64
+	}
 	actionGap := float32(10)
 	actionH := float32(0)
+	actionColumns := 1
 	if actionCount > 0 {
 		if layout.Portrait {
 			actionH = float32(actionCount)*buttonH + float32(actionCount-1)*actionGap
 		} else {
-			columns := maxInt(1, int((messageW+actionGap)/(136+actionGap)))
-			columns = minInt(columns, actionCount)
-			rows := (actionCount + columns - 1) / columns
+			actionColumns = dialogActionColumns(messageW, actionCount, actionGap)
+			rows := (actionCount + actionColumns - 1) / actionColumns
 			actionH = float32(rows)*buttonH + float32(rows-1)*actionGap
 		}
 	}
@@ -232,10 +238,14 @@ func LayoutDialog(viewport Viewport, model MobileDialogModel) DialogLayout {
 		noticeH = 28
 	}
 	messageScale := dialogTextScale(viewport)
-	lineAdvance := maxf(20, float32(23)*dialogTextScale(viewport))
-	messageMaxChars := maxInt(28, int(messageW/(11*messageScale)))
+	// The retained mobile theme renders body text at 28 logical pixels with
+	// ~1.3 line spacing. Use a deliberately conservative estimate here so the
+	// scroll range never ends before the real measured text does.
+	lineAdvance := maxf(36, float32(38)*messageScale)
+	messageMaxChars := maxInt(18, int(messageW/(15*messageScale)))
 	messages := dialogMessagesForLayout(model)
 	messageH := dialogMessageContentHeight(messages, messageMaxChars, lineAdvance, strings.TrimSpace(model.Title))
+	layout.MessageContentHeight = messageH
 	contentH := float32(16+56+12) + messageH
 	if noticeH > 0 {
 		contentH += 8 + noticeH
@@ -249,7 +259,12 @@ func LayoutDialog(viewport Viewport, model MobileDialogModel) DialogLayout {
 		minimumH = 190
 	}
 	maxH := maxf(0, safe.H-24)
-	if !layout.Portrait {
+	if layout.Portrait {
+		// Portrait also needs room for the NPC cut-in. Keep the conversation as
+		// a bottom sheet and scroll its body instead of allowing it to grow over
+		// the character illustration.
+		maxH = minf(maxH, safe.H*0.52)
+	} else {
 		maxH = minf(maxH, safe.H*0.72)
 	}
 	panelH := minf(maxH, maxf(minimumH, contentH))
@@ -304,9 +319,8 @@ func LayoutDialog(viewport Viewport, model MobileDialogModel) DialogLayout {
 				}
 			}
 		} else {
-			columns := maxInt(1, int((layout.Actions.W+actionGap)/(136+actionGap)))
-			columns = minInt(columns, actionCount)
-			buttonW := minf(190, maxf(136, (layout.Actions.W-float32(columns-1)*actionGap)/float32(columns)))
+			columns := actionColumns
+			buttonW := minf(300, maxf(136, (layout.Actions.W-float32(columns-1)*actionGap)/float32(columns)))
 			if actionCount == 1 {
 				// A single Next/Close action is the primary conversation
 				// affordance on touch screens; make it deliberately generous.
@@ -325,6 +339,20 @@ func LayoutDialog(viewport Viewport, model MobileDialogModel) DialogLayout {
 		}
 	}
 	return layout
+}
+
+func dialogActionColumns(width float32, actionCount int, gap float32) int {
+	if actionCount <= 1 {
+		return 1
+	}
+	columns := maxInt(1, int((width+gap)/(220+gap)))
+	columns = minInt(columns, actionCount)
+	// More than two menu choices in a single row makes script labels unreadable
+	// on phones even when the framebuffer itself is wide.
+	if actionCount >= 3 {
+		columns = minInt(columns, 2)
+	}
+	return columns
 }
 
 func dialogLineCount(message string, maxChars int) int {
@@ -382,10 +410,11 @@ func normalizeDialogText(value string) string {
 }
 
 type DialogController struct {
-	Model    MobileDialogModel
-	Layout   DialogLayout
-	Viewport Viewport
-	Sink     input.CommandSink
+	Model        MobileDialogModel
+	Layout       DialogLayout
+	Viewport     Viewport
+	Sink         input.CommandSink
+	ScrollOffset float32
 }
 
 func NewDialogController(model MobileDialogModel, viewport Viewport, sink input.CommandSink) *DialogController {
@@ -397,6 +426,9 @@ func NewDialogController(model MobileDialogModel, viewport Viewport, sink input.
 func (c *DialogController) SetModel(model MobileDialogModel) {
 	if c == nil {
 		return
+	}
+	if !sameDialogContent(c.Model, model) {
+		c.ScrollOffset = 0
 	}
 	c.Model = model
 	c.relayout()
@@ -490,9 +522,50 @@ func (c *DialogController) Back() bool {
 	return c.Close()
 }
 
+func (c *DialogController) ScrollBy(delta float32) bool {
+	if c == nil || !c.Model.Open || c.Layout.Message.H <= 0 {
+		return false
+	}
+	maxOffset := maxf(0, c.Layout.MessageContentHeight-c.Layout.Message.H)
+	next := c.ScrollOffset + delta
+	if next < 0 {
+		next = 0
+	}
+	if next > maxOffset {
+		next = maxOffset
+	}
+	if next == c.ScrollOffset {
+		return false
+	}
+	c.ScrollOffset = next
+	return true
+}
+
+func sameDialogContent(a, b MobileDialogModel) bool {
+	if a.Open != b.Open || a.NPCID != b.NPCID || a.Title != b.Title || a.Message != b.Message || a.Notice != b.Notice ||
+		len(a.Messages) != len(b.Messages) || len(a.Options) != len(b.Options) {
+		return false
+	}
+	for i := range a.Messages {
+		if a.Messages[i] != b.Messages[i] {
+			return false
+		}
+	}
+	for i := range a.Options {
+		if a.Options[i] != b.Options[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func (c *DialogController) relayout() {
 	if c == nil {
 		return
 	}
 	c.Layout = LayoutDialog(c.Viewport, c.Model)
+	maxOffset := maxf(0, c.Layout.MessageContentHeight-c.Layout.Message.H)
+	if c.ScrollOffset > maxOffset {
+		c.ScrollOffset = maxOffset
+	}
 }

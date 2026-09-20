@@ -65,7 +65,50 @@ func (c *NPCCutinOverlay) DrawMobile(screen *render.Frame) {
 	if c == nil || screen == nil {
 		return
 	}
+	bounds := screen.Bounds()
+	if bounds.Dy() > bounds.Dx() {
+		c.drawMobilePortrait(screen)
+		return
+	}
 	c.drawTexture(screen)
+}
+
+func (c *NPCCutinOverlay) drawMobilePortrait(screen *render.Frame) {
+	if c == nil || screen == nil || !c.Visible() {
+		return
+	}
+	screenBounds := screen.Bounds()
+	textureBounds := c.texture.Bounds()
+	tw, th := float64(textureBounds.Dx()), float64(textureBounds.Dy())
+	if tw <= 0 || th <= 0 {
+		return
+	}
+	maxW := float64(screenBounds.Dx()) * 0.90
+	maxH := float64(screenBounds.Dy()) * 0.42
+	scale := 1.0
+	if tw > maxW {
+		scale = maxW / tw
+	}
+	if th*scale > maxH {
+		scale = maxH / th
+	}
+	drawW, drawH := tw*scale, th*scale
+	marginX := float64(screenBounds.Dx()) * 0.04
+	x := float64(screenBounds.Min.X) + marginX
+	switch c.position {
+	case network.NPCCutinCenter, network.NPCCutinWindow, network.NPCCutinWindowless:
+		x = float64(screenBounds.Min.X) + (float64(screenBounds.Dx())-drawW)/2
+	case network.NPCCutinRight:
+		x = float64(screenBounds.Max.X) - drawW - marginX
+	}
+	// Portrait dialogs are bottom sheets. Keep the illustration in the upper
+	// band so neither long prose nor menu choices are painted across the art.
+	y := float64(screenBounds.Min.Y) + float64(screenBounds.Dy())*0.035
+	var opts render.DrawImageOptions
+	opts.GeoM.Scale(scale, scale)
+	opts.GeoM.Translate(x, y)
+	opts.Filter = render.FilterLinear
+	screen.DrawImage(c.texture, &opts)
 }
 
 func (c *NPCCutinOverlay) drawTexture(screen *render.Frame) {
