@@ -113,3 +113,65 @@ func TestControllerConsumesDisabledAndMenuControls(t *testing.T) {
 		t.Fatal("empty world tap was incorrectly consumed")
 	}
 }
+
+func TestControllerWorldUtilityActionsEmitSemanticCommands(t *testing.T) {
+	model := Fixture("loot-basic")
+	model.Emotes = []EmoteModel{{ID: 15, Label: "thx"}}
+	var commands input.CommandBuffer
+	controller := NewController(model, FoldOuterViewport(), &commands)
+
+	if !controller.Tap(controller.Layout.SitAction.X+4, controller.Layout.SitAction.Y+4) {
+		t.Fatal("sit action was not handled")
+	}
+	if !controller.Tap(controller.Layout.LootAction.X+4, controller.Layout.LootAction.Y+4) {
+		t.Fatal("loot action was not handled")
+	}
+	got := commands.Commands()
+	if len(got) != 2 || got[0].Kind != input.CommandToggleSit || got[1].Kind != input.CommandLootFocused {
+		t.Fatalf("world utility commands = %+v", got)
+	}
+
+	if !controller.Tap(controller.Layout.EmoteAction.X+4, controller.Layout.EmoteAction.Y+4) || !controller.Navigation.EmoteOpen {
+		t.Fatal("emote action did not open quick picker")
+	}
+	if len(controller.Layout.EmoteRows) != 1 {
+		t.Fatalf("emote rows = %d, want one", len(controller.Layout.EmoteRows))
+	}
+	row := controller.Layout.EmoteRows[0]
+	if !controller.Tap(row.X+4, row.Y+4) {
+		t.Fatal("emote row was not handled")
+	}
+	got = commands.Commands()
+	if len(got) != 3 || got[2].Kind != input.CommandEmotion || got[2].EmotionID != 15 {
+		t.Fatalf("emote command = %+v", got)
+	}
+	if controller.Navigation.EmoteOpen {
+		t.Fatal("emote picker stayed open after selection")
+	}
+}
+
+func TestControllerBackClosesQuickEmotesBeforeLeavingHUD(t *testing.T) {
+	model := Fixture("normal")
+	model.Emotes = []EmoteModel{{ID: 0, Label: "!"}}
+	controller := NewController(model, FoldOuterViewport(), nil)
+	controller.Tap(controller.Layout.EmoteAction.X+4, controller.Layout.EmoteAction.Y+4)
+	if !controller.Navigation.EmoteOpen {
+		t.Fatal("emote picker did not open")
+	}
+	if !controller.Back() || controller.Navigation.EmoteOpen {
+		t.Fatal("back did not close emote picker")
+	}
+	if controller.Navigation.Screen != ScreenWorldHUD {
+		t.Fatalf("back left world HUD: %v", controller.Navigation.Screen)
+	}
+}
+
+func TestControllerUnavailableEmotesStayClosed(t *testing.T) {
+	controller := NewController(Fixture("normal"), FoldOuterViewport(), nil)
+	if !controller.Tap(controller.Layout.EmoteAction.X+4, controller.Layout.EmoteAction.Y+4) {
+		t.Fatal("disabled emote control did not consume its touch")
+	}
+	if controller.Navigation.EmoteOpen {
+		t.Fatal("disabled emote control opened an empty picker")
+	}
+}
