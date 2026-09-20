@@ -507,6 +507,11 @@ func enrichMobileStatuses(model *mobileui.MobileHUDModel, s *session.Session) {
 
 	visible := model.Statuses[:0]
 	for _, status := range model.Statuses {
+		// Match the desktop 2008-client status bar: EFST_SIT itself did not
+		// have a visible status icon in the target client.
+		if status.ID == db.StatusSit {
+			continue
+		}
 		info, ok := db.StatusIconInfoByID(status.ID)
 		if !ok || strings.TrimSpace(info.Icon) == "" {
 			continue
