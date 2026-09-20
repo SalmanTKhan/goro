@@ -201,9 +201,9 @@ func LayoutDialog(viewport Viewport, model MobileDialogModel) DialogLayout {
 		return layout
 	}
 	layout.Portrait = viewport.IsPortrait()
-	panelW := minf(1100, maxf(0, safe.W-48))
+	panelW := minf(760, maxf(0, safe.W*0.68))
 	if layout.Portrait {
-		panelW = maxf(0, safe.W-32)
+		panelW = maxf(0, safe.W-24)
 	}
 	pad := float32(20)
 	if layout.Portrait {
@@ -241,12 +241,20 @@ func LayoutDialog(viewport Viewport, model MobileDialogModel) DialogLayout {
 		contentH += 12 + actionH
 	}
 	contentH += 16
-	minimumH := float32(240)
+	minimumH := float32(180)
 	if layout.Portrait {
-		minimumH = 300
+		minimumH = 220
 	}
-	panelH := minf(maxf(0, safe.H-32), maxf(minimumH, contentH))
-	layout.Panel = Rect{X: safe.X + (safe.W-panelW)/2, Y: safe.Y + (safe.H-panelH)/2, W: panelW, H: panelH}
+	maxH := maxf(0, safe.H-24)
+	if !layout.Portrait {
+		maxH = minf(maxH, safe.H*0.72)
+	}
+	panelH := minf(maxH, maxf(minimumH, contentH))
+	panelY := safe.Bottom() - panelH - 16
+	if layout.Portrait {
+		panelY = safe.Bottom() - panelH - 12
+	}
+	layout.Panel = Rect{X: safe.X + (safe.W-panelW)/2, Y: panelY, W: panelW, H: panelH}
 	layout.Header = Rect{X: layout.Panel.X + pad, Y: layout.Panel.Y + 16, W: layout.Panel.W - 2*pad, H: 56}
 	actionBottom := layout.Panel.Bottom() - 16
 	if actionH > 0 {
@@ -352,10 +360,13 @@ func dialogTextScale(viewport Viewport) float32 {
 		shortEdge = safe.W
 	}
 	if shortEdge <= 0 {
-		return 2.50
+		return 1
 	}
-	scale := shortEdge / 320
-	return minf(2.75, maxf(2.50, scale))
+	// Text widgets use the mobile theme's real font size already. This value is
+	// only a layout estimate; the previous 2.5x minimum produced enormous blank
+	// vertical gaps and full-screen dialog sheets.
+	scale := shortEdge / 720
+	return minf(1.35, maxf(0.95, scale))
 }
 
 func normalizeDialogText(value string) string {
