@@ -7,6 +7,7 @@ import (
 	"image"
 	"image/color"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"unicode"
