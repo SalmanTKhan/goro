@@ -105,12 +105,12 @@ func LayoutInventory(viewport Viewport, tokens InventoryTokens, model MobileInve
 	// full-height pale rectangle just because the device is tall. When the
 	// actual item rows exceed the available space, the viewport naturally
 	// expands to the full scrollable height.
-	grid := LayoutGrid(layout.GridViewport, len(items), inventoryGridSpec(layout.Portrait, fold))
+	grid := LayoutGrid(layout.GridViewport, len(items), inventoryGridSpec(layout.Portrait, fold, len(items)))
 	minimumRows := maxInt(2, grid.Rows)
 	minimumGridH := grid.OuterPadding + float32(minimumRows)*grid.CellHeight + float32(maxInt(0, minimumRows-1))*grid.VerticalGap + tokens.Gap + 58
 	if gridH > minimumGridH {
 		layout.GridViewport.H = minimumGridH
-		grid = LayoutGrid(layout.GridViewport, len(items), inventoryGridSpec(layout.Portrait, fold))
+		grid = LayoutGrid(layout.GridViewport, len(items), inventoryGridSpec(layout.Portrait, fold, len(items)))
 	}
 	if detailH > 0 {
 		layout.DetailPanel = Rect{contentX, layout.GridViewport.Bottom() + tokens.Gap, contentW, detailH}
@@ -157,15 +157,25 @@ func LayoutInventory(viewport Viewport, tokens InventoryTokens, model MobileInve
 	return layout
 }
 
-func inventoryGridSpec(portrait, fold bool) GridSpec {
+func inventoryGridSpec(portrait, fold bool, itemCount int) GridSpec {
 	if portrait {
-		return GridSpec{MinCellWidth: 48, MaxCellWidth: 260, MinRowHeight: 0, HorizontalGap: 16, VerticalGap: 16, PreferredColumns: 4, MinColumns: 4, MaxColumns: 4, AspectRatio: 1, FillWidth: true, OuterPadding: 16}
+		columns := 4
+		switch {
+		case itemCount <= 4:
+			columns = 2
+		case itemCount <= 12:
+			columns = 3
+		}
+		return GridSpec{MinCellWidth: 64, MaxCellWidth: 260, MinRowHeight: 0, HorizontalGap: 16, VerticalGap: 16, PreferredColumns: columns, MinColumns: columns, MaxColumns: columns, AspectRatio: 1, FillWidth: true, OuterPadding: 16}
 	}
 	preferred := 6
 	if fold {
 		preferred = 5
 	}
-	return GridSpec{MinCellWidth: 96, MaxCellWidth: 248, MinRowHeight: 0, HorizontalGap: 16, VerticalGap: 16, PreferredColumns: preferred, MinColumns: 4, MaxColumns: 6, AspectRatio: 1, FillWidth: false, OuterPadding: 16}
+	if itemCount > 0 && itemCount < preferred {
+		preferred = maxInt(3, itemCount)
+	}
+	return GridSpec{MinCellWidth: 96, MaxCellWidth: 248, MinRowHeight: 0, HorizontalGap: 16, VerticalGap: 16, PreferredColumns: preferred, MinColumns: minInt(3, preferred), MaxColumns: maxInt(3, preferred), AspectRatio: 1, FillWidth: true, OuterPadding: 16}
 }
 
 func ScrollExtent(model MobileInventoryModel, state InventoryInteractionState, tokens InventoryTokens, viewport Rect) InventoryScrollState {
@@ -185,7 +195,7 @@ func ScrollExtentForLayout(model MobileInventoryModel, state InventoryInteractio
 		return InventoryScrollState{ViewportExtent: layout.GridViewport.H, ContentExtent: layout.GridContentExtent, Offset: state.Scroll.Offset, RowExtent: layout.GridRowExtent}
 	}
 	items := state.FilteredItems(model)
-	grid := LayoutGrid(layout.GridViewport, len(items), inventoryGridSpec(layout.Portrait, layout.Safe.W > layout.Safe.H && layout.Safe.H <= 900))
+	grid := LayoutGrid(layout.GridViewport, len(items), inventoryGridSpec(layout.Portrait, layout.Safe.W > layout.Safe.H && layout.Safe.H <= 900, len(items)))
 	return InventoryScrollState{ViewportExtent: layout.GridViewport.H, ContentExtent: grid.Scroll.ContentExtent, Offset: state.Scroll.Offset, RowExtent: grid.Scroll.RowExtent}
 }
 
