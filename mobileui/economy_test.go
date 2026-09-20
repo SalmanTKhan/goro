@@ -202,3 +202,55 @@ func TestEconomyScrollReportsOnlyVisualChanges(t *testing.T) {
 		t.Fatalf("scroll past bottom reported a change: before=%f after=%f", atBottom, c.Scroll.Offset)
 	}
 }
+
+
+func TestEconomyQuantityMaxControl(t *testing.T) {
+	var commands input.CommandBuffer
+	shop := FixtureShop("shop-sell")
+	c := NewEconomyController(Viewport{Width: 420, Height: 900, SafeTop: 24, SafeBottom: 24}, &commands)
+	c.OpenShop(shop)
+	c.Tab = ShopSellTab
+	c.relayout()
+
+	// Use the fixture's first sellable stack and force a larger limit so this
+	// exercises the phone use case where repeated '+' taps are impractical.
+	c.Tap(c.Layout.Rows[0].X+2, c.Layout.Rows[0].Y+2)
+	if !c.Quantity.Open {
+		t.Fatal("sell quantity did not open")
+	}
+	c.Quantity.Maximum = 68
+	c.Quantity.SetValue(1)
+	c.relayout()
+
+	if c.Layout.QuantityMax.W < 48 || c.Layout.QuantityMax.H < 48 {
+		t.Fatalf("max control misses touch target: %+v", c.Layout.QuantityMax)
+	}
+	c.Tap(c.Layout.QuantityMax.X+2, c.Layout.QuantityMax.Y+2)
+	if c.Quantity.Value != 68 {
+		t.Fatalf("max quantity value=%d, want 68", c.Quantity.Value)
+	}
+	if len(commands.Commands()) != 0 {
+		t.Fatalf("max control emitted authority command: %+v", commands.Commands())
+	}
+}
+
+func TestEconomyQuantityFourButtonRowFitsPortrait(t *testing.T) {
+	modal, minus, plus, maximum, confirm, cancel := LayoutEconomyQuantity(
+		Viewport{Width: 420, Height: 900, SafeTop: 24, SafeBottom: 24},
+	)
+	if modal.W <= 0 || cancel.W < 48 {
+		t.Fatalf("quantity modal invalid: modal=%+v cancel=%+v", modal, cancel)
+	}
+	buttons := []Rect{minus, plus, maximum, confirm}
+	for i, button := range buttons {
+		if button.W < 48 || button.H < 48 {
+			t.Fatalf("button %d misses touch target: %+v", i, button)
+		}
+		if button.X < modal.X || button.Right() > modal.Right() || button.Y < modal.Y || button.Bottom() > modal.Bottom() {
+			t.Fatalf("button %d escapes modal: button=%+v modal=%+v", i, button, modal)
+		}
+		if i > 0 && buttons[i-1].Intersects(button) {
+			t.Fatalf("quantity buttons overlap: left=%+v right=%+v", buttons[i-1], button)
+		}
+	}
+}
