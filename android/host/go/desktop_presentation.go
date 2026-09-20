@@ -77,14 +77,12 @@ type desktopPresentation struct {
 	uiScale                 float32
 	dirty                   bool
 	urgentDirty             bool
-	forceFullRaster         bool
 	captured                bool
 	debugLogged             bool
 	lastRaster              time.Time
 	rasterCount             int
 	rasterDeferred          int
 	rasterDuration          time.Duration
-	raster                  render.RetainedUIRasterizer
 
 	// pointer queues touches for the polled input path, in logical UI
 	// coordinates. Widget events reach gogpu immediately, but large parts of the
@@ -107,7 +105,7 @@ type pointerEvent struct {
 }
 
 func newDesktopPresentation(game *app.Game, width, height int) *desktopPresentation {
-	d := &desktopPresentation{game: game, win: &androidUIWindow{width: desktopUIWidth, height: desktopUIHeight}, uiWidth: desktopUIWidth, uiHeight: desktopUIHeight, uiScale: game.UISettings().Normalized().Scale, dirty: true, urgentDirty: true, forceFullRaster: true}
+	d := &desktopPresentation{game: game, win: &androidUIWindow{width: desktopUIWidth, height: desktopUIHeight}, uiWidth: desktopUIWidth, uiHeight: desktopUIHeight, uiScale: game.UISettings().Normalized().Scale, dirty: true, urgentDirty: true}
 	theme := rotheme.Default.AsTheme()
 	theme.Colors.Background = widget.RGBA8(0, 0, 0, 0)
 	// RasterizeUI creates a fresh canvas for every redraw. Framework-managed
@@ -124,7 +122,6 @@ func (d *desktopPresentation) SetUIRoot(root widget.Widget) {
 	d.ui.SetRoot(root)
 	d.dirty = true
 	d.urgentDirty = true
-	d.forceFullRaster = true
 }
 func (d *desktopPresentation) Frame()      { d.ui.Frame() }
 func (d *desktopPresentation) Invalidate() { d.dirty = true }
@@ -134,7 +131,6 @@ func (d *desktopPresentation) SetUISettings(settings input.UISettings) {
 	}
 	d.uiScale = settings.Normalized().Scale
 	d.urgentDirty = true
-	d.forceFullRaster = true
 	d.Resize(d.width, d.height)
 }
 
@@ -220,7 +216,6 @@ func (d *desktopPresentation) Resize(width, height int) {
 	d.captured = false
 	d.dirty = true
 	d.urgentDirty = true
-	d.forceFullRaster = true
 }
 
 func maxInt(a, b int) int {
@@ -248,7 +243,7 @@ func (d *desktopPresentation) Draw(frame *render.Frame) {
 				}
 			}
 			started := time.Now()
-			if image, rasterDrawn, err := d.raster.Rasterize(d.ui, d.uiWidth, d.uiHeight, d.image, d.forceFullRaster || d.image == nil); err == nil {
+			if image, rasterDrawn, err := render.RasterizeUI(d.ui, d.uiWidth, d.uiHeight, d.image); err == nil {
 				d.image = image
 				if rasterDrawn {
 					d.rasterCount++
@@ -274,7 +269,6 @@ func (d *desktopPresentation) Draw(frame *render.Frame) {
 			d.debugLogged = true
 			d.dirty = false
 			d.urgentDirty = false
-			d.forceFullRaster = false
 		} else {
 			d.rasterDeferred++
 		}
