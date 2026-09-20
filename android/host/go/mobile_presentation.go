@@ -1305,11 +1305,11 @@ func (p *mobilePresentation) drawOnlineStatus(frame *render.Frame) {
 		return
 
 	case mobileui.OnlineLoginCredentials:
-		username := model.Username
-		if p.onlineInputMode == androidTextInputLoginUsername || p.onlineUsername != "" {
-			username = p.onlineUsername
+		username := p.onlineUsername
+		if strings.TrimSpace(username) == "" {
+			username = model.Username
 		}
-		if username == "" {
+		if strings.TrimSpace(username) == "" {
 			username = "tap to enter username"
 		}
 		password := ""
@@ -1320,8 +1320,8 @@ func (p *mobilePresentation) drawOnlineStatus(frame *render.Frame) {
 		} else {
 			password = "tap to enter password"
 		}
-		drawMobileButton(frame, layout.Username, "ID   "+username, colors, scale*0.68, true)
-		drawMobileButton(frame, layout.Password, "Password   "+password, colors, scale*0.68, true)
+		drawMobileButton(frame, layout.Username, "ID   "+username, colors, scale*0.68, p.onlineInputMode == androidTextInputLoginUsername)
+		drawMobileButton(frame, layout.Password, "Password   "+password, colors, scale*0.68, p.onlineInputMode == androidTextInputLoginPassword)
 		loginEnabled := strings.TrimSpace(p.onlineUsername) != "" || strings.TrimSpace(model.Username) != ""
 		loginEnabled = loginEnabled && (p.onlinePassword != "" || model.PasswordSet)
 		drawMobileButton(frame, layout.Submit, "LOGIN", colors, scale*0.78, loginEnabled)
@@ -1391,6 +1391,9 @@ func (p *mobilePresentation) handleOnlineTouch(x, y float32) {
 
 	case mobileui.OnlineLoginCredentials:
 		if layout.Username.Contains(x, y) {
+			if strings.TrimSpace(p.onlineUsername) == "" {
+				p.onlineUsername = model.Username
+			}
 			p.onlineInputMode = androidTextInputLoginUsername
 			p.syncTextInputState()
 			return
@@ -1422,6 +1425,13 @@ func (p *mobilePresentation) handleOnlineTouch(x, y float32) {
 			p.onlineInputMode = androidTextInputNone
 			p.syncTextInputState()
 			p.modeChanged(false)
+			return
+		}
+		// A text field is only active while the player is explicitly editing it.
+		// Tapping the background must not behave like another username tap.
+		if p.onlineInputMode != androidTextInputNone {
+			p.onlineInputMode = androidTextInputNone
+			p.syncTextInputState()
 		}
 		return
 
