@@ -40,6 +40,8 @@ type MobileOnlineLoginModel struct {
 	SelectedServer int
 	Username      string
 	PasswordSet   bool
+	CreateName    string
+	CreateSlot    int
 	CanSubmit     bool
 	CanReconnect  bool
 	CanDisconnect bool
@@ -51,7 +53,7 @@ type MobileOnlineLoginModel struct {
 type OnlineLoginLayout struct {
 	Safe, Panel, Title, Status, Network, Notice Rect
 	Options                                      []Rect
-	Username, Password, Submit                   Rect
+	Username, Password, Submit, Cancel           Rect
 	Slots                                        []Rect
 	Reconnect, Disconnect, Create, Mode          Rect
 }
@@ -133,7 +135,16 @@ func LayoutOnlineLogin(viewport Viewport, model MobileOnlineLoginModel) OnlineLo
 		}
 		layout.Create = Rect{X: layout.Panel.X + pad, Y: layout.Panel.Bottom() - 72, W: (layout.Panel.W - 2*pad - 2*gap) / 3, H: 52}
 
-	case OnlineLoginConnecting, OnlineLoginCreate:
+	case OnlineLoginCreate:
+		formW := minf(620, layout.Panel.W-2*pad)
+		formX := layout.Panel.X + (layout.Panel.W-formW)/2
+		top := layout.Notice.Bottom() + 28
+		layout.Username = Rect{X: formX, Y: top, W: formW, H: 60}
+		buttonGap := float32(12)
+		buttonW := (formW-buttonGap)/2
+		layout.Submit = Rect{X: formX, Y: layout.Username.Bottom() + 18, W: buttonW, H: 60}
+		layout.Cancel = Rect{X: layout.Submit.Right() + buttonGap, Y: layout.Submit.Y, W: buttonW, H: 60}
+	case OnlineLoginConnecting:
 		buttonY := layout.Panel.Bottom() - 74
 		buttonGap := float32(12)
 		buttonW := (layout.Panel.W - 2*pad - buttonGap) / 2
