@@ -101,7 +101,7 @@ func LayoutShopCartScrolled(viewport Viewport, rowCount int, selected ShopTab, o
 		// three-quarters. This avoids the cart jumping in size with item count.
 		cartGap := float32(12)
 		cartH := layout.Panel.H * 0.25
-		minCartH := economyRowHeight + 96 // heading + one full row + footer
+		minCartH := economyRowHeight + 116 // 58px heading + one full row + 58px footer
 		if cartH < minCartH {
 			cartH = minCartH
 		}
