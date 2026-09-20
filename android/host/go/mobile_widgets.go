@@ -330,7 +330,12 @@ func (m *mobileWidgets) drawWidgets(p *mobilePresentation, frame *render.Frame) 
 			continue
 		}
 		p.game.DrawMobileInventoryItemIcon(frame, placement.Item, int(placement.Rect.X), int(placement.Rect.Y), side)
-		if placement.ShowQuantity && placement.Item.Quantity > 1 {
+		if placement.Dimmed && placement.OverlayRect.W > 0 && placement.OverlayRect.H > 0 {
+			drawMobileShortcutDim(frame, placement.OverlayRect)
+		}
+		if placement.ShortcutBadge != "" && placement.OverlayRect.W > 0 {
+			drawMobileShortcutBadge(frame, placement.ShortcutBadge, placement.OverlayRect, true, p.mobileTextScale())
+		} else if placement.ShowQuantity && placement.Item.Quantity > 1 {
 			drawMobileTextFit(frame, fmt.Sprintf("x%d", placement.Item.Quantity),
 				placement.Rect.X, placement.Rect.Bottom()-18, placement.Rect.W,
 				mobileColors().title, p.mobileTextScale()*0.58)
@@ -346,6 +351,16 @@ func (m *mobileWidgets) drawWidgets(p *mobilePresentation, frame *render.Frame) 
 			continue
 		}
 		p.game.DrawMobileSkillIcon(frame, placement.Skill, int(placement.Rect.X), int(placement.Rect.Y), side)
+		if placement.Dimmed && placement.OverlayRect.W > 0 && placement.OverlayRect.H > 0 {
+			drawMobileShortcutDim(frame, placement.OverlayRect)
+		}
+		if placement.ShortcutBadge != "" && placement.OverlayRect.W > 0 {
+			drawMobileShortcutBadge(frame, placement.ShortcutBadge, placement.OverlayRect, false, p.mobileTextScale())
+		}
+		if placement.CooldownText != "" && placement.OverlayRect.W > 0 {
+			drawMobileTextCentered(frame, placement.CooldownText, placement.OverlayRect,
+				color.RGBA{R: 255, G: 255, B: 255, A: 255}, p.mobileTextScale()*0.78)
+		}
 	}
 	for _, placement := range art.statuses {
 		side := int(min32(placement.Rect.W, placement.Rect.H))
@@ -392,6 +407,41 @@ func vendingSelection(state mobileui.VendingSelectionState) int {
 		return -1
 	}
 	return state.SelectedIndex
+}
+
+func drawMobileShortcutDim(frame *render.Frame, rect mobileui.Rect) {
+	if frame == nil || rect.W <= 0 || rect.H <= 0 {
+		return
+	}
+	render.DrawRect(frame, float64(rect.X+2), float64(rect.Y+2), float64(rect.W-4), float64(rect.H-4),
+		color.RGBA{R: 20, G: 32, B: 48, A: 132})
+}
+
+func drawMobileShortcutBadge(frame *render.Frame, text string, rect mobileui.Rect, right bool, textScale float64) {
+	if frame == nil || text == "" || rect.W <= 0 || rect.H <= 0 {
+		return
+	}
+	scale := textScale * 0.56
+	w, h := render.BitmapTextSize(text)
+	if w <= 0 || h <= 0 {
+		return
+	}
+	textW := float32(w) * float32(scale)
+	textH := float32(h) * float32(scale)
+	maxW := rect.W - 8
+	if textW > maxW && w > 0 {
+		scale *= float64(maxW / textW)
+		textW = maxW
+		textH = float32(h) * float32(scale)
+	}
+	x := rect.X + 4
+	y := rect.Y + 3
+	if right {
+		x = rect.Right() - textW - 4
+		y = rect.Bottom() - textH - 3
+	}
+	drawMobileText(frame, text, x+1, y+1, color.RGBA{R: 0, G: 0, B: 0, A: 210}, scale)
+	drawMobileText(frame, text, x, y, mobileColors().title, scale)
 }
 
 func min32(a, b float32) float32 {

@@ -3571,34 +3571,29 @@ func drawMobileStatuses(frame *render.Frame, rect mobileui.Rect, statuses []mobi
 	}
 }
 
-func drawMobileItemShortcut(frame *render.Frame, rect mobileui.Rect, item mobileui.InventoryItemModel, index int, game *app.Game, colors mobilePalette, scale float64) {
+func drawMobileItemShortcut(frame *render.Frame, rect mobileui.Rect, item mobileui.InventoryItemModel, _ int, game *app.Game, colors mobilePalette, scale float64) {
 	active := item.Usable && item.Index != 0 && item.Quantity > 0
 	drawMobileCard(frame, rect, colors, active)
-	drawMobileTextFit(frame, fmt.Sprintf("F%d", index+1), rect.X+7, rect.Y+7, rect.W*0.30, colors.accent, scale*0.52)
-	iconSize := minf32(64, maxf32(40, rect.H-26))
+	iconSize := minf32(64, maxf32(40, minf32(rect.W, rect.H)-10))
 	iconX := rect.X + (rect.W-iconSize)/2
-	iconY := rect.Y + 12
+	iconY := rect.Y + (rect.H-iconSize)/2
 	if game != nil && item.ItemID != 0 {
 		game.DrawMobileInventoryItemIcon(frame, item, int(iconX), int(iconY), int(iconSize))
-	}
-	if item.Quantity > 1 {
-		drawMobileTextFit(frame, fmt.Sprintf("x%d", item.Quantity), rect.X+4, rect.Bottom()-19, rect.W-8, colors.title, scale*0.56)
 	}
 	if !active {
 		render.DrawRect(frame, float64(rect.X+3), float64(rect.Y+3), float64(rect.W-6), float64(rect.H-6), color.RGBA{R: 30, G: 46, B: 66, A: 120})
 	}
+	if item.Quantity > 1 {
+		drawMobileShortcutBadge(frame, strconv.Itoa(item.Quantity), rect, true, scale)
+	}
 }
 
-func drawMobileSkill(frame *render.Frame, rect mobileui.Rect, skill mobileui.SkillSlotModel, index int, game *app.Game, colors mobilePalette, scale float64) {
+func drawMobileSkill(frame *render.Frame, rect mobileui.Rect, skill mobileui.SkillSlotModel, _ int, game *app.Game, colors mobilePalette, scale float64) {
 	active := skill.Usable && skill.CooldownRemaining <= 0
 	drawMobileCard(frame, rect, colors, active)
-	drawMobileTextFit(frame, fmt.Sprintf("F%d", index+1), rect.X+7, rect.Y+7, rect.W*0.30, colors.accent, scale*0.52)
-	if skill.Level > 0 {
-		drawMobileTextFit(frame, fmt.Sprintf("Lv%d", skill.Level), rect.X+rect.W*0.62, rect.Y+7, rect.W*0.31, colors.muted, scale*0.48)
-	}
-	iconSize := minf32(64, maxf32(40, rect.H-34))
+	iconSize := minf32(64, maxf32(40, minf32(rect.W, rect.H)-10))
 	iconX := rect.X + (rect.W-iconSize)/2
-	iconY := rect.Y + 17
+	iconY := rect.Y + (rect.H-iconSize)/2
 	render.DrawRect(frame, float64(iconX), float64(iconY), float64(iconSize), float64(iconSize), colors.header)
 	glyph := "?"
 	if skill.Name != "" {
@@ -3609,13 +3604,15 @@ func drawMobileSkill(frame *render.Frame, rect mobileui.Rect, skill mobileui.Ski
 	if game != nil {
 		game.DrawMobileSkillIcon(frame, mobileui.MobileSkillModel{SkillID: skill.SkillID}, int(iconX), int(iconY), int(iconSize))
 	}
-	drawMobileTextFit(frame, mobileSkillDisplayName(skill.Name), rect.X+5, rect.Bottom()-17, rect.W-10, colors.text, scale*0.48)
 	if !active {
 		render.DrawRect(frame, float64(rect.X+3), float64(rect.Y+3), float64(rect.W-6), float64(rect.H-6), color.RGBA{R: 30, G: 46, B: 66, A: 120})
-		if skill.CooldownRemaining > 0 {
-			seconds := int(skill.CooldownRemaining.Seconds() + 0.99)
-			drawMobileText(frame, fmt.Sprintf("%ds", seconds), rect.X+rect.W/2-10, rect.Y+rect.H/2-8, color.RGBA{R: 255, G: 255, B: 255, A: 255}, scale*0.82)
-		}
+	}
+	if skill.Level > 0 {
+		drawMobileShortcutBadge(frame, "Lv"+strconv.Itoa(skill.Level), rect, false, scale)
+	}
+	if skill.CooldownRemaining > 0 {
+		seconds := int(skill.CooldownRemaining.Seconds() + 0.99)
+		drawMobileTextCentered(frame, fmt.Sprintf("%ds", seconds), rect, color.RGBA{R: 255, G: 255, B: 255, A: 255}, scale*0.78)
 	}
 }
 

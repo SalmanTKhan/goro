@@ -241,6 +241,10 @@ func SkillIconRects(model mobileui.MobileSkillsModel, layout mobileui.SkillsLayo
 
 // SkillIconPlacement pairs a skill with the square its sprite belongs in.
 type SkillIconPlacement struct {
-	Skill mobileui.MobileSkillModel
-	Rect  mobileui.Rect
+	Skill         mobileui.MobileSkillModel
+	Rect          mobileui.Rect
+	OverlayRect   mobileui.Rect
+	ShortcutBadge string
+	Dimmed        bool
+	CooldownText  string
 }

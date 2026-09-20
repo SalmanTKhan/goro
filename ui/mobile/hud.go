@@ -261,12 +261,6 @@ func (k Kit) placeSkillBar(
 			skill := shortcut.Skill
 			targeting := nav.Targeting.Mode != 0 && nav.Targeting.SkillID == skill.SkillID
 			c.Place(k.Slot(true, targeting), slot)
-			role := RoleMuted
-			if !skill.Usable {
-				role = RoleLabel
-			}
-			c.Place(k.Centered("Lv"+strconv.Itoa(skill.Level), role),
-				quantityBadgeRect(slot, k.Theme.Metrics.TableCellPadX))
 		default:
 			c.Place(k.Slot(false, false), slot)
 		}
@@ -417,6 +411,15 @@ func HUDIconRects(
 		switch shortcut.Kind {
 		case mobileui.ShortcutSkill:
 			skill := shortcut.Skill
+			badge := ""
+			if skill.Level > 0 {
+				badge = "Lv" + strconv.Itoa(skill.Level)
+			}
+			cooldown := ""
+			if skill.CooldownRemaining > 0 {
+				seconds := int(skill.CooldownRemaining.Seconds() + 0.99)
+				cooldown = strconv.Itoa(seconds) + "s"
+			}
 			skills = append(skills, SkillIconPlacement{
 				Skill: mobileui.MobileSkillModel{
 					SkillID: skill.SkillID,
@@ -424,14 +427,24 @@ func HUDIconRects(
 					Level:   skill.Level,
 					IconKey: skill.IconKey,
 				},
-				Rect: slot,
+				Rect:          slot,
+				OverlayRect:   slot,
+				ShortcutBadge: badge,
+				Dimmed:        !skill.Usable || skill.CooldownRemaining > 0,
+				CooldownText:  cooldown,
 			})
 		case mobileui.ShortcutItem:
 			inset := slot.W * 0.08
+			badge := ""
+			if shortcut.Item.Quantity > 1 {
+				badge = strconv.Itoa(shortcut.Item.Quantity)
+			}
 			loot = append(loot, IconPlacement{
 				Item: shortcut.Item,
 				Rect: mobileui.Rect{X: slot.X + inset, Y: slot.Y + inset, W: slot.W - 2*inset, H: slot.H - 2*inset},
-				ShowQuantity: true,
+				OverlayRect:   slot,
+				ShortcutBadge: badge,
+				Dimmed:        !shortcut.Item.Usable || shortcut.Item.Index == 0 || shortcut.Item.Quantity <= 0,
 			})
 		}
 	}

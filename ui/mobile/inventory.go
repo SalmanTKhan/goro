@@ -206,9 +206,12 @@ func IconRects(
 
 // IconPlacement pairs an item with the cell its sprite belongs in.
 type IconPlacement struct {
-	Item         mobileui.InventoryItemModel
-	Rect         mobileui.Rect
-	ShowQuantity bool
+	Item          mobileui.InventoryItemModel
+	Rect          mobileui.Rect
+	ShowQuantity  bool
+	OverlayRect   mobileui.Rect
+	ShortcutBadge string
+	Dimmed        bool
 }
 
 func inventoryItemAt(items []mobileui.InventoryItemModel, index uint16) (mobileui.InventoryItemModel, bool) {
