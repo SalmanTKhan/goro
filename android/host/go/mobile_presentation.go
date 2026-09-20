@@ -46,7 +46,14 @@ func (s mobileCommandSink) Emit(command input.PlayerCommand) bool {
 		s.presentation.dialogController.Open(mobileui.ProjectDialog(command.ActorID, title, message, shopAvailable))
 	}
 	if accepted && command.Kind == input.CommandOpenShop && s.presentation != nil {
-		s.presentation.economyController.OpenShop(game.MobileShopModel(command.NPCID))
+		model := game.MobileShopModel(command.NPCID)
+		if s.presentation.economyController.Screen == mobileui.EconomyShop {
+			// Tab switches already update presentation state before emitting the
+			// server deal request. Do not reopen the controller and reset it to Buy.
+			s.presentation.economyController.SetShop(model)
+		} else {
+			s.presentation.economyController.OpenShop(model)
+		}
 		s.presentation.dialogController.Close()
 	}
 	if accepted && command.Kind == input.CommandOpenStorage && s.presentation != nil {
@@ -59,6 +66,13 @@ func (s mobileCommandSink) Emit(command input.PlayerCommand) bool {
 	}
 	if accepted && command.Kind == input.CommandDepositItem && s.presentation != nil {
 		s.presentation.economyController.SetStorage(game.MobileStorageModel())
+	}
+	if accepted && s.presentation != nil &&
+		(command.Kind == input.CommandShopCartAdd || command.Kind == input.CommandShopCartRemove || command.Kind == input.CommandShopCartConfirm) {
+		s.presentation.economyController.SetShop(game.MobileShopModel(command.NPCID))
+		if s.presentation.widgets != nil {
+			s.presentation.widgets.Invalidate()
+		}
 	}
 	if accepted && s.presentation != nil &&
 		(command.Kind == input.CommandAssignSkillHotkey || command.Kind == input.CommandAssignItemHotkey) {
@@ -1052,7 +1066,9 @@ func (p *mobilePresentation) Move(id input.TouchID, x, y int) {
 			p.widgets.Invalidate()
 		}
 	case mobileui.TouchEconomy:
-		p.economyController.ScrollBy(-dy)
+		if p.economyController.ScrollBy(-dy) && p.widgets != nil {
+			p.widgets.Invalidate()
+		}
 	case mobileui.TouchCharacter, mobileui.TouchSkills:
 		if p.characterSkills.ScrollBy(-dy) && p.widgets != nil {
 			p.widgets.Invalidate()
@@ -3116,6 +3132,13 @@ func (p *mobilePresentation) drawEconomy(frame *render.Frame) {
 	for _, tab := range layout.Tabs {
 		drawMobileButton(frame, tab.Rect, strings.ToUpper(tab.Tab.String()), colors, textScale*0.76, tab.Tab == c.Tab)
 	}
+	if len(items) == 0 {
+		label := "NO ITEMS AVAILABLE"
+		if c.Tab == mobileui.ShopSellTab {
+			label = "NO SELLABLE ITEMS"
+		}
+		centerMobileText(frame, label, layout.ListViewport.X, layout.ListViewport.Y+24, layout.ListViewport.W, colors.muted, textScale*0.72)
+	}
 	for rowNumber, row := range layout.Rows {
 		if rowNumber >= len(layout.RowIndices) {
 			break
@@ -3130,6 +3153,24 @@ func (p *mobilePresentation) drawEconomy(frame *render.Frame) {
 			continue
 		}
 		drawMobileActionRow(frame, row, fmt.Sprintf("%s   %d zeny", trimText(item.Name, 28), item.Price), "BUY", colors, textScale*0.86, textScale*0.78, item.CanBuy)
+	}
+	if shop.CartEnabled && layout.CartPanel.W > 0 {
+		drawMobilePanel(frame, layout.CartPanel)
+		title := "BUYING"
+		action := "BUY"
+		if c.Tab == mobileui.ShopSellTab {
+			title, action = "SELLING", "SELL"
+		}
+		drawMobileTextFit(frame, title+" — TAP LINE TO REMOVE", layout.CartPanel.X+10, layout.CartPanel.Y+10, layout.CartPanel.W-20, colors.title, textScale*0.66)
+		for i, row := range layout.CartRows {
+			if i >= len(shop.Cart) {
+				break
+			}
+			entry := shop.Cart[i]
+			drawMobileActionRow(frame, row, fmt.Sprintf("%s  x%d", trimText(entry.Name, 18), entry.Quantity), fmt.Sprintf("%d z", entry.Total), colors, textScale*0.70, textScale*0.62, true)
+		}
+		drawMobileTextBoxFit(frame, fmt.Sprintf("SUBTOTAL %d z", shop.CartTotal), layout.CartSubtotal, colors.title, textScale*0.68)
+		drawMobileButton(frame, layout.CartConfirm, action, colors, textScale*0.72, len(shop.Cart) > 0)
 	}
 	p.drawEconomyQuantity(frame)
 }
@@ -3155,7 +3196,11 @@ func (p *mobilePresentation) drawEconomyQuantity(frame *render.Frame) {
 	drawMobileText(frame, fmt.Sprintf("%s   %d / %d", action, c.Quantity.Value, c.Quantity.Maximum), l.QuantityModal.X+20, l.QuantityModal.Y+76, colors.text, textScale*1.08)
 	drawMobileButton(frame, l.QuantityMinus, "−", colors, textScale*1.15, false)
 	drawMobileButton(frame, l.QuantityPlus, "+", colors, textScale*1.15, false)
-	drawMobileButton(frame, l.QuantityConfirm, "CONFIRM", colors, textScale*0.72, true)
+	confirmLabel := "CONFIRM"
+	if c.Shop.CartEnabled && (c.Quantity.Action == mobileui.EconomyQuantityBuy || c.Quantity.Action == mobileui.EconomyQuantitySell) {
+		confirmLabel = "ADD"
+	}
+	drawMobileButton(frame, l.QuantityConfirm, confirmLabel, colors, textScale*0.72, true)
 	drawMobileButton(frame, l.QuantityCancel, "CANCEL", colors, textScale*0.72, false)
 }
 
