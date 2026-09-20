@@ -2,10 +2,12 @@ package mobileui
 
 type EconomyLayout struct {
 	Safe, Panel, Header, Close, ListViewport                                    Rect
+	CartPanel, CartSubtotal, CartConfirm                                         Rect
 	QuantityModal, QuantityMinus, QuantityPlus, QuantityConfirm, QuantityCancel Rect
 	Tabs                                                                        []EconomyTabRect
 	Rows                                                                        []Rect
 	RowIndices                                                                  []int
+	CartRows                                                                    []Rect
 	Portrait                                                                    bool
 }
 
@@ -32,6 +34,10 @@ func LayoutShop(viewport Viewport, rowCount int, selected ShopTab) EconomyLayout
 }
 
 func LayoutShopScrolled(viewport Viewport, rowCount int, selected ShopTab, offset float32) EconomyLayout {
+	return LayoutShopCartScrolled(viewport, rowCount, selected, offset, false, 0)
+}
+
+func LayoutShopCartScrolled(viewport Viewport, rowCount int, selected ShopTab, offset float32, cartEnabled bool, cartCount int) EconomyLayout {
 	safe := viewport.SafeRect()
 	layout := EconomyLayout{Safe: safe}
 	if safe.W <= 0 || safe.H <= 0 {
@@ -57,23 +63,96 @@ func LayoutShopScrolled(viewport Viewport, rowCount int, selected ShopTab, offse
 	}
 	layout.Header = Rect{X: layout.Panel.X + pad, Y: layout.Panel.Y + 16, W: layout.Panel.W - 2*pad, H: 56}
 	layout.Close = Rect{X: layout.Header.Right() - 112, Y: layout.Header.Y, W: 112, H: 52}
-	tabW := (layout.Panel.W - 56) / 2
+
+	contentX := layout.Panel.X + pad
+	contentW := maxf(0, layout.Panel.W-2*pad)
 	tabY := layout.Header.Bottom() + 8
-	if layout.Portrait {
-		tabW = (layout.Panel.W - 2*pad - 8) / 2
-	}
-	layout.Tabs = []EconomyTabRect{
-		{Tab: ShopBuyTab, Rect: Rect{X: layout.Panel.X + pad, Y: tabY, W: tabW, H: 52}},
-		{Tab: ShopSellTab, Rect: Rect{X: layout.Panel.X + pad + tabW + 8, Y: tabY, W: tabW, H: 52}},
-	}
-	// Keep the same content inset as the panel header on wide landscape
-	// displays so the last row does not sit against the panel edge.
 	listBottomPad := float32(20)
 	if layout.Portrait {
 		listBottomPad = 16
 	}
-	layout.ListViewport = Rect{X: layout.Panel.X + pad, Y: tabY + 64, W: layout.Panel.W - 2*pad, H: maxf(0, layout.Panel.Bottom()-listBottomPad-(tabY+64))}
+
+	listW := contentW
+	if cartEnabled && !layout.Portrait {
+		cartGap := float32(12)
+		cartW := minf(420, maxf(280, contentW*0.34))
+		if contentW-cartW-cartGap >= 280 {
+			listW = contentW - cartW - cartGap
+			layout.CartPanel = Rect{
+				X: contentX + listW + cartGap,
+				Y: tabY,
+				W: cartW,
+				H: maxf(0, layout.Panel.Bottom()-listBottomPad-tabY),
+			}
+		}
+	}
+
+	tabW := (listW - 8) / 2
+	layout.Tabs = []EconomyTabRect{
+		{Tab: ShopBuyTab, Rect: Rect{X: contentX, Y: tabY, W: tabW, H: 52}},
+		{Tab: ShopSellTab, Rect: Rect{X: contentX + tabW + 8, Y: tabY, W: tabW, H: 52}},
+	}
+	listY := tabY + 64
+	listBottom := layout.Panel.Bottom() - listBottomPad
+
+	if cartEnabled && layout.Portrait {
+		cartGap := float32(12)
+		cartH := minf(280, maxf(190, layout.Panel.H*0.24))
+		minListH := float32(180)
+		if listBottom-listY-cartGap-cartH < minListH {
+			cartH = maxf(150, listBottom-listY-cartGap-minListH)
+		}
+		if cartH > 0 {
+			layout.CartPanel = Rect{
+				X: contentX,
+				Y: listBottom - cartH,
+				W: contentW,
+				H: cartH,
+			}
+			listBottom = layout.CartPanel.Y - cartGap
+		}
+	}
+
+	layout.ListViewport = Rect{X: contentX, Y: listY, W: listW, H: maxf(0, listBottom-listY)}
 	layout.Rows, layout.RowIndices = economyVisibleRows(layout.ListViewport, rowCount, offset)
+
+	if layout.CartPanel.W > 0 && layout.CartPanel.H > 0 {
+		cartPad := float32(10)
+		titleH := float32(38)
+		footerH := float32(58)
+		bodyY := layout.CartPanel.Y + titleH
+		bodyBottom := layout.CartPanel.Bottom() - footerH
+		rowGap := float32(4)
+		rowH := float32(52)
+		available := maxf(0, bodyBottom-bodyY)
+		maxRows := int((available + rowGap) / (rowH + rowGap))
+		if maxRows < 0 {
+			maxRows = 0
+		}
+		visible := minInt(cartCount, maxRows)
+		for i := 0; i < visible; i++ {
+			layout.CartRows = append(layout.CartRows, Rect{
+				X: layout.CartPanel.X + cartPad,
+				Y: bodyY + float32(i)*(rowH+rowGap),
+				W: layout.CartPanel.W - 2*cartPad,
+				H: rowH,
+			})
+		}
+		footerY := layout.CartPanel.Bottom() - footerH + 3
+		confirmW := minf(150, maxf(112, layout.CartPanel.W*0.38))
+		layout.CartConfirm = Rect{
+			X: layout.CartPanel.Right() - cartPad - confirmW,
+			Y: footerY,
+			W: confirmW,
+			H: 48,
+		}
+		layout.CartSubtotal = Rect{
+			X: layout.CartPanel.X + cartPad,
+			Y: footerY,
+			W: maxf(0, layout.CartConfirm.X-layout.CartPanel.X-2*cartPad),
+			H: 48,
+		}
+	}
 	return layout
 }
 
