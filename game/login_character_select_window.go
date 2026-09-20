@@ -45,7 +45,7 @@ func (m *LoginMode) updateCharacterSelectInput(ctx client.Context) {
 }
 
 func (m *LoginMode) updateCharacterSelectWindow(ctx client.Context) {
-	if ctx.Config.Headless {
+	if ctx.Config.Headless || ctx.Config.Render.NoUI {
 		return
 	}
 	opts := gameui.CharacterSelectWindowOptions{
