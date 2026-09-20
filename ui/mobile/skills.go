@@ -72,7 +72,6 @@ func (k Kit) placeSkillList(c *Canvas, model mobileui.MobileSkillsModel, layout 
 	c.Place(k.Panel(), listSurface(layout))
 
 	pad := k.Theme.Metrics.TableCellPadX
-	touch := k.Theme.Metrics.MinTouchTarget
 	for i, row := range layout.Rows {
 		if i >= len(model.Skills) {
 			break
@@ -100,10 +99,8 @@ func (k Kit) placeSkillList(c *Canvas, model mobileui.MobileSkillsModel, layout 
 		c.Place(k.Content(skill.Name, RoleValue), mobileui.Rect{X: textX, Y: row.Y, W: textW, H: half})
 		c.Place(k.Text(skillLevelLabel(skill), RoleMuted), mobileui.Rect{X: textX, Y: row.Y + half, W: textW, H: half})
 
-		if skill.Upgradable {
-			c.Place(k.Button("+", ButtonNormal), mobileui.Rect{
-				X: row.Right() - pad - touch, Y: row.Y + (row.H-touch)/2, W: touch, H: touch,
-			})
+		if i < len(layout.UpgradeButtons) && layout.UpgradeButtons[i].W > 0 {
+			c.Place(k.Button("+", ButtonNormal), layout.UpgradeButtons[i])
 		}
 	}
 }
@@ -175,6 +172,19 @@ func (k Kit) placeSkillDetail(c *Canvas, model mobileui.MobileSkillsModel, layou
 		c.Place(k.Text(row[0], RoleLabel), mobileui.Rect{X: inner.X, Y: y, W: inner.W * 0.4, H: rowH})
 		c.Place(k.Text(row[1], RoleValue), mobileui.Rect{X: inner.X + inner.W*0.4, Y: y, W: inner.W * 0.6, H: rowH})
 		y += rowH
+	}
+	if len(skill.Description) > 0 {
+		descriptionBottom := inner.Bottom()
+		if layout.HotbarButton.W > 0 {
+			descriptionBottom = layout.HotbarButton.Y - pad
+		}
+		if descriptionBottom > y {
+			c.Place(k.Wrapped(joinLines(skill.Description), RoleBody, 0),
+				mobileui.Rect{X: inner.X, Y: y, W: inner.W, H: descriptionBottom - y})
+		}
+	}
+	if layout.HotbarButton.W > 0 {
+		c.Place(k.Button("Add to Bar", ButtonNormal), layout.HotbarButton)
 	}
 }
 
