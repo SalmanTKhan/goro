@@ -24,7 +24,7 @@ type EquipmentSlotRect struct {
 }
 
 type MobileInventoryLayout struct {
-	Safe, Header, TabsArea, CategoryButton, GridViewport, EquipmentViewport, PaperDoll, PaperDollCluster, DetailPanel, DetailIcon, DetailTitle, DetailMeta, DetailDescription, PrimaryAction, SecondaryAction, EquipmentButton, StorageButton, BackButton, QuantityModal Rect
+	Safe, Header, TabsArea, CategoryButton, GridViewport, EquipmentViewport, PaperDoll, PaperDollCluster, DetailPanel, DetailIcon, DetailTitle, DetailMeta, DetailDescription, PrimaryAction, SecondaryAction, ShortcutAction, EquipmentButton, StorageButton, BackButton, QuantityModal Rect
 	QuantityMinus, QuantityPlus, QuantityConfirm, QuantityCancel                                                                                                                                                                                                         Rect
 	Tabs, CategoryOptions                                                                                                                                                                                                                                                []InventoryTabRect
 	Cells                                                                                                                                                                                                                                                                []InventoryCellRect
@@ -132,10 +132,23 @@ func LayoutInventory(viewport Viewport, tokens InventoryTokens, model MobileInve
 		layout.Cells = append(layout.Cells, InventoryCellRect{Index: items[i].Index, Rect: cell})
 	}
 	if state.Selection.HasSelection && layout.DetailPanel.W > 0 {
-		buttonW := maxf(tokens.MinTouchTarget, (layout.DetailPanel.W-3*tokens.Gap)/2)
 		actionEdge, actionHeight := detailActionMetrics(layout.DetailPanel, tokens)
-		layout.PrimaryAction = Rect{layout.DetailPanel.X + tokens.Gap, layout.DetailPanel.Bottom() - actionEdge - actionHeight, buttonW, actionHeight}
-		layout.SecondaryAction = Rect{layout.PrimaryAction.Right() + tokens.Gap, layout.PrimaryAction.Y, layout.PrimaryAction.W, layout.PrimaryAction.H}
+		usableShortcut := state.Selection.Detail.Item.Usable
+		if usableShortcut && layout.DetailPanel.W < 520 {
+			buttonW := maxf(tokens.MinTouchTarget, (layout.DetailPanel.W-3*tokens.Gap)/2)
+			layout.PrimaryAction = Rect{X: layout.DetailPanel.X + tokens.Gap, Y: layout.DetailPanel.Bottom() - actionEdge - actionHeight, W: buttonW, H: actionHeight}
+			layout.SecondaryAction = Rect{X: layout.PrimaryAction.Right() + tokens.Gap, Y: layout.PrimaryAction.Y, W: buttonW, H: actionHeight}
+			layout.ShortcutAction = Rect{X: layout.DetailPanel.X + tokens.Gap, Y: layout.PrimaryAction.Y - tokens.Gap - actionHeight, W: layout.DetailPanel.W - 2*tokens.Gap, H: actionHeight}
+		} else if usableShortcut {
+			buttonW := maxf(tokens.MinTouchTarget, (layout.DetailPanel.W-4*tokens.Gap)/3)
+			layout.PrimaryAction = Rect{X: layout.DetailPanel.X + tokens.Gap, Y: layout.DetailPanel.Bottom() - actionEdge - actionHeight, W: buttonW, H: actionHeight}
+			layout.ShortcutAction = Rect{X: layout.PrimaryAction.Right() + tokens.Gap, Y: layout.PrimaryAction.Y, W: buttonW, H: actionHeight}
+			layout.SecondaryAction = Rect{X: layout.ShortcutAction.Right() + tokens.Gap, Y: layout.PrimaryAction.Y, W: buttonW, H: actionHeight}
+		} else {
+			buttonW := maxf(tokens.MinTouchTarget, (layout.DetailPanel.W-3*tokens.Gap)/2)
+			layout.PrimaryAction = Rect{X: layout.DetailPanel.X + tokens.Gap, Y: layout.DetailPanel.Bottom() - actionEdge - actionHeight, W: buttonW, H: actionHeight}
+			layout.SecondaryAction = Rect{X: layout.PrimaryAction.Right() + tokens.Gap, Y: layout.PrimaryAction.Y, W: layout.PrimaryAction.W, H: layout.PrimaryAction.H}
+		}
 		layoutDetailContent(&layout, tokens)
 	}
 	if state.Quantity.Open {
@@ -289,6 +302,9 @@ func layoutDetailContent(layout *MobileInventoryLayout, tokens InventoryTokens) 
 	descriptionBottom := layout.DetailPanel.Bottom() - tokens.Gap
 	if layout.PrimaryAction.H > 0 {
 		descriptionBottom = layout.PrimaryAction.Y - tokens.Gap
+	}
+	if layout.ShortcutAction.H > 0 && layout.ShortcutAction.Y < descriptionBottom {
+		descriptionBottom = layout.ShortcutAction.Y - tokens.Gap
 	}
 	layout.DetailDescription = Rect{X: layout.DetailPanel.X + tokens.Gap, Y: descriptionY, W: maxf(0, layout.DetailPanel.W-2*tokens.Gap), H: maxf(0, descriptionBottom-descriptionY)}
 }
