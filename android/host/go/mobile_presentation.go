@@ -1903,6 +1903,9 @@ func (p *mobilePresentation) drawCharacterSkills(frame *render.Frame) {
 		drawMobileText(frame, trimText(skill.Name, 24), row.X+64, row.Y+10, colors.text, textScale*0.82)
 		drawMobileText(frame, fmt.Sprintf("Lv %d/%d", skill.Level, skill.MaxLevel), row.X+64, row.Bottom()-17, colors.muted, textScale*0.68)
 		drawMobileText(frame, fmt.Sprintf("SP %d", skill.SPCost), row.Right()-78, row.Y+10, colors.accent, textScale*0.68)
+		if i < len(l.UpgradeButtons) && l.UpgradeButtons[i].W > 0 {
+			drawMobileButton(frame, l.UpgradeButtons[i], "+", colors, textScale*0.88, true)
+		}
 	}
 	if l.Detail.W <= 0 || l.Detail.H <= 0 {
 		return
@@ -1933,8 +1936,16 @@ func (p *mobilePresentation) drawCharacterSkills(frame *render.Frame) {
 	drawMobileText(frame, fmt.Sprintf("Level %d / %d", skill.Level, skill.MaxLevel), iconX+iconSize+14, l.Detail.Y+88, colors.muted, textScale*0.82)
 	drawMobileText(frame, fmt.Sprintf("SP cost %d", skill.SPCost), iconX+iconSize+14, l.Detail.Y+118, colors.muted, textScale*0.82)
 	drawMobileText(frame, fmt.Sprintf("Range %d   Target %s", skill.Range, skillTargetText(skill.TargetMode)), l.Detail.X+18, l.Detail.Y+iconSize+82, colors.muted, textScale*0.82)
-	if skill.Upgradable {
-		drawMobileText(frame, "Upgrade authority not available", l.Detail.X+18, l.Detail.Y+iconSize+114, colors.muted, textScale*0.72)
+	descriptionY := l.Detail.Y + iconSize + 114
+	descriptionBottom := l.Detail.Bottom() - 12
+	if l.HotbarButton.W > 0 {
+		descriptionBottom = l.HotbarButton.Y - 10
+		drawMobileButton(frame, l.HotbarButton, "ADD TO BAR", colors, textScale*0.72, true)
+	}
+	if len(skill.Description) > 0 && descriptionBottom > descriptionY {
+		lineAdvance := float32(22)
+		maxLines := int((descriptionBottom - descriptionY) / lineAdvance)
+		drawMobileRichWrappedTextLimited(frame, mobileDescriptionText(skill.Description), l.Detail.X+18, descriptionY, l.Detail.W-36, lineAdvance, maxLines, colors.muted, textScale*0.68)
 	}
 }
 
