@@ -137,35 +137,52 @@ func LayoutOnlineLogin(viewport Viewport, model MobileOnlineLoginModel) OnlineLo
 		layout.Mode = Rect{X: formX, Y: layout.Submit.Bottom() + 10, W: formW, H: 44}
 
 	case OnlineLoginCharacters:
-		// Match the desktop selector's three-slots-per-page contract, but use
-		// a touch-friendly card row plus a dedicated selected-character info
-		// surface instead of squeezing nine slots into one phone screen.
+		// Match the desktop selector's three-slots-per-page contract. Landscape
+		// uses the wide phone canvas for large paper dolls with the selected
+		// character's stats in a right-side rail; portrait stacks the summary
+		// below the same three-card row.
 		pageTop := layout.Notice.Bottom() + 10
 		footerH := float32(56)
 		footerY := layout.Panel.Bottom() - footerH - 16
-		infoH := float32(132)
-		if portrait {
-			infoH = 174
-		}
 		gap := float32(10)
-		slotAreaBottom := footerY - 26 - gap - infoH - gap
-		slotH := minf(174, maxf(96, slotAreaBottom-pageTop))
-		cellW := (layout.Panel.W - 2*pad - 2*gap) / 3
-		for i := 0; i < 3; i++ {
-			layout.Slots = append(layout.Slots, Rect{
-				X: layout.Panel.X + pad + float32(i)*(cellW+gap),
-				Y: pageTop,
-				W: cellW,
-				H: slotH,
-			})
+		contentBottom := footerY - 28 - gap
+		innerX := layout.Panel.X + pad
+		innerW := layout.Panel.W - 2*pad
+
+		if !portrait {
+			infoW := minf(360, maxf(280, innerW*0.34))
+			slotAreaW := maxf(0, innerW-infoW-gap)
+			cellW := maxf(0, (slotAreaW-2*gap)/3)
+			slotH := maxf(96, contentBottom-pageTop)
+			for i := 0; i < 3; i++ {
+				layout.Slots = append(layout.Slots, Rect{
+					X: innerX + float32(i)*(cellW+gap),
+					Y: pageTop,
+					W: cellW,
+					H: slotH,
+				})
+			}
+			layout.CharacterInfo = Rect{X: innerX + slotAreaW + gap, Y: pageTop, W: infoW, H: slotH}
+		} else {
+			infoH := minf(190, maxf(130, (contentBottom-pageTop)*0.42))
+			slotAreaBottom := contentBottom - infoH - gap
+			slotH := maxf(96, slotAreaBottom-pageTop)
+			cellW := (innerW - 2*gap) / 3
+			for i := 0; i < 3; i++ {
+				layout.Slots = append(layout.Slots, Rect{
+					X: innerX + float32(i)*(cellW+gap),
+					Y: pageTop,
+					W: cellW,
+					H: slotH,
+				})
+			}
+			layout.CharacterInfo = Rect{X: innerX, Y: slotAreaBottom + gap, W: innerW, H: infoH}
 		}
-		infoY := pageTop + slotH + gap
-		layout.CharacterInfo = Rect{X: layout.Panel.X + pad, Y: infoY, W: layout.Panel.W - 2*pad, H: maxf(0, footerY-26-gap-infoY)}
-		layout.PageLabel = Rect{X: layout.Panel.X + pad, Y: footerY - 26, W: layout.Panel.W - 2*pad, H: 22}
+		layout.PageLabel = Rect{X: innerX, Y: footerY - 26, W: innerW, H: 22}
 
 		sideW := minf(154, maxf(96, layout.Panel.W*0.18))
 		actionW := minf(300, maxf(180, layout.Panel.W*0.34))
-		layout.PagePrev = Rect{X: layout.Panel.X + pad, Y: footerY, W: sideW, H: footerH}
+		layout.PagePrev = Rect{X: innerX, Y: footerY, W: sideW, H: footerH}
 		layout.PageNext = Rect{X: layout.Panel.Right() - pad - sideW, Y: footerY, W: sideW, H: footerH}
 		layout.Create = Rect{X: layout.Panel.X + (layout.Panel.W-actionW)/2, Y: footerY, W: actionW, H: footerH}
 
