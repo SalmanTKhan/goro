@@ -92,7 +92,7 @@ func (c *NPCCutinOverlay) drawMobilePortrait(screen *render.Frame) {
 	if th*scale > maxH {
 		scale = maxH / th
 	}
-	drawW, drawH := tw*scale, th*scale
+	drawW := tw * scale
 	marginX := float64(screenBounds.Dx()) * 0.04
 	x := float64(screenBounds.Min.X) + marginX
 	switch c.position {
