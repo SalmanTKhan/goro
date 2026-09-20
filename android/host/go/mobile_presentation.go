@@ -1345,10 +1345,16 @@ func (p *mobilePresentation) drawOnlineStatus(frame *render.Frame) {
 			label := fmt.Sprintf("SLOT %d", entry.Slot+1)
 			if entry.Occupied {
 				label = fmt.Sprintf("%s  LV %d", trimText(entry.Name, 14), entry.Level)
+				previewTop := rect.Y + 34
+				previewBottom := rect.Bottom() - 24
+				if previewBottom > previewTop {
+					p.game.DrawMobileLoginCharacterPreview(frame, entry.Slot,
+						int(rect.X+8), int(previewTop), int(rect.W-16), int(previewBottom-previewTop))
+				}
 			}
-			drawMobileTextCentered(frame, label, mobileui.Rect{X: rect.X + 8, Y: rect.Y + 12, W: rect.W - 16, H: 30}, colors.text, scale*0.66)
+			drawMobileTextCentered(frame, label, mobileui.Rect{X: rect.X + 8, Y: rect.Y + 6, W: rect.W - 16, H: 28}, colors.text, scale*0.62)
 			if entry.Occupied {
-				drawMobileTextCentered(frame, entry.JobName, mobileui.Rect{X: rect.X + 8, Y: rect.Y + 46, W: rect.W - 16, H: 26}, colors.muted, scale*0.52)
+				drawMobileTextCentered(frame, entry.JobName, mobileui.Rect{X: rect.X + 8, Y: rect.Bottom()-24, W: rect.W - 16, H: 18}, colors.muted, scale*0.48)
 			} else {
 				drawMobileTextCentered(frame, "CREATE", mobileui.Rect{X: rect.X + 8, Y: rect.Y + 46, W: rect.W - 16, H: 26}, colors.accent, scale*0.54)
 			}
