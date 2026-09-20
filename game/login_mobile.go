@@ -32,7 +32,10 @@ func (m *LoginMode) MobileLoginModel(ctx client.Context) mobileui.MobileOnlineLo
 
 	if m.phase == loginPhaseCreate {
 		model.Phase = mobileui.OnlineLoginCreate
-		model.Notice = "Creating a character"
+		model.CreateName = m.create.name
+		model.CreateSlot = m.create.slot
+		model.CanSubmit = len([]byte(strings.TrimSpace(m.create.name))) >= charCreateNameMinBytes
+		model.Notice = fmt.Sprintf("Create a character in slot %d.", m.create.slot+1)
 		return model
 	}
 	if m.phase == loginPhaseCharacter {
@@ -193,21 +196,36 @@ func (m *LoginMode) ApplyPlayerCommand(ctx client.Context, command input.PlayerC
 		return false
 
 	case input.CommandOnlineCreateCharacter:
-		if m.phase != loginPhaseCharacter || ctx.Session == nil || ctx.Network == nil {
+		if ctx.Session == nil || ctx.Network == nil {
 			return false
 		}
-		m.selectedSlot = clampCharacterSlot(int(command.Slot), m.maxSlots)
-		if _, occupied := characterBySlot(ctx.Session.Characters, m.selectedSlot); occupied {
-			m.status = "character slot occupied"
+		if m.phase == loginPhaseCharacter {
+			m.selectedSlot = clampCharacterSlot(int(command.Slot), m.maxSlots)
+			if _, occupied := characterBySlot(ctx.Session.Characters, m.selectedSlot); occupied {
+				m.status = "character slot occupied"
+				return false
+			}
+			m.openCharacterCreate(ctx, m.selectedSlot, time.Now())
+			return true
+		}
+		if m.phase != loginPhaseCreate {
 			return false
 		}
-		name := strings.TrimSpace(command.Text)
-		if name == "" {
-			name = fmt.Sprintf("GoroMobile%d", m.selectedSlot)
+		if name := strings.TrimSpace(command.Text); name != "" {
+			m.create.name = appendCharacterNameInput("", name, charCreateNameMaxBytes)
 		}
-		m.create = defaultCharCreateState(m.selectedSlot)
-		m.create.name = name
+		if len([]byte(strings.TrimSpace(m.create.name))) < charCreateNameMinBytes {
+			m.status = "name must be at least 4 characters"
+			return false
+		}
 		return m.submitCharacterCreate(ctx)
+
+	case input.CommandOnlineCancelCharacterCreate:
+		if m.phase != loginPhaseCreate {
+			return false
+		}
+		m.cancelCharacterCreate(time.Now())
+		return true
 
 	case input.CommandOnlineReconnect:
 		if ctx.Network == nil {
