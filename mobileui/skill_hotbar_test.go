@@ -171,3 +171,21 @@ func TestStarterSkillLoadoutSkipsMissingSkills(t *testing.T) {
 		t.Fatalf("partial pack should yield 1/1, got %d / %d", len(skills.List), len(hotkeys.Slots))
 	}
 }
+
+
+func TestTallPortraitSkillsUseCompactGrid(t *testing.T) {
+	viewport := Viewport{Width: 840, Height: 2289, SafeTop: 48, SafeBottom: 96}
+	layout := LayoutHUD(viewport, DefaultTokens(), Fixture("skills-paged"), Navigation{})
+	if len(layout.SkillSlots) != 6 {
+		t.Fatalf("skill slots=%d, want 6", len(layout.SkillSlots))
+	}
+	if layout.SkillSlots[3].Y <= layout.SkillSlots[0].Y {
+		t.Fatalf("portrait skills did not form a second row: %+v", layout.SkillSlots)
+	}
+	if layout.SkillBar.W >= layout.Safe.W*0.60 {
+		t.Fatalf("portrait skill dock is still too wide: bar=%+v safe=%+v", layout.SkillBar, layout.Safe)
+	}
+	if layout.SkillPagePrev.W == 0 || layout.SkillPageNext.W == 0 {
+		t.Fatalf("overflowing portrait hotbar has no page controls: %+v", layout)
+	}
+}

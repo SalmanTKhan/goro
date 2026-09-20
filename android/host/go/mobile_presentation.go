@@ -118,6 +118,7 @@ type mobilePresentation struct {
 	minimapImage       *render.Image
 	minimapSignature   string
 	touch              mobileui.TouchSession
+	hudTouchStart      mobileui.Hit
 	commandDumpKey     string
 	lastPlaying        bool
 	playingInitialized bool
@@ -986,12 +987,21 @@ func (p *mobilePresentation) BeginTouch(id input.TouchID, x, y int) bool {
 	if owner == mobileui.TouchUnclaimed || !p.ConsumeTouch(point) {
 		return false
 	}
-	return p.touch.Begin(point, owner, owner == mobileui.TouchDialog || (p.economyController != nil && p.economyController.Quantity.Open) || p.navigation.Targeting.Mode != input.SkillTargetIdle)
+	p.hudTouchStart = mobileui.Hit{}
+	if owner == mobileui.TouchHUD {
+		p.hudTouchStart = p.hud.HitTest(float32(point.X), float32(point.Y))
+	}
+	if !p.touch.Begin(point, owner, owner == mobileui.TouchDialog || (p.economyController != nil && p.economyController.Quantity.Open) || p.navigation.Targeting.Mode != input.SkillTargetIdle) {
+		p.hudTouchStart = mobileui.Hit{}
+		return false
+	}
+	return true
 }
 
 func (p *mobilePresentation) CancelTouch() {
 	if p != nil {
 		p.touch.Cancel()
+		p.hudTouchStart = mobileui.Hit{}
 	}
 }
 
@@ -1051,6 +1061,8 @@ func (p *mobilePresentation) Release(id input.TouchID, x, y int) {
 	}
 	rawX, rawY := x, y
 	x, y = p.logicalPoint(x, y)
+	startHUDHit := p.hudTouchStart
+	p.hudTouchStart = mobileui.Hit{}
 	owner, moved := p.touch.End(id)
 	if owner == mobileui.TouchUnclaimed || moved {
 		return
@@ -1195,6 +1207,15 @@ func (p *mobilePresentation) Release(id input.TouchID, x, y int) {
 		return
 	}
 	hit := p.hud.HitTest(float32(x), float32(y))
+	if owner == mobileui.TouchHUD {
+		// Bind a tap to the control that owned finger-down. Small finger drift
+		// may remain inside touch slop; re-hit-testing only at finger-up allowed
+		// adjacent actions such as Loot -> Sit to fire accidentally.
+		if startHUDHit.Control == mobileui.ControlNone || hit != startHUDHit {
+			return
+		}
+		hit = startHUDHit
+	}
 	switch hit.Control {
 	case mobileui.ControlMenu:
 		p.navigation.MenuOpen = !p.navigation.MenuOpen

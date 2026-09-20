@@ -215,27 +215,38 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 			x += side + gap
 		}
 	}
+	// The world HUD uses two independent thumb zones. Combat stays fixed to
+	// the lower-right; lower-frequency social/state actions stay on the left.
+	// Their anchors do not depend on whether a target or loot currently exists,
+	// so acquiring a target cannot make the controls jump under the player's
+	// fingers.
 	chatW := minf(380, maxf(240, safe.W*0.30))
 	if portrait {
-		chatW = minf(360, maxf(200, safe.W*0.52))
+		// Portrait cannot afford a full composer and a combat dock on the same
+		// bottom edge. The button opens the full chat surface, so collapse the
+		// HUD affordance to a single left-thumb control.
+		chatW = maxf(tokens.MinTouchTarget, 88)
+		chatHeight = maxf(tokens.MinTouchTarget, 56)
 	}
 	l.ChatBar = Rect{safe.X + tokens.Edge, safe.Bottom() - tokens.Edge - chatHeight, chatW, chatHeight}
 	if l.ChatBar.W > safe.W-2*tokens.Edge {
 		l.ChatBar.W = maxf(0, safe.W-2*tokens.Edge)
 	}
-	chatButtonW := minf(112, l.ChatBar.W)
-	l.ChatButton = Rect{l.ChatBar.Right() - chatButtonW, l.ChatBar.Y, chatButtonW, l.ChatBar.H}
-	chatTextW := maxf(0, l.ChatButton.X-l.ChatBar.X)
-	chatLabelW := minf(52, maxf(36, chatTextW*0.34))
-	if chatLabelW > chatTextW {
-		chatLabelW = chatTextW
+	if portrait {
+		l.ChatButton = l.ChatBar
+	} else {
+		chatButtonW := minf(112, l.ChatBar.W)
+		l.ChatButton = Rect{l.ChatBar.Right() - chatButtonW, l.ChatBar.Y, chatButtonW, l.ChatBar.H}
+		chatTextW := maxf(0, l.ChatButton.X-l.ChatBar.X)
+		chatLabelW := minf(52, maxf(36, chatTextW*0.34))
+		if chatLabelW > chatTextW {
+			chatLabelW = chatTextW
+		}
+		l.ChatLabel = Rect{l.ChatBar.X + 10, l.ChatBar.Y, maxf(0, chatLabelW-10), l.ChatBar.H}
+		promptX := l.ChatLabel.Right() + 8
+		l.ChatPrompt = Rect{promptX, l.ChatBar.Y, maxf(0, l.ChatButton.X-promptX-8), l.ChatBar.H}
 	}
-	l.ChatLabel = Rect{l.ChatBar.X + 10, l.ChatBar.Y, maxf(0, chatLabelW-10), l.ChatBar.H}
-	promptX := l.ChatLabel.Right() + 8
-	l.ChatPrompt = Rect{promptX, l.ChatBar.Y, maxf(0, l.ChatButton.X-promptX-8), l.ChatBar.H}
-	// Combat controls live in the lower-right thumb zone. A selected target
-	// gets a dedicated action button, while the target identity/HP frame moves
-	// to top-center so combat information stays near the player's focal area.
+
 	skillSize := maxf(tokens.MinTouchTarget, tokens.SkillSize)
 	if !portrait {
 		skillSize = skillWidth
@@ -243,11 +254,22 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 	if portrait && safe.W < 600 {
 		skillSize = maxf(72, minf(skillSize, safe.W*0.20))
 	}
-	skillY := l.ChatBar.Y - overlayGap - skillSize
-	if !portrait {
-		skillY = safe.Bottom() - tokens.Edge - skillHeight
+
+	// Reserve the primary-action lane even without a target. This makes skill,
+	// loot, and utility geometry stable across target acquisition/loss.
+	actionSize := maxf(tokens.MinTouchTarget, skillSize+24)
+	if portrait {
+		actionSize = maxf(96, skillSize+16)
+		if safe.W < 600 {
+			actionSize = maxf(88, skillSize+18)
+		}
 	}
+	dockGap := maxf(10, tokens.Gap)
+	dockRight := safe.Right() - tokens.Edge
+	dockBottom := safe.Bottom() - tokens.Edge
+	primarySlot := Rect{X: dockRight - actionSize, Y: dockBottom - actionSize, W: actionSize, H: actionSize}
 	if model.Target.Visible && model.Target.ID != 0 {
+		l.PrimaryAction = primarySlot
 		if portrait {
 			targetW := minf(panelWidth, maxf(220, safe.W-2*tokens.Edge))
 			targetTop := maxf(l.PlayerPanel.Bottom(), l.Minimap.Bottom())
@@ -260,37 +282,11 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 			l.TargetPanel = Rect{safe.X + (safe.W-targetW)/2, safe.Y + tokens.Edge, targetW, targetHeight}
 		}
 	}
-	// The player panel occupies the left rail on landscape displays. Nearby
-	// loot stays below it and stops above the collapsed chat strip.
-	lootTop := l.PlayerPanel.Bottom() + overlayGap
-	if portrait {
-		lootTop = maxf(l.StatusArea.Bottom(), l.TargetPanel.Bottom()) + tokens.Gap
-	}
-	lootBottom := l.ChatBar.Y - overlayGap
-	lootHeaderHeight := float32(32)
-	lootRowHeight := maxf(tokens.MinTouchTarget, 52)
-	maxLootRows := int((lootBottom - lootTop - lootHeaderHeight) / lootRowHeight)
-	if maxLootRows < 0 {
-		maxLootRows = 0
-	}
-	visibleLoot := len(model.Loot)
-	if visibleLoot > maxLootRows {
-		visibleLoot = maxLootRows
-	}
-	if visibleLoot > 0 {
-		lootWidth := minf(360, maxf(240, safe.W*0.30))
-		if lootWidth > safe.W-2*tokens.Edge {
-			lootWidth = maxf(0, safe.W-2*tokens.Edge)
-		}
-		l.LootPanel = Rect{safe.X + tokens.Edge, lootTop, lootWidth, lootHeaderHeight + float32(visibleLoot)*lootRowHeight}
-		for i := 0; i < visibleLoot; i++ {
-			l.LootRows = append(l.LootRows, Rect{l.LootPanel.X + 4, l.LootPanel.Y + lootHeaderHeight + float32(i)*lootRowHeight, l.LootPanel.W - 8, lootRowHeight - 4})
-		}
-	}
+
 	perPage := visibleSkillCap(safe, portrait)
 	l.SkillsPerPage = perPage
 	visibleSkills := minInt(perPage, len(model.Skills))
-	if visibleSkills > 0 && portrait {
+	if visibleSkills > 0 {
 		pages := (len(model.Skills) + perPage - 1) / perPage
 		page := navigation.SkillPage
 		if page < 0 {
@@ -301,83 +297,71 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 		}
 		l.SkillStart = page * perPage
 	}
-	barW := float32(visibleSkills) * skillWidth
-	if visibleSkills > 1 {
-		barW += float32(visibleSkills-1) * tokens.Gap
+
+	skillColumns, skillRows := visibleSkills, 1
+	if portrait && visibleSkills > 3 {
+		skillColumns = 3
+		skillRows = (visibleSkills + skillColumns - 1) / skillColumns
 	}
-	if portrait && barW > safe.W-2*tokens.Edge {
-		barW = safe.W - 2*tokens.Edge
+	if skillColumns < 1 {
+		skillRows = 0
 	}
-	pageGap := float32(0)
-	if portrait && len(model.Skills) > visibleSkills {
-		pageGap = tokens.Gap
-		buttonSize := maxf(tokens.MinTouchTarget, skillSize)
-		available := safe.W - 2*tokens.Edge - 2*(buttonSize+tokens.Gap)
-		if model.Target.Visible && model.Target.ID != 0 {
-			available -= buttonSize + tokens.Gap
-		}
-		if available < 0 {
-			available = 0
-		}
-		barW = minf(barW, available)
-		right := safe.Right() - tokens.Edge
-		if model.Target.Visible && model.Target.ID != 0 {
-			l.PrimaryAction = Rect{right - buttonSize, skillY, buttonSize, buttonSize}
-			right = l.PrimaryAction.X - tokens.Gap
-		}
-		groupW := barW + 2*(buttonSize+tokens.Gap)
-		groupX := right - groupW
-		l.SkillPagePrev = Rect{groupX, skillY, buttonSize, buttonSize}
-		l.SkillBar = Rect{l.SkillPagePrev.Right() + tokens.Gap, skillY, barW, buttonSize}
-		l.SkillPageNext = Rect{l.SkillBar.Right() + tokens.Gap, l.SkillBar.Y, buttonSize, buttonSize}
-	} else {
-		right := safe.Right() - tokens.Edge
-		if model.Target.Visible && model.Target.ID != 0 {
-			actionSize := maxf(tokens.MinTouchTarget, skillHeight+24)
-			l.PrimaryAction = Rect{right - actionSize, safe.Bottom() - tokens.Edge - actionSize, actionSize, actionSize}
-			right = l.PrimaryAction.X - tokens.Gap
-		}
-		l.SkillBar = Rect{right - barW, skillY, barW, skillHeight}
+	barW, barH := float32(0), float32(0)
+	if skillColumns > 0 {
+		barW = float32(skillColumns)*skillSize + float32(skillColumns-1)*tokens.Gap
+		barH = float32(skillRows)*skillSize + float32(skillRows-1)*tokens.Gap
 	}
+	skillRight := primarySlot.X - dockGap
+	l.SkillBar = Rect{X: skillRight - barW, Y: dockBottom - barH, W: barW, H: barH}
 	for i := 0; i < visibleSkills; i++ {
-		slotW := skillWidth
-		if pageGap > 0 {
-			slotW = l.SkillBar.W / float32(visibleSkills)
-			if visibleSkills > 1 {
-				slotW -= tokens.Gap * float32(visibleSkills-1) / float32(visibleSkills)
-			}
+		row, col := 0, i
+		if portrait && skillColumns > 0 {
+			row, col = i/skillColumns, i%skillColumns
 		}
-		layoutX := l.SkillBar.X + float32(i)*(slotW+tokens.Gap)
-		l.SkillSlots = append(l.SkillSlots, Rect{layoutX, l.SkillBar.Y, slotW, l.SkillBar.H})
+		x := l.SkillBar.X + float32(col)*(skillSize+tokens.Gap)
+		y := l.SkillBar.Y + float32(row)*(skillSize+tokens.Gap)
+		l.SkillSlots = append(l.SkillSlots, Rect{X: x, Y: y, W: skillSize, H: skillSize})
 	}
 
-	// Three one-tap world utilities sit directly above the combat bar. They are
-	// deliberately separate from the overflow menu: sit/stand and pickup are
-	// moment-to-moment gameplay actions, and emotes need to be reachable without
-	// covering the world with a full screen. Skill targeting temporarily owns
-	// this strip, so hide the utilities while its Cancel banner is active.
+	if len(model.Skills) > visibleSkills && l.SkillBar.W > 0 {
+		pageSize := maxf(tokens.MinTouchTarget, 52)
+		pairW := 2*pageSize + tokens.Gap
+		pageX := l.SkillBar.X + (l.SkillBar.W-pairW)/2
+		if pageX < safe.X+tokens.Edge {
+			pageX = safe.X + tokens.Edge
+		}
+		pageY := l.SkillBar.Y - dockGap - pageSize
+		if pageY < safe.Y+tokens.Edge {
+			pageY = safe.Y + tokens.Edge
+		}
+		l.SkillPagePrev = Rect{X: pageX, Y: pageY, W: pageSize, H: pageSize}
+		l.SkillPageNext = Rect{X: pageX + pageSize + tokens.Gap, Y: pageY, W: pageSize, H: pageSize}
+	}
+
+	// Low-frequency state/social controls live with the left thumb. Loot is a
+	// combat-frequency action, so it gets its own isolated control above the
+	// primary-action lane instead of sharing a three-button strip with Sit.
 	if navigation.Targeting.Mode == input.SkillTargetIdle && !navigation.MenuOpen {
 		utilityH := maxf(tokens.MinTouchTarget, 52)
-		// "Emote" is the widest authored label. 110 logical pixels leaves
-		// enough room for the real 28px mobile font while still fitting all
-		// three actions across the narrow 390px qualification viewport.
-		utilityW := float32(110)
-		utilityGap := maxf(8, tokens.Gap)
-		utilityRight := safe.Right() - tokens.Edge
-		if !portrait && l.PrimaryAction.W > 0 && l.SkillBar.Right() > safe.X {
-			// In landscape the taller Attack/Talk action extends into this
-			// utility row. The skill bar has already moved left, so anchor to
-			// its right edge. Portrait keeps the row above the combat action and
-			// can use the full safe width.
-			utilityRight = l.SkillBar.Right()
+		utilityGap := maxf(10, tokens.Gap)
+		utilityW := float32(96)
+		if portrait {
+			utilityW = l.ChatBar.W
 		}
-		utilityY := skillY - utilityGap - utilityH
-		if utilityY < safe.Y+tokens.Edge {
-			utilityY = safe.Y + tokens.Edge
+		l.SitAction = Rect{X: l.ChatBar.X, Y: l.ChatBar.Y - utilityGap - utilityH, W: utilityW, H: utilityH}
+		if portrait {
+			l.EmoteAction = Rect{X: l.ChatBar.X, Y: l.SitAction.Y - utilityGap - utilityH, W: utilityW, H: utilityH}
+		} else {
+			l.EmoteAction = Rect{X: l.SitAction.Right() + utilityGap, Y: l.SitAction.Y, W: maxf(104, utilityW), H: utilityH}
 		}
-		l.EmoteAction = Rect{X: utilityRight - utilityW, Y: utilityY, W: utilityW, H: utilityH}
-		l.LootAction = Rect{X: l.EmoteAction.X - utilityGap - utilityW, Y: utilityY, W: utilityW, H: utilityH}
-		l.SitAction = Rect{X: l.LootAction.X - utilityGap - utilityW, Y: utilityY, W: utilityW, H: utilityH}
+
+		lootW := minf(primarySlot.W, 112)
+		l.LootAction = Rect{
+			X: primarySlot.X + (primarySlot.W-lootW)/2,
+			Y: primarySlot.Y - utilityGap - utilityH,
+			W: lootW,
+			H: utilityH,
+		}
 
 		if navigation.EmoteOpen && len(model.Emotes) > 0 {
 			columns := 6
@@ -392,11 +376,20 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 			emoteGap, pad := float32(8), float32(10)
 			panelW := 2*pad + float32(columns)*buttonW + float32(columns-1)*emoteGap
 			panelH := 2*pad + float32(rows)*buttonH + float32(rows-1)*emoteGap
-			panelX := utilityRight - panelW
+			panelX := l.EmoteAction.X
+			if portrait {
+				panelX = l.EmoteAction.Right() + utilityGap
+			}
+			if panelX+panelW > safe.Right()-tokens.Edge {
+				panelX = safe.Right() - tokens.Edge - panelW
+			}
 			if panelX < safe.X+tokens.Edge {
 				panelX = safe.X + tokens.Edge
 			}
-			panelY := utilityY - utilityGap - panelH
+			panelY := l.EmoteAction.Y - utilityGap - panelH
+			if portrait {
+				panelY = l.EmoteAction.Y
+			}
 			if panelY < safe.Y+tokens.Edge {
 				panelY = safe.Y + tokens.Edge
 			}
@@ -409,9 +402,58 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 			}
 		}
 	}
-	if navigation.Targeting.Mode != input.SkillTargetIdle {
+
+	// The nearby-loot list occupies the left rail and stops before the left
+	// utility stack. It never competes with the right combat dock.
+	lootTop := l.PlayerPanel.Bottom() + overlayGap
+	if portrait {
+		lootTop = maxf(l.StatusArea.Bottom(), l.TargetPanel.Bottom()) + tokens.Gap
+	}
+	lootBottom := l.ChatBar.Y - overlayGap
+	for _, reserved := range []Rect{l.SitAction, l.EmoteAction} {
+		if reserved.W > 0 && reserved.Y < lootBottom {
+			lootBottom = reserved.Y - overlayGap
+		}
+	}
+	lootHeaderHeight := float32(32)
+	lootRowHeight := maxf(tokens.MinTouchTarget, 52)
+	maxLootRows := int((lootBottom - lootTop - lootHeaderHeight) / lootRowHeight)
+	if maxLootRows < 0 {
+		maxLootRows = 0
+	}
+	visibleLoot := len(model.Loot)
+	if visibleLoot > maxLootRows {
+		visibleLoot = maxLootRows
+	}
+	if visibleLoot > 0 {
+		lootWidth := minf(360, maxf(240, safe.W*0.30))
+		if portrait {
+			lootWidth = minf(lootWidth, maxf(0, primarySlot.X-safe.X-2*tokens.Edge))
+		}
+		if lootWidth > safe.W-2*tokens.Edge {
+			lootWidth = maxf(0, safe.W-2*tokens.Edge)
+		}
+		if lootWidth >= tokens.MinTouchTarget {
+			l.LootPanel = Rect{safe.X + tokens.Edge, lootTop, lootWidth, lootHeaderHeight + float32(visibleLoot)*lootRowHeight}
+			for i := 0; i < visibleLoot; i++ {
+				l.LootRows = append(l.LootRows, Rect{l.LootPanel.X + 4, l.LootPanel.Y + lootHeaderHeight + float32(i)*lootRowHeight, l.LootPanel.W - 8, lootRowHeight - 4})
+			}
+		}
+	}
+
+	combatDockTop := primarySlot.Y
+	if l.SkillBar.W > 0 && l.SkillBar.Y < combatDockTop {
+		combatDockTop = l.SkillBar.Y
+	}
+	if l.SkillPagePrev.W > 0 && l.SkillPagePrev.Y < combatDockTop {
+		combatDockTop = l.SkillPagePrev.Y
+	}
+	if l.LootAction.W > 0 && l.LootAction.Y < combatDockTop {
+		combatDockTop = l.LootAction.Y
+	}
+	if navigation.Targeting.Mode != input.SkillTargetIdle {	if navigation.Targeting.Mode != input.SkillTargetIdle {
 		bannerW, bannerH := minf(440, maxf(300, safe.W*0.34)), float32(52)
-		bannerY := l.SkillBar.Y - tokens.Gap - bannerH
+		bannerY := combatDockTop - tokens.Gap - bannerH
 		if portrait && l.TargetPanel.H > 0 {
 			bannerY = l.TargetPanel.Bottom() + tokens.Gap
 		}

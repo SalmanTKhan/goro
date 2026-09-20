@@ -283,7 +283,11 @@ func (k Kit) placeChatBar(c *Canvas, layout mobileui.HUDLayout) {
 	}
 	c.Place(k.Panel(), layout.ChatBar)
 	if layout.ChatButton.W > 0 {
-		c.Place(k.Button("Open", ButtonNormal), layout.ChatButton)
+		label := "Open"
+		if layout.ChatButton.W >= layout.ChatBar.W-1 {
+			label = "Chat"
+		}
+		c.Place(k.Button(label, ButtonNormal), layout.ChatButton)
 	}
 	// The layout reserves a narrow "Chat" caption beside the prompt, sized for
 	// the old bitmap text; at mobile text size the two overlap. The Open button

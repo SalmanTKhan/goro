@@ -55,7 +55,7 @@ func TestLayoutFitsSupportedViewports(t *testing.T) {
 
 func TestFoldOuterHUDAnchoring(t *testing.T) {
 	layout := LayoutHUD(FoldOuterViewport(), DefaultTokens(), Fixture("normal"), Navigation{})
-	if layout.SkillBar.W != 388 || layout.SkillBar.X != 1864 || layout.SkillBar.Y != 728 {
+	if layout.SkillBar.W != 388 || layout.SkillBar.X != 1740 || layout.SkillBar.Y != 728 {
 		t.Fatalf("unexpected Fold skill bar: %+v", layout.SkillBar)
 	}
 	if layout.Menu.X != 2188 || layout.Minimap.X != 1960 || layout.Minimap.W != 216 {
@@ -215,6 +215,56 @@ func TestStatusArtworkGetsConcreteIconSlots(t *testing.T) {
 	for i, slot := range layout.StatusSlots {
 		if slot.W <= 0 || slot.H <= 0 || !layout.StatusArea.Contains(slot.X, slot.Y) || slot.Right() > layout.StatusArea.Right()+0.01 {
 			t.Fatalf("status slot %d escaped status area: slot=%+v area=%+v", i, slot, layout.StatusArea)
+		}
+	}
+}
+
+
+func TestCombatDockDoesNotShiftWhenTargetAppears(t *testing.T) {
+	for _, viewport := range []Viewport{
+		FoldOuterViewport(),
+		{Width: 840, Height: 2289, SafeTop: 48, SafeBottom: 96},
+		{Width: 390, Height: 844, SafeTop: 24, SafeBottom: 24},
+	} {
+		idleModel := Fixture("normal")
+		targetModel := idleModel
+		monster := Fixture("monster")
+		targetModel.Target = monster.Target
+
+		idle := LayoutHUD(viewport, DefaultTokens(), idleModel, Navigation{})
+		targeted := LayoutHUD(viewport, DefaultTokens(), targetModel, Navigation{})
+		if idle.SkillBar != targeted.SkillBar {
+			t.Fatalf("skill bar shifted on target acquisition viewport=%+v idle=%+v target=%+v", viewport, idle.SkillBar, targeted.SkillBar)
+		}
+		if idle.LootAction != targeted.LootAction || idle.SitAction != targeted.SitAction || idle.EmoteAction != targeted.EmoteAction {
+			t.Fatalf("utility controls shifted on target acquisition viewport=%+v idle=%+v target=%+v", viewport, idle, targeted)
+		}
+		if targeted.PrimaryAction.W < DefaultTokens().MinTouchTarget || targeted.PrimaryAction.H < DefaultTokens().MinTouchTarget {
+			t.Fatalf("targeted primary action is not touch safe: %+v", targeted.PrimaryAction)
+		}
+	}
+}
+
+func TestLootIsSeparatedFromSit(t *testing.T) {
+	for _, viewport := range []Viewport{
+		FoldOuterViewport(),
+		{Width: 840, Height: 2289, SafeTop: 48, SafeBottom: 96},
+		{Width: 390, Height: 844, SafeTop: 24, SafeBottom: 24},
+	} {
+		layout := LayoutHUD(viewport, DefaultTokens(), Fixture("loot-basic"), Navigation{})
+		if layout.LootAction.Intersects(layout.SitAction) {
+			t.Fatalf("loot and sit overlap viewport=%+v loot=%+v sit=%+v", viewport, layout.LootAction, layout.SitAction)
+		}
+		dx := layout.LootAction.X - layout.SitAction.Right()
+		if dx < 0 {
+			dx = layout.SitAction.X - layout.LootAction.Right()
+		}
+		dy := layout.LootAction.Y - layout.SitAction.Bottom()
+		if dy < 0 {
+			dy = layout.SitAction.Y - layout.LootAction.Bottom()
+		}
+		if dx < 24 && dy < 24 {
+			t.Fatalf("loot and sit are too close for distinct thumb actions viewport=%+v loot=%+v sit=%+v", viewport, layout.LootAction, layout.SitAction)
 		}
 	}
 }
