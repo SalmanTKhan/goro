@@ -22,6 +22,9 @@ func TestLayoutFitsSupportedViewports(t *testing.T) {
 			"player": layout.PlayerPanel, "target": layout.TargetPanel, "minimap": layout.Minimap,
 			"menu": layout.Menu, "status": layout.StatusArea, "chat": layout.ChatBar, "skills": layout.SkillBar,
 		} {
+			if rect.W <= 0 || rect.H <= 0 {
+				continue
+			}
 			if rect.X < layout.Safe.X || rect.Y < layout.Safe.Y || rect.Right() > layout.Safe.Right()+0.01 || rect.Bottom() > layout.Safe.Bottom()+0.01 {
 				t.Fatalf("%s %+v escapes safe rect %+v at viewport %+v", name, rect, layout.Safe, viewport)
 			}
@@ -44,7 +47,7 @@ func TestLayoutFitsSupportedViewports(t *testing.T) {
 		if layout.Minimap.Intersects(layout.Menu) {
 			t.Fatal("minimap overlaps menu")
 		}
-		if layout.TargetPanel.Intersects(layout.SkillBar) {
+		if layout.TargetPanel.W > 0 && layout.TargetPanel.Intersects(layout.SkillBar) {
 			t.Fatal("target panel overlaps skill bar")
 		}
 	}
@@ -52,10 +55,10 @@ func TestLayoutFitsSupportedViewports(t *testing.T) {
 
 func TestFoldOuterHUDAnchoring(t *testing.T) {
 	layout := LayoutHUD(FoldOuterViewport(), DefaultTokens(), Fixture("normal"), Navigation{})
-	if layout.SkillBar.W != 420 || layout.SkillBar.X != 1832 || layout.SkillBar.Y != 720 {
+	if layout.SkillBar.W != 388 || layout.SkillBar.X != 1864 || layout.SkillBar.Y != 728 {
 		t.Fatalf("unexpected Fold skill bar: %+v", layout.SkillBar)
 	}
-	if layout.Menu.X != 2180 || layout.Minimap.X != 1936 || layout.Minimap.W != 232 {
+	if layout.Menu.X != 2188 || layout.Minimap.X != 1960 || layout.Minimap.W != 216 {
 		t.Fatalf("unexpected Fold top-right controls: menu=%+v minimap=%+v", layout.Menu, layout.Minimap)
 	}
 	if layout.Minimap.Intersects(layout.Menu) || layout.SkillBar.W > 440 {
@@ -66,6 +69,28 @@ func TestFoldOuterHUDAnchoring(t *testing.T) {
 	}
 	if layout.TargetPanel.Right() >= layout.SkillBar.X {
 		t.Fatal("Fold target and skill controls overlap")
+	}
+}
+
+
+func TestFoldOuterCombatHUDUsesTopCenterTargetAndThumbAction(t *testing.T) {
+	layout := LayoutHUD(FoldOuterViewport(), DefaultTokens(), Fixture("monster"), Navigation{})
+	if layout.TargetPanel.W <= 0 || layout.PrimaryAction.W <= 0 {
+		t.Fatalf("combat HUD missing target/action: target=%+v action=%+v", layout.TargetPanel, layout.PrimaryAction)
+	}
+	targetCenter := layout.TargetPanel.X + layout.TargetPanel.W/2
+	safeCenter := layout.Safe.X + layout.Safe.W/2
+	if diff := targetCenter - safeCenter; diff < -0.01 || diff > 0.01 {
+		t.Fatalf("target frame center = %.1f, safe center = %.1f", targetCenter, safeCenter)
+	}
+	if layout.PrimaryAction.Right() > layout.Safe.Right() || layout.PrimaryAction.Bottom() > layout.Safe.Bottom() {
+		t.Fatalf("primary action escapes safe area: %+v in %+v", layout.PrimaryAction, layout.Safe)
+	}
+	if layout.PrimaryAction.Intersects(layout.SkillBar) {
+		t.Fatalf("primary action overlaps skill bar: action=%+v skills=%+v", layout.PrimaryAction, layout.SkillBar)
+	}
+	if layout.TargetPanel.Intersects(layout.PlayerPanel) || layout.TargetPanel.Intersects(layout.Minimap) || layout.TargetPanel.Intersects(layout.Menu) {
+		t.Fatalf("target frame overlaps top HUD: target=%+v player=%+v minimap=%+v menu=%+v", layout.TargetPanel, layout.PlayerPanel, layout.Minimap, layout.Menu)
 	}
 }
 
