@@ -403,7 +403,9 @@ func (g *Game) MobileHUDModel() mobileui.MobileHUDModel {
 		model.Player.Sitting = g.world.Player.Sitting
 	}
 	enrichMobileStatuses(&model, g.session)
-	model.Emotes = mobileQuickEmotes()
+	if g.network != nil {
+		model.Emotes = mobileQuickEmotes()
+	}
 
 	if g.resource != nil {
 		for i := range model.Skills {
