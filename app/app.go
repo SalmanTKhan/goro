@@ -583,6 +583,13 @@ func (g *Game) DrawMobileSkillIcon(screen *render.Frame, skill mobileui.MobileSk
 	g.modes.DrawMobileSkillIcon(screen, skill.SkillID, x, y, size)
 }
 
+func (g *Game) DrawMobileLoginCharacterPreview(screen *render.Frame, slot int, x, y, width, height int) {
+	if g == nil || g.modes == nil {
+		return
+	}
+	g.modes.DrawMobileLoginCharacterPreview(screen, slot, x, y, width, height)
+}
+
 // DrawMobileProfilePreview renders a draft appearance through the production
 // humanoid sprite path while keeping draft state outside the renderer.
 func (g *Game) DrawMobileProfilePreview(screen *render.Frame, profile mobileui.MobileProfileModel, x, y, width, height int) {
