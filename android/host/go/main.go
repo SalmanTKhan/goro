@@ -450,6 +450,8 @@ func (h *host) renderLoop() {
 	var surface *wgpu.Surface
 	var surfaceFormat gputypes.TextureFormat
 	var surfaceConfigured bool
+	var surfaceWindow uintptr
+	var surfaceNeedsGPURebuild bool
 	var nextSurfaceConfigureAttempt time.Time
 	var state = input.NewState()
 	var goroRenderer *render.GPURenderer
@@ -503,6 +505,131 @@ func (h *host) renderLoop() {
 	ticker := time.NewTicker(16 * time.Millisecond)
 	defer ticker.Stop()
 
+	rebuildGPUStack := func(window uintptr) error {
+		if window == 0 {
+			return fmt.Errorf("gpu rebuild: native window is nil")
+		}
+		androidLog(fmt.Sprintf("stage=gpu-rebuild begin size=%dx%d", width, height))
+		surfaceConfigured = false
+
+		newInstance, err := wgpu.CreateInstance(&wgpu.InstanceDescriptor{Backends: gputypes.BackendsVulkan})
+		if err != nil {
+			return fmt.Errorf("gpu rebuild instance: %w", err)
+		}
+		var newSurface *wgpu.Surface
+		var newAdapter *wgpu.Adapter
+		var newDevice *wgpu.Device
+		var newRenderer *render.GPURenderer
+		cleanupNew := func() {
+			if newRenderer != nil {
+				newRenderer.Release()
+				newRenderer = nil
+			}
+			if newSurface != nil {
+				newSurface.Release()
+				newSurface = nil
+			}
+			if newDevice != nil {
+				newDevice.Release()
+				newDevice = nil
+			}
+			if newAdapter != nil {
+				newAdapter.Release()
+				newAdapter = nil
+			}
+			if newInstance != nil {
+				newInstance.Release()
+				newInstance = nil
+			}
+		}
+
+		newSurface, err = newInstance.CreateSurfaceUnsafe(wgpu.SurfaceTargetFromAndroidNativeWindow(window))
+		if err != nil {
+			cleanupNew()
+			return fmt.Errorf("gpu rebuild surface: %w", err)
+		}
+		newAdapter, err = newInstance.RequestAdapter(&wgpu.RequestAdapterOptions{
+			CompatibleSurface: newSurface,
+			PowerPreference:   wgpu.PowerPreferenceHighPerformance,
+		})
+		if err != nil {
+			cleanupNew()
+			return fmt.Errorf("gpu rebuild adapter: %w", err)
+		}
+		if newAdapter == nil {
+			cleanupNew()
+			return fmt.Errorf("gpu rebuild adapter: nil adapter")
+		}
+		info := newAdapter.Info()
+		androidLog(fmt.Sprintf("stage=gpu-rebuild adapter name=%q backend=%s", info.Name, info.Backend))
+
+		newDevice, err = newAdapter.RequestDevice(nil)
+		if err != nil {
+			cleanupNew()
+			return fmt.Errorf("gpu rebuild device: %w", err)
+		}
+		newFormat, err := configureSurface(newSurface, newAdapter, newDevice, width, height, surfaceVSync)
+		if err != nil {
+			cleanupNew()
+			return fmt.Errorf("gpu rebuild surface configure: %w", err)
+		}
+		context, err := render.NewRawGPUContext(newDevice, newDevice.Queue(), newFormat)
+		if err != nil {
+			cleanupNew()
+			return fmt.Errorf("gpu rebuild context: %w", err)
+		}
+		newRenderer, err = render.NewGPURenderer(context, config.RenderConfig{Stats: false})
+		if err != nil {
+			cleanupNew()
+			return fmt.Errorf("gpu rebuild renderer: %w", err)
+		}
+
+		// The replacement stack is fully usable before we tear down the old
+		// device. Game/session state and CPU-side render assets remain alive;
+		// the fresh renderer lazily uploads those assets on subsequent frames.
+		if goroRenderer != nil {
+			goroRenderer.Release()
+		}
+		if device != nil {
+			device.Release()
+		}
+		if adapter != nil {
+			adapter.Release()
+		}
+		if instance != nil {
+			instance.Release()
+		}
+		instance = newInstance
+		surface = newSurface
+		adapter = newAdapter
+		device = newDevice
+		goroRenderer = newRenderer
+		surfaceFormat = newFormat
+		surfaceConfigured = true
+		surfaceNeedsGPURebuild = false
+		nextSurfaceConfigureAttempt = time.Time{}
+
+		// Ownership has transferred into the host fields above.
+		newInstance = nil
+		newSurface = nil
+		newAdapter = nil
+		newDevice = nil
+		newRenderer = nil
+
+		frameBuffer = nil
+		if offlineGame != nil {
+			offlineGame.Resize(width, height)
+		}
+		if mobile != nil {
+			mobile.Resize(width, height)
+		}
+		if desktop != nil {
+			desktop.Resize(width, height)
+		}
+		androidLog(fmt.Sprintf("stage=gpu-rebuild ready format=%s size=%dx%d", surfaceFormat, width, height))
+		return nil
+	}
+
 	initDevice := func(window uintptr) error {
 		surfaceStartedAt = time.Now()
 		mapReadyAt = time.Time{}
@@ -514,54 +641,18 @@ func (h *host) renderLoop() {
 		phaseWindow.Reset()
 		peakRSS = 0
 
-		// Rotation/fold-posture changes can destroy and recreate only the Android
-		// Surface while the process, game, GPU device, and texture cache remain
-		// valid. Rebinding that new native window to the existing GPU context
-		// avoids replacing the device underneath already-resident game resources.
+		// A replacement Android ANativeWindow is a new presentation target. With
+		// gogpu/wgpu the adapter selected for the previous surface may report no
+		// same-backend capabilities for that replacement forever. Recreate only
+		// the GPU presentation stack while preserving the live game/session.
 		if instance != nil && adapter != nil && device != nil && goroRenderer != nil && offlineGame != nil {
-			androidLog(fmt.Sprintf("stage=surface-rebind begin size=%dx%d", width, height))
-			var rebindErr error
-			surface, rebindErr = instance.CreateSurfaceUnsafe(wgpu.SurfaceTargetFromAndroidNativeWindow(window))
-			if rebindErr != nil {
-				androidLog(fmt.Sprintf("stage=surface-rebind error=%v", rebindErr))
-				return fmt.Errorf("surface rebind: %w", rebindErr)
-			}
-			surfaceConfigured = false
-			nextSurfaceConfigureAttempt = time.Time{}
-			previousFormat := surfaceFormat
-			configuredFormat, rebindErr := configureSurface(surface, adapter, device, width, height, surfaceVSync)
-			if rebindErr == errSurfaceCapabilitiesUnavailable {
-				// Android may deliver surfaceCreated before the replacement native
-				// window is ready to report Vulkan presentation capabilities. Keep
-				// the new WGPU surface alive and let surfaceChanged/resume finish the
-				// bind instead of guessing a swapchain format.
-				nextSurfaceConfigureAttempt = time.Now().Add(50 * time.Millisecond)
-				androidLog("stage=surface-rebind deferred reason=capabilities-empty")
+			androidLog(fmt.Sprintf("stage=surface-rebind rebuild-gpu size=%dx%d", width, height))
+			if rebuildErr := rebuildGPUStack(window); rebuildErr != nil {
+				surfaceNeedsGPURebuild = true
+				nextSurfaceConfigureAttempt = time.Now().Add(100 * time.Millisecond)
+				androidLog(fmt.Sprintf("stage=gpu-rebuild deferred error=%v", rebuildErr))
 				return nil
 			}
-			if rebindErr != nil {
-				surface.Release()
-				surface = nil
-				return rebindErr
-			}
-			if previousFormat != configuredFormat {
-				// The existing renderer's pipelines target the previous swapchain
-				// format. A format change is exceptional on the same Android device;
-				// fail explicitly rather than drawing with incompatible pipelines.
-				surface.Release()
-				surface = nil
-				return fmt.Errorf("surface format changed during rebind: %s -> %s", previousFormat, configuredFormat)
-			}
-			surfaceFormat = configuredFormat
-			surfaceConfigured = true
-			offlineGame.Resize(width, height)
-			if mobile != nil {
-				mobile.Resize(width, height)
-			}
-			if desktop != nil {
-				desktop.Resize(width, height)
-			}
-			androidLog(fmt.Sprintf("stage=surface-rebind ready size=%dx%d", width, height))
 			return nil
 		}
 
@@ -836,7 +927,13 @@ func (h *host) renderLoop() {
 			switch cmd.kind {
 			case commandSurfaceCreated:
 				width, height = cmd.width, cmd.height
-				logResourceProbe(currentResourceRoot(), startMap)
+				surfaceWindow = cmd.window
+				surfaceNeedsGPURebuild = false
+				// Resource probing is startup diagnostics, not part of binding a
+				// replacement Android surface. Avoid reparsing the map on resume.
+				if offlineGame == nil {
+					logResourceProbe(currentResourceRoot(), startMap)
+				}
 				releaseSurface()
 				err = initDevice(cmd.window)
 			case commandSurfaceChanged:
@@ -884,6 +981,8 @@ func (h *host) renderLoop() {
 					offlineGame.PauseAudio()
 				}
 				releaseSurface()
+				surfaceWindow = 0
+				surfaceNeedsGPURebuild = false
 			case commandTouch:
 				uiConsumed := desktop != nil && desktop.Touch(cmd.action, cmd.x, cmd.y, cmd.pressed)
 				if !uiConsumed && mobile != nil {
@@ -979,6 +1078,12 @@ func (h *host) renderLoop() {
 					}
 				}
 				releaseSurface()
+				surfaceWindow = 0
+				surfaceNeedsGPURebuild = false
+				if goroRenderer != nil {
+					goroRenderer.Release()
+					goroRenderer = nil
+				}
 				if device != nil {
 					device.Release()
 					device = nil
@@ -996,7 +1101,18 @@ func (h *host) renderLoop() {
 			}
 			cmd.done <- err
 		case <-ticker.C:
-			if !appPaused && surface != nil && !surfaceConfigured && device != nil && adapter != nil && width > 0 && height > 0 {
+			if !appPaused && surfaceNeedsGPURebuild && surfaceWindow != 0 && width > 0 && height > 0 {
+				now := time.Now()
+				if nextSurfaceConfigureAttempt.IsZero() || !now.Before(nextSurfaceConfigureAttempt) {
+					if rebuildErr := rebuildGPUStack(surfaceWindow); rebuildErr != nil {
+						nextSurfaceConfigureAttempt = now.Add(250 * time.Millisecond)
+						androidLog(fmt.Sprintf("stage=gpu-rebuild retry-error=%v", rebuildErr))
+					} else {
+						androidLog("stage=gpu-rebuild recovered")
+					}
+				}
+			}
+			if !appPaused && !surfaceNeedsGPURebuild && surface != nil && !surfaceConfigured && device != nil && adapter != nil && width > 0 && height > 0 {
 				now := time.Now()
 				if nextSurfaceConfigureAttempt.IsZero() || !now.Before(nextSurfaceConfigureAttempt) {
 					configuredFormat, configureErr := configureSurface(surface, adapter, device, width, height, surfaceVSync)

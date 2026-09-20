@@ -64,3 +64,12 @@ type GPURenderer = gpuRenderer
 func NewGPURenderer(context GPUDeviceContext, cfg config.RenderConfig) (*GPURenderer, error) {
 	return newGPURendererFromProvider(context, cfg)
 }
+
+// Release frees all device-owned resources held by this renderer. Hosts that
+// replace their raw GPU device must release the renderer before releasing the
+// device it borrows.
+func (r *gpuRenderer) Release() {
+	if r != nil {
+		r.release()
+	}
+}
