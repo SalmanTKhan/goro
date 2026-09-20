@@ -154,6 +154,28 @@ func TestWorldUtilityControlsAreTouchSafeAndDoNotCoverSkills(t *testing.T) {
 	}
 }
 
+func TestWorldUtilitiesRespectCombatAndMenuOwnership(t *testing.T) {
+	model := Fixture("monster")
+	layout := LayoutHUD(FoldOuterViewport(), DefaultTokens(), model, Navigation{})
+	for name, rect := range map[string]Rect{"sit": layout.SitAction, "loot": layout.LootAction, "emote": layout.EmoteAction} {
+		if rect.Intersects(layout.PrimaryAction) {
+			t.Fatalf("%s overlaps primary combat action: utility=%+v primary=%+v", name, rect, layout.PrimaryAction)
+		}
+	}
+
+	targeting := LayoutHUD(FoldOuterViewport(), DefaultTokens(), model, Navigation{
+		Targeting: input.SkillTargetState{Mode: input.SkillTargetActor, SkillID: 100, Level: 1},
+	})
+	if targeting.SitAction.W != 0 || targeting.LootAction.W != 0 || targeting.EmoteAction.W != 0 {
+		t.Fatalf("world utilities remained visible while targeting: sit=%+v loot=%+v emote=%+v", targeting.SitAction, targeting.LootAction, targeting.EmoteAction)
+	}
+
+	menu := LayoutHUD(FoldOuterViewport(), DefaultTokens(), model, Navigation{MenuOpen: true})
+	if menu.SitAction.W != 0 || menu.LootAction.W != 0 || menu.EmoteAction.W != 0 {
+		t.Fatalf("world utilities remained visible behind menu: sit=%+v loot=%+v emote=%+v", menu.SitAction, menu.LootAction, menu.EmoteAction)
+	}
+}
+
 func TestQuickEmotePanelFitsSafeArea(t *testing.T) {
 	model := Fixture("normal")
 	for i := 0; i < 12; i++ {
