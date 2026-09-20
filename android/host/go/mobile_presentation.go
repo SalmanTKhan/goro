@@ -142,6 +142,7 @@ func newMobilePresentation(game *app.Game, width, height int) *mobilePresentatio
 	p.hudController = mobileui.NewController(p.hudModel, p.viewport, mobileCommandSink{game: game, presentation: p})
 	p.inventory = mobileui.NewInventoryController(game.MobileInventoryModel(), p.viewport, mobileCommandSink{game: game, presentation: p})
 	p.characterSkills = mobileui.NewCharacterSkillsController(game.MobileCharacterModel(), game.MobileSkillsModel(), p.viewport)
+	p.characterSkills.Sink = mobileCommandSink{game: game, presentation: p}
 	p.profileController = mobileui.NewProfileController(game.MobileProfileModel(), p.viewport, mobileCommandSink{game: game, presentation: p})
 	p.dialogController = mobileui.NewDialogController(mobileui.MobileDialogModel{}, p.viewport, mobileCommandSink{game: game, presentation: p})
 	p.economyController = mobileui.NewEconomyController(p.viewport, mobileCommandSink{game: game, presentation: p})
