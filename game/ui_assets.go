@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kivutar/goro/client"
+	"github.com/kivutar/goro/db"
 	"github.com/kivutar/goro/render"
 	"github.com/kivutar/goro/res"
 	"github.com/kivutar/goro/session"
@@ -44,6 +45,58 @@ func (m *WorldMode) DrawSkillIcon(screen *render.Frame, manager *res.Manager, sk
 
 func (m *WorldMode) DrawMobileSkillIcon(screen *render.Frame, manager *res.Manager, skill session.Skill, x, y, size int) {
 	m.drawSkillIconNearest(screen, manager, skill, x, y, size)
+}
+
+func (m *WorldMode) DrawMobileStatusIcon(screen *render.Frame, manager *res.Manager, statusID uint16, x, y, size int) {
+	if screen == nil || manager == nil || size <= 0 {
+		return
+	}
+	img := m.StatusIconImage(manager, statusID)
+	if img == nil {
+		return
+	}
+	bounds := img.Bounds()
+	if bounds.Dx() <= 0 || bounds.Dy() <= 0 {
+		return
+	}
+	scale := math.Min(float64(size)/float64(bounds.Dx()), float64(size)/float64(bounds.Dy()))
+	drawW := float64(bounds.Dx()) * scale
+	drawH := float64(bounds.Dy()) * scale
+	var opts render.DrawImageOptions
+	opts.Filter = render.FilterNearest
+	opts.GeoM.Scale(scale, scale)
+	opts.GeoM.Translate(float64(x)+(float64(size)-drawW)/2, float64(y)+(float64(size)-drawH)/2)
+	screen.DrawImage(render.NewImageFromImage(img), &opts)
+}
+
+func (m *WorldMode) StatusIconImage(manager *res.Manager, statusID uint16) image.Image {
+	if manager == nil {
+		return nil
+	}
+	info, ok := db.StatusIconInfoByID(statusID)
+	if !ok || strings.TrimSpace(info.Icon) == "" {
+		return nil
+	}
+	key := fmt.Sprintf("__status_icon_image_%d_%s", statusID, info.Icon)
+	if m.imageCache == nil {
+		m.imageCache = make(map[string]image.Image)
+	}
+	if m.imageMiss == nil {
+		m.imageMiss = make(map[string]struct{})
+	}
+	if img := m.imageCache[key]; img != nil {
+		return img
+	}
+	if _, missed := m.imageMiss[key]; missed {
+		return nil
+	}
+	img, _, err := res.LoadImage(manager, res.EffectTextureCandidates(info.Icon))
+	if err != nil {
+		m.imageMiss[key] = struct{}{}
+		return nil
+	}
+	m.imageCache[key] = img
+	return img
 }
 
 // DrawEquipmentPreview is the shared paper-doll character preview used by
