@@ -1233,7 +1233,7 @@ func (p *mobilePresentation) Draw(frame *render.Frame) {
 }
 
 func (p *mobilePresentation) drawOnlineStatus(frame *render.Frame) {
-	if p == nil || frame == nil {
+	if p == nil || frame == nil || p.game == nil {
 		return
 	}
 	safe := p.viewport.SafeRect()
@@ -1248,24 +1248,84 @@ func (p *mobilePresentation) drawOnlineStatus(frame *render.Frame) {
 	}
 	colors := mobileColors()
 	scale := p.mobileTextScale()
-	render.DrawRect(frame, float64(safe.X), float64(safe.Y), float64(safe.W), float64(safe.H), color.RGBA{R: 10, G: 22, B: 42, A: 255})
+	render.DrawRect(frame, float64(safe.X), float64(safe.Y), float64(safe.W), float64(safe.H), color.RGBA{R: 10, G: 22, B: 42, A: 210})
 	drawMobilePanel(frame, panel)
-	title := "GORO ONLINE"
-	if model.Phase == mobileui.OnlineLoginCharacters {
-		title = "ONLINE / CHARACTERS"
-	} else if model.Phase == mobileui.OnlineLoginCreate {
-		title = "ONLINE / CHARACTER"
-	}
-	drawMobileTextCentered(frame, title, layout.Title, colors.text, scale*1.5)
-	drawMobileTextFit(frame, model.Status, layout.Status.X, layout.Status.Y+12, layout.Status.W, colors.title, scale)
-	drawMobileTextCentered(frame, model.Network, layout.Network, colors.muted, scale*0.8)
-	server := model.Server
-	if server == "" {
-		server = "configured server"
-	}
-	drawMobileTextCentered(frame, server, layout.Notice, colors.muted, scale*0.65)
 
-	if model.Phase == mobileui.OnlineLoginCharacters {
+	title := "GORO ONLINE"
+	switch model.Phase {
+	case mobileui.OnlineLoginServer:
+		title = "SELECT SERVER"
+	case mobileui.OnlineLoginCredentials:
+		title = "ACCOUNT LOGIN"
+	case mobileui.OnlineLoginCharacterService:
+		title = "SELECT SERVICE"
+	case mobileui.OnlineLoginConnecting:
+		title = "CONNECTING"
+	case mobileui.OnlineLoginCharacters:
+		title = "SELECT CHARACTER"
+	case mobileui.OnlineLoginCreate:
+		title = "CREATE CHARACTER"
+	}
+	drawMobileTextCentered(frame, title, layout.Title, colors.text, scale*1.35)
+	drawMobileTextCentered(frame, model.Status, layout.Status, colors.title, scale*0.82)
+	drawMobileTextCentered(frame, model.Network, layout.Network, colors.muted, scale*0.62)
+	if model.Notice != "" {
+		drawMobileTextCentered(frame, model.Notice, layout.Notice, colors.muted, scale*0.62)
+	}
+
+	switch model.Phase {
+	case mobileui.OnlineLoginServer, mobileui.OnlineLoginCharacterService:
+		for i, rect := range layout.Options {
+			if i >= len(model.Servers) {
+				break
+			}
+			entry := model.Servers[i]
+			active := entry.Selected || entry.Index == model.SelectedServer
+			drawMobileCard(frame, rect, colors, active)
+			if active {
+				drawMobileSelectionOutline(frame, rect, colors)
+			}
+			nameRect := mobileui.Rect{X: rect.X + 14, Y: rect.Y + 6, W: rect.W - 28, H: rect.H * 0.52}
+			detailRect := mobileui.Rect{X: rect.X + 14, Y: rect.Y + rect.H*0.50, W: rect.W - 28, H: rect.H * 0.40}
+			drawMobileTextFit(frame, entry.Name, nameRect.X, nameRect.Y+4, nameRect.W, colors.text, scale*0.72)
+			detail := entry.Detail
+			if entry.UserCount > 0 {
+				detail = fmt.Sprintf("%s   users %d", detail, entry.UserCount)
+			}
+			drawMobileTextFit(frame, detail, detailRect.X, detailRect.Y+2, detailRect.W, colors.muted, scale*0.54)
+		}
+		if model.CanSwitchMode {
+			drawMobileTextCentered(frame, "OFFLINE MODE", layout.Mode, colors.accent, scale*0.58)
+		}
+		return
+
+	case mobileui.OnlineLoginCredentials:
+		username := model.Username
+		if p.onlineInputMode == androidTextInputLoginUsername || p.onlineUsername != "" {
+			username = p.onlineUsername
+		}
+		if username == "" {
+			username = "tap to enter username"
+		}
+		password := ""
+		if p.onlinePassword != "" {
+			password = strings.Repeat("*", len([]rune(p.onlinePassword)))
+		} else if model.PasswordSet {
+			password = "********"
+		} else {
+			password = "tap to enter password"
+		}
+		drawMobileButton(frame, layout.Username, "ID   "+username, colors, scale*0.68, true)
+		drawMobileButton(frame, layout.Password, "Password   "+password, colors, scale*0.68, true)
+		loginEnabled := strings.TrimSpace(p.onlineUsername) != "" || strings.TrimSpace(model.Username) != ""
+		loginEnabled = loginEnabled && (p.onlinePassword != "" || model.PasswordSet)
+		drawMobileButton(frame, layout.Submit, "LOGIN", colors, scale*0.78, loginEnabled)
+		if model.CanSwitchMode {
+			drawMobileTextCentered(frame, "OFFLINE MODE", layout.Mode, colors.accent, scale*0.58)
+		}
+		return
+
+	case mobileui.OnlineLoginCharacters:
 		for i, rect := range layout.Slots {
 			if i >= len(model.Characters) {
 				break
@@ -1280,22 +1340,20 @@ func (p *mobilePresentation) drawOnlineStatus(frame *render.Frame) {
 			if entry.Occupied {
 				label = fmt.Sprintf("%s  LV %d", trimText(entry.Name, 14), entry.Level)
 			}
-			drawMobileTextCentered(frame, label, mobileui.Rect{X: rect.X + 8, Y: rect.Y + 20, W: rect.W - 16, H: 34}, colors.text, scale*0.72)
+			drawMobileTextCentered(frame, label, mobileui.Rect{X: rect.X + 8, Y: rect.Y + 12, W: rect.W - 16, H: 30}, colors.text, scale*0.66)
 			if entry.Occupied {
-				drawMobileTextCentered(frame, entry.JobName, mobileui.Rect{X: rect.X + 8, Y: rect.Y + 62, W: rect.W - 16, H: 28}, colors.muted, scale*0.58)
+				drawMobileTextCentered(frame, entry.JobName, mobileui.Rect{X: rect.X + 8, Y: rect.Y + 46, W: rect.W - 16, H: 26}, colors.muted, scale*0.52)
 			} else {
-				drawMobileTextCentered(frame, "CREATE", mobileui.Rect{X: rect.X + 8, Y: rect.Y + 62, W: rect.W - 16, H: 28}, colors.accent, scale*0.60)
+				drawMobileTextCentered(frame, "CREATE", mobileui.Rect{X: rect.X + 8, Y: rect.Y + 46, W: rect.W - 16, H: 26}, colors.accent, scale*0.54)
 			}
 		}
-		drawMobileButton(frame, layout.Create, "CREATE SELECTED", colors, scale*0.68, model.CanCreate)
+		drawMobileButton(frame, layout.Create, "CREATE SELECTED", colors, scale*0.62, model.CanCreate)
 		return
+
+	default:
+		drawMobileButton(frame, layout.Reconnect, "RECONNECT", colors, scale*0.64, model.CanReconnect)
+		drawMobileButton(frame, layout.Disconnect, "DISCONNECT", colors, scale*0.64, model.CanDisconnect)
 	}
-	if model.Notice != "" {
-		drawMobileTextCentered(frame, model.Notice, mobileui.Rect{X: panel.X + 28, Y: layout.Notice.Bottom() + 24, W: panel.W - 56, H: 80}, colors.muted, scale*0.68)
-	}
-	drawMobileButton(frame, layout.Reconnect, "RECONNECT", colors, scale*0.68, model.CanReconnect)
-	drawMobileButton(frame, layout.Disconnect, "DISCONNECT", colors, scale*0.68, model.CanDisconnect)
-	drawMobileTextCentered(frame, "OFFLINE MODE", layout.Mode, colors.accent, scale*0.66)
 }
 
 func (p *mobilePresentation) handleOnlineTouch(x, y float32) {
@@ -1304,7 +1362,65 @@ func (p *mobilePresentation) handleOnlineTouch(x, y float32) {
 	}
 	model := p.game.MobileLoginModel()
 	layout := mobileui.LayoutOnlineLogin(p.viewport, model)
-	if model.Phase == mobileui.OnlineLoginCharacters {
+
+	switch model.Phase {
+	case mobileui.OnlineLoginServer, mobileui.OnlineLoginCharacterService:
+		for i, rect := range layout.Options {
+			if !rect.Contains(x, y) || i >= len(model.Servers) {
+				continue
+			}
+			entry := model.Servers[i]
+			kind := input.CommandOnlineSelectLoginServer
+			if model.Phase == mobileui.OnlineLoginCharacterService {
+				kind = input.CommandOnlineSelectCharacterService
+			}
+			p.onlineInputMode = androidTextInputNone
+			p.syncTextInputState()
+			p.emitMobileCommand(input.PlayerCommand{Kind: kind, Slot: uint16(entry.Index)})
+			return
+		}
+		if layout.Mode.Contains(x, y) && model.CanSwitchMode && p.modeChanged != nil {
+			p.modeChanged(false)
+		}
+		return
+
+	case mobileui.OnlineLoginCredentials:
+		if layout.Username.Contains(x, y) {
+			p.onlineInputMode = androidTextInputLoginUsername
+			p.syncTextInputState()
+			return
+		}
+		if layout.Password.Contains(x, y) {
+			p.onlineInputMode = androidTextInputLoginPassword
+			p.syncTextInputState()
+			return
+		}
+		if layout.Submit.Contains(x, y) {
+			username := p.onlineUsername
+			if strings.TrimSpace(username) == "" {
+				username = model.Username
+			}
+			password := p.onlinePassword
+			if strings.TrimSpace(username) == "" || (password == "" && !model.PasswordSet) {
+				return
+			}
+			p.onlineInputMode = androidTextInputNone
+			p.syncTextInputState()
+			p.emitMobileCommand(input.PlayerCommand{
+				Kind: input.CommandOnlineSubmitCredentials,
+				Username: username,
+				Password: password,
+			})
+			return
+		}
+		if layout.Mode.Contains(x, y) && model.CanSwitchMode && p.modeChanged != nil {
+			p.onlineInputMode = androidTextInputNone
+			p.syncTextInputState()
+			p.modeChanged(false)
+		}
+		return
+
+	case mobileui.OnlineLoginCharacters:
 		for i, rect := range layout.Slots {
 			if !rect.Contains(x, y) || i >= len(model.Characters) {
 				continue
@@ -1322,16 +1438,13 @@ func (p *mobilePresentation) handleOnlineTouch(x, y float32) {
 		}
 		return
 	}
+
 	if layout.Reconnect.Contains(x, y) && model.CanReconnect {
 		p.emitMobileCommand(input.PlayerCommand{Kind: input.CommandOnlineReconnect})
 		return
 	}
 	if layout.Disconnect.Contains(x, y) && model.CanDisconnect {
 		p.emitMobileCommand(input.PlayerCommand{Kind: input.CommandOnlineDisconnect})
-		return
-	}
-	if layout.Mode.Contains(x, y) && model.CanSwitchMode && p.modeChanged != nil {
-		p.modeChanged(false)
 	}
 }
 
