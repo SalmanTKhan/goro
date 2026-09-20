@@ -277,7 +277,9 @@ func (m *mobileWidgets) drawWidgets(p *mobilePresentation, frame *render.Frame) 
 	if p.widgetHUDActive() && p.settings.Display.ShowMinimap && p.hud.Minimap.W > 0 {
 		mapRect := mobileui.Rect{X: p.hud.Minimap.X + 10, Y: p.hud.Minimap.Y + 34, W: p.hud.Minimap.W - 20, H: p.hud.Minimap.H - 70}
 		render.DrawRect(frame, float64(mapRect.X), float64(mapRect.Y), float64(mapRect.W), float64(mapRect.H), mobileColors().mapBackground)
-		p.drawMinimapTerrain(frame, mapRect)
+		if !p.game.DrawMobileMinimap(frame, mapRect) {
+			p.drawMinimapTerrain(frame, mapRect)
+		}
 	}
 
 	// Real art on top, from the authoritative resource path.
