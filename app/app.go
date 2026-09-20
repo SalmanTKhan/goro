@@ -542,18 +542,20 @@ func (g *Game) DrawMobileMinimap(frame *render.Frame, rect mobileui.Rect) bool {
 	if bounds.Dx() <= 0 || bounds.Dy() <= 0 {
 		return false
 	}
-	sw, sh := float64(bounds.Dx()), float64(bounds.Dy())
-	dw, dh := float64(rect.W), float64(rect.H)
-	if sw/sh > dw/dh {
-		dh = dw * sh / sw
-	} else {
-		dw = dh * sw / sh
+
+	// Desktop RO minimap presentation always scales the retail bitmap into a
+	// square map canvas, then projects world cells into the centered
+	// world-aspect rectangle inside that square. Use exactly that contract on
+	// mobile so artwork and markers cannot disagree about orientation/aspect.
+	size := float64(rect.W)
+	if float64(rect.H) < size {
+		size = float64(rect.H)
 	}
-	dx := float64(rect.X) + (float64(rect.W)-dw)/2
-	dy := float64(rect.Y) + (float64(rect.H)-dh)/2
+	dx := float64(rect.X) + (float64(rect.W)-size)/2
+	dy := float64(rect.Y) + (float64(rect.H)-size)/2
 	var opts render.DrawImageOptions
 	opts.Filter = render.FilterLinear
-	opts.GeoM.Scale(dw/sw, dh/sh)
+	opts.GeoM.Scale(size/float64(bounds.Dx()), size/float64(bounds.Dy()))
 	opts.GeoM.Translate(dx, dy)
 	frame.DrawImage(g.mobileMinimapTexture, &opts)
 
@@ -566,8 +568,18 @@ func (g *Game) DrawMobileMinimap(frame *render.Frame, rect mobileui.Rect) bool {
 	if mapW <= 0 || mapH <= 0 {
 		return true
 	}
-	mx := dx + float64(g.world.Player.X)*dw/float64(mapW)
-	my := dy + dh - float64(g.world.Player.Y)*dh/float64(mapH)
+
+	maxSide := mapW
+	if mapH > maxSide {
+		maxSide = mapH
+	}
+	projectedW := size * float64(mapW) / float64(maxSide)
+	projectedH := size * float64(mapH) / float64(maxSide)
+	projectedX := dx + (size-projectedW)/2
+	projectedY := dy + (size-projectedH)/2
+	mx := projectedX + float64(g.world.Player.X)*projectedW/float64(mapW)
+	my := projectedY + projectedH - float64(g.world.Player.Y)*projectedH/float64(mapH)
+
 	marker := color.RGBA{R: 255, G: 232, B: 96, A: 255}
 	render.DrawRect(frame, mx-4, my-4, 9, 9, color.RGBA{A: 190})
 	render.DrawRect(frame, mx-3, my-3, 7, 7, marker)
