@@ -88,6 +88,8 @@ const (
 	CommandOnlineSelectLoginServer
 	CommandOnlineSubmitCredentials
 	CommandOnlineSelectCharacterService
+	CommandUpgradeSkill
+	CommandAssignSkillHotkey
 )
 
 // WorldPosition is a presentation-independent world target. Screen-space
