@@ -798,8 +798,12 @@ func (p *mobilePresentation) Refresh() {
 		} else if p.game.Online() {
 			p.dialogController.Close()
 		}
-		if p.widgets != nil && !reflect.DeepEqual(previousDialog, p.dialogController.Model) {
-			p.widgets.Invalidate()
+		if !reflect.DeepEqual(previousDialog, p.dialogController.Model) {
+			androidLog(fmt.Sprintf("stage=mobile-dialog open=%t npc=%d options=%d notice=%q",
+				p.dialogController.Model.Open, p.dialogController.Model.NPCID, len(p.dialogController.Model.Options), p.dialogController.Model.Notice))
+			if p.widgets != nil {
+				p.widgets.Invalidate()
+			}
 		}
 	}
 	if p.economyController != nil {
