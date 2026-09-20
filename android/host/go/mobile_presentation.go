@@ -555,6 +555,11 @@ func (p *mobilePresentation) Back() bool {
 	if p == nil {
 		return false
 	}
+	if p.onlineInputMode == androidTextInputLoginUsername || p.onlineInputMode == androidTextInputLoginPassword {
+		p.onlineInputMode = androidTextInputNone
+		p.syncTextInputState()
+		return true
+	}
 	if p.tradeController != nil && p.tradeController.IsOpen() {
 		if p.tradeController.Back() {
 			if !p.tradeController.IsOpen() {
