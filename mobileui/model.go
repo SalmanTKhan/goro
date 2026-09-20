@@ -26,6 +26,7 @@ type PlayerHUDModel struct {
 	MaxSP     int
 	BaseLevel int
 	JobLevel  int
+	Sitting   bool
 }
 
 type TargetHUDModel struct {
@@ -56,6 +57,11 @@ type StatusEffectModel struct {
 	Name       string
 	Remaining  time.Duration
 	Beneficial bool
+}
+
+type EmoteModel struct {
+	ID    uint8
+	Label string
 }
 
 // LootItemModel is the read-only mobile projection of one world drop. DropID
@@ -118,6 +124,7 @@ type MobileHUDModel struct {
 	Target   TargetHUDModel
 	Skills   []SkillSlotModel
 	Statuses []StatusEffectModel
+	Emotes   []EmoteModel
 	Loot     []LootItemModel
 	Minimap  MinimapModel
 }
@@ -129,6 +136,7 @@ type HUDSource struct {
 	Target   TargetHUDModel
 	Skills   []SkillSlotModel
 	Statuses []StatusEffectModel
+	Emotes   []EmoteModel
 	Loot     []LootItemModel
 	Minimap  MinimapModel
 }
@@ -138,6 +146,7 @@ func Project(source HUDSource) MobileHUDModel {
 		Player: source.Player, Target: source.Target,
 		Skills:   append([]SkillSlotModel(nil), source.Skills...),
 		Statuses: append([]StatusEffectModel(nil), source.Statuses...),
+		Emotes:   append([]EmoteModel(nil), source.Emotes...),
 		Loot:     append([]LootItemModel(nil), source.Loot...),
 		Minimap:  projectMinimap(source.Minimap),
 	}
