@@ -273,11 +273,7 @@ func (k Kit) placeWorldUtilities(c *Canvas, model mobileui.MobileHUDModel, layou
 		if i >= len(model.Emotes) {
 			break
 		}
-		label := model.Emotes[i].Label
-		if label != "!" && label != "?" && label != "$" && label != "..." {
-			label = "/" + label
-		}
-		c.Place(k.Button(label, ButtonNormal), row)
+		c.Place(k.Button(model.Emotes[i].Label, ButtonNormal), row)
 	}
 }
 
