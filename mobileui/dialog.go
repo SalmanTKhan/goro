@@ -307,6 +307,11 @@ func LayoutDialog(viewport Viewport, model MobileDialogModel) DialogLayout {
 			columns := maxInt(1, int((layout.Actions.W+actionGap)/(136+actionGap)))
 			columns = minInt(columns, actionCount)
 			buttonW := minf(190, maxf(136, (layout.Actions.W-float32(columns-1)*actionGap)/float32(columns)))
+			if actionCount == 1 {
+				// A single Next/Close action is the primary conversation
+				// affordance on touch screens; make it deliberately generous.
+				buttonW = minf(320, layout.Actions.W)
+			}
 			for i, option := range model.Options {
 				row, column := i/columns, i%columns
 				rowStart := layout.Actions.X + (layout.Actions.W-(float32(columns)*buttonW+float32(columns-1)*actionGap))/2
