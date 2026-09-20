@@ -279,7 +279,7 @@ func (m *mobileWidgets) drawWidgets(p *mobilePresentation, frame *render.Frame) 
 		mapRect := mobileui.Rect{X: v.X + 12, Y: v.Y + 12, W: v.W - 24, H: v.H - 24}
 		p.game.DrawMobileMinimap(frame, mapRect)
 	}
-	if p.widgetHUDActive() && p.settings.Display.ShowMinimap && p.hud.Minimap.W > 0 {
+	if p.widgetHUDActive() && !p.navigation.MenuOpen && p.settings.Display.ShowMinimap && p.hud.Minimap.W > 0 {
 		mapRect := mobileui.Rect{X: p.hud.Minimap.X + 10, Y: p.hud.Minimap.Y + 34, W: p.hud.Minimap.W - 20, H: p.hud.Minimap.H - 70}
 		render.DrawRect(frame, float64(mapRect.X), float64(mapRect.Y), float64(mapRect.W), float64(mapRect.H), mobileColors().mapBackground)
 		if !p.game.DrawMobileMinimap(frame, mapRect) {
