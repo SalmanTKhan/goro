@@ -119,7 +119,7 @@ func LayoutMobileScreenHeader(panel Rect, backWidth, actionWidth float32) Mobile
 }
 
 type HUDLayout struct {
-	Safe, PlayerPanel, TargetPanel, LootPanel, Minimap, Menu, StatusArea, ChatBar, ChatLabel, ChatPrompt, ChatButton, SkillBar, SkillPagePrev, SkillPageNext, MenuPanel, CombatBanner, CombatCancel Rect
+	Safe, PlayerPanel, TargetPanel, LootPanel, Minimap, Menu, StatusArea, ChatBar, ChatLabel, ChatPrompt, ChatButton, SkillBar, SkillPagePrev, SkillPageNext, PrimaryAction, MenuPanel, CombatBanner, CombatCancel Rect
 	SkillSlots                                                                                                                                                                                      []Rect
 	SkillStart                                                                                                                                                                                      int
 	SkillsPerPage                                                                                                                                                                                   int
@@ -145,18 +145,18 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 	skillWidth := maxf(tokens.MinTouchTarget, tokens.SkillSize)
 	skillHeight := skillWidth
 	if !portrait {
-		// Landscape has a short physical edge. Keep the overlay compact and
-		// reserve the extra horizontal space for the world while retaining
-		// readable, touch-safe controls at normal phone distance.
+		// Landscape is the primary phone/tablet gameplay posture. Keep the RO
+		// visual vocabulary, but reduce the desktop-window footprint and reserve
+		// the lower-right thumb zone for combat.
 		overlayGap = 12
-		menuSize = 72
-		panelHeight = 132
-		targetHeight = 112
-		chatHeight = 64
-		skillWidth = 96
-		skillHeight = 96
+		menuSize = 64
+		panelHeight = 112
+		targetHeight = 96
+		chatHeight = 56
+		skillWidth = 88
+		skillHeight = 88
 	}
-	panelWidth := minf(360, maxf(220, safe.W*0.30))
+	panelWidth := minf(340, maxf(240, safe.W*0.22))
 	if portrait {
 		// Keep the status card as a readable overlay rather than letting it
 		// consume the entire portrait width. The minimap and menu retain their
@@ -167,7 +167,7 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 	}
 	l.PlayerPanel = Rect{safe.X + tokens.Edge, safe.Y + tokens.Edge, panelWidth, panelHeight}
 	l.Menu = Rect{safe.Right() - tokens.Edge - menuSize, safe.Y + tokens.Edge, menuSize, menuSize}
-	miniW := minf(232, maxf(156, safe.W*0.22))
+	miniW := minf(216, maxf(156, safe.W*0.18))
 	if miniW > safe.W/2 {
 		miniW = maxf(0, safe.W/2)
 	}
@@ -176,7 +176,7 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 		miniY := maxf(l.Menu.Bottom()+tokens.Gap, l.PlayerPanel.Bottom()+tokens.Gap)
 		l.Minimap = Rect{safe.Right() - tokens.Edge - miniW, miniY, miniW, 224}
 	} else {
-		l.Minimap = Rect{l.Menu.X - overlayGap - miniW, l.Menu.Y, miniW, 216}
+		l.Minimap = Rect{l.Menu.X - overlayGap - miniW, l.Menu.Y, miniW, 200}
 	}
 	if !model.Minimap.Visible {
 		l.Minimap = Rect{}
@@ -191,7 +191,7 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 		}
 		l.StatusArea = Rect{l.PlayerPanel.Right() + overlayGap, l.PlayerPanel.Y, statusW, 48}
 	}
-	chatW := minf(420, maxf(240, safe.W*0.34))
+	chatW := minf(380, maxf(240, safe.W*0.30))
 	if portrait {
 		chatW = minf(360, maxf(200, safe.W*0.52))
 	}
@@ -209,9 +209,13 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 	l.ChatLabel = Rect{l.ChatBar.X + 10, l.ChatBar.Y, maxf(0, chatLabelW-10), l.ChatBar.H}
 	promptX := l.ChatLabel.Right() + 8
 	l.ChatPrompt = Rect{promptX, l.ChatBar.Y, maxf(0, l.ChatButton.X-promptX-8), l.ChatBar.H}
-	// Combat controls occupy their own lower-right region on portrait. The
-	// target panel is placed above that region rather than behind it.
+	// Combat controls live in the lower-right thumb zone. A selected target
+	// gets a dedicated action button, while the target identity/HP frame moves
+	// to top-center so combat information stays near the player's focal area.
 	skillSize := maxf(tokens.MinTouchTarget, tokens.SkillSize)
+	if !portrait {
+		skillSize = skillWidth
+	}
 	if portrait && safe.W < 600 {
 		skillSize = maxf(72, minf(skillSize, safe.W*0.20))
 	}
@@ -219,17 +223,22 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 	if !portrait {
 		skillY = safe.Bottom() - tokens.Edge - skillHeight
 	}
-	targetY := skillY - overlayGap - targetHeight
-	l.TargetPanel = Rect{safe.X + tokens.Edge, targetY, panelWidth, targetHeight}
-	// The player panel occupies the left rail on landscape displays. Keep the
-	// loot rail below it even when the status strip is shorter; otherwise the
-	// loot panel is drawn underneath the character panel and its touch rows
-	// become unreachable.
+	if model.Target.Visible && model.Target.ID != 0 {
+		if portrait {
+			targetW := minf(panelWidth, maxf(220, safe.W-2*tokens.Edge))
+			l.TargetPanel = Rect{safe.X + (safe.W-targetW)/2, l.PlayerPanel.Bottom() + overlayGap, targetW, targetHeight}
+		} else {
+			targetW := minf(460, maxf(320, safe.W*0.24))
+			l.TargetPanel = Rect{safe.X + (safe.W-targetW)/2, safe.Y + tokens.Edge, targetW, targetHeight}
+		}
+	}
+	// The player panel occupies the left rail on landscape displays. Nearby
+	// loot stays below it and stops above the collapsed chat strip.
 	lootTop := l.PlayerPanel.Bottom() + overlayGap
 	if portrait {
-		lootTop = l.StatusArea.Bottom() + tokens.Gap
+		lootTop = maxf(l.StatusArea.Bottom(), l.TargetPanel.Bottom()) + tokens.Gap
 	}
-	lootBottom := l.TargetPanel.Y - overlayGap
+	lootBottom := l.ChatBar.Y - overlayGap
 	lootHeaderHeight := float32(32)
 	lootRowHeight := maxf(tokens.MinTouchTarget, 52)
 	maxLootRows := int((lootBottom - lootTop - lootHeaderHeight) / lootRowHeight)
@@ -276,17 +285,31 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 		pageGap = tokens.Gap
 		buttonSize := maxf(tokens.MinTouchTarget, skillSize)
 		available := safe.W - 2*tokens.Edge - 2*(buttonSize+tokens.Gap)
+		if model.Target.Visible && model.Target.ID != 0 {
+			available -= buttonSize + tokens.Gap
+		}
 		if available < 0 {
 			available = 0
 		}
 		barW = minf(barW, available)
+		right := safe.Right() - tokens.Edge
+		if model.Target.Visible && model.Target.ID != 0 {
+			l.PrimaryAction = Rect{right - buttonSize, skillY, buttonSize, buttonSize}
+			right = l.PrimaryAction.X - tokens.Gap
+		}
 		groupW := barW + 2*(buttonSize+tokens.Gap)
-		groupX := safe.Right() - tokens.Edge - groupW
+		groupX := right - groupW
 		l.SkillPagePrev = Rect{groupX, skillY, buttonSize, buttonSize}
 		l.SkillBar = Rect{l.SkillPagePrev.Right() + tokens.Gap, skillY, barW, buttonSize}
 		l.SkillPageNext = Rect{l.SkillBar.Right() + tokens.Gap, l.SkillBar.Y, buttonSize, buttonSize}
 	} else {
-		l.SkillBar = Rect{safe.Right() - tokens.Edge - barW, skillY, barW, skillHeight}
+		right := safe.Right() - tokens.Edge
+		if model.Target.Visible && model.Target.ID != 0 {
+			actionSize := maxf(tokens.MinTouchTarget, skillHeight+24)
+			l.PrimaryAction = Rect{right - actionSize, safe.Bottom() - tokens.Edge - actionSize, actionSize, actionSize}
+			right = l.PrimaryAction.X - tokens.Gap
+		}
+		l.SkillBar = Rect{right - barW, skillY, barW, skillHeight}
 	}
 	for i := 0; i < visibleSkills; i++ {
 		slotW := skillWidth
@@ -301,9 +324,12 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 	}
 	if navigation.Targeting.Mode != input.SkillTargetIdle {
 		bannerW, bannerH := minf(440, maxf(300, safe.W*0.34)), float32(52)
-		bannerY := l.TargetPanel.Y - tokens.Gap - bannerH
+		bannerY := l.SkillBar.Y - tokens.Gap - bannerH
+		if portrait && l.TargetPanel.H > 0 {
+			bannerY = l.TargetPanel.Bottom() + tokens.Gap
+		}
 		if bannerY < safe.Y+tokens.Edge {
-			bannerY = l.SkillBar.Y - tokens.Gap - bannerH
+			bannerY = safe.Y + tokens.Edge
 		}
 		l.CombatBanner = Rect{safe.X + (safe.W-bannerW)/2, bannerY, bannerW, bannerH}
 		l.CombatCancel = Rect{l.CombatBanner.Right() - 120, l.CombatBanner.Y + 2, 112, 48}
@@ -343,6 +369,7 @@ const (
 	ControlLootItem
 	ControlSkillPagePrev
 	ControlSkillPageNext
+	ControlPrimaryAction
 )
 
 type Hit struct {
@@ -361,6 +388,9 @@ func (l HUDLayout) HitTest(x, y float32) Hit {
 	}
 	if l.SkillPageNext.Contains(x, y) {
 		return Hit{Control: ControlSkillPageNext}
+	}
+	if l.PrimaryAction.Contains(x, y) {
+		return Hit{Control: ControlPrimaryAction}
 	}
 	for _, action := range l.MenuActions {
 		if action.Rect.Contains(x, y) {
