@@ -118,8 +118,73 @@ type androidRuntimeMetrics struct {
 	DesktopUIRasterCount       int      `json:"desktop_ui_raster_count"`
 	DesktopUIRasterDeferred    int      `json:"desktop_ui_raster_deferred"`
 	DesktopUIRasterMS          float64  `json:"desktop_ui_raster_ms"`
+	PhaseUpdateMS              float64  `json:"phase_update_ms"`
+	PhaseUIFrameMS             float64  `json:"phase_ui_frame_ms"`
+	PhaseWorldDrawMS           float64  `json:"phase_world_draw_ms"`
+	PhasePresentationMS        float64  `json:"phase_presentation_ms"`
+	PhaseAcquireMS             float64  `json:"phase_acquire_ms"`
+	PhaseGPUDrawMS             float64  `json:"phase_gpu_draw_ms"`
+	PhasePresentMS             float64  `json:"phase_present_ms"`
+	PhaseMaxMS                 float64  `json:"phase_max_ms"`
 	FrameBufferAllocations     int      `json:"frame_buffer_allocations"`
 	LastFrameAt                string   `json:"last_frame_at"`
+}
+
+
+type androidFramePhases struct {
+	update       time.Duration
+	uiFrame      time.Duration
+	worldDraw    time.Duration
+	presentation time.Duration
+	acquire      time.Duration
+	gpuDraw      time.Duration
+	present      time.Duration
+}
+
+type androidPhaseWindow struct {
+	frames int
+	total  androidFramePhases
+	max    time.Duration
+}
+
+func (w *androidPhaseWindow) Add(p androidFramePhases) {
+	if w == nil {
+		return
+	}
+	w.frames++
+	w.total.update += p.update
+	w.total.uiFrame += p.uiFrame
+	w.total.worldDraw += p.worldDraw
+	w.total.presentation += p.presentation
+	w.total.acquire += p.acquire
+	w.total.gpuDraw += p.gpuDraw
+	w.total.present += p.present
+	frame := p.update + p.uiFrame + p.worldDraw + p.presentation + p.acquire + p.gpuDraw + p.present
+	if frame > w.max {
+		w.max = frame
+	}
+}
+
+func (w *androidPhaseWindow) Average() androidFramePhases {
+	if w == nil || w.frames <= 0 {
+		return androidFramePhases{}
+	}
+	n := time.Duration(w.frames)
+	return androidFramePhases{
+		update:       w.total.update / n,
+		uiFrame:      w.total.uiFrame / n,
+		worldDraw:    w.total.worldDraw / n,
+		presentation: w.total.presentation / n,
+		acquire:      w.total.acquire / n,
+		gpuDraw:      w.total.gpuDraw / n,
+		present:      w.total.present / n,
+	}
+}
+
+func (w *androidPhaseWindow) Reset() {
+	if w != nil {
+		*w = androidPhaseWindow{}
+	}
 }
 
 type mobileAssetManifest struct {
@@ -392,6 +457,7 @@ func (h *host) renderLoop() {
 	var frameBuffer *render.Frame
 	var frameBufferAllocations int
 	var cpuFrameTotal time.Duration
+	var phaseWindow androidPhaseWindow
 	var peakRSS int64
 	var runtimeMetricsPath string
 	var surfaceVSync = true
@@ -433,6 +499,7 @@ func (h *host) renderLoop() {
 		frameBuffer = nil
 		frameBufferAllocations = 0
 		cpuFrameTotal = 0
+		phaseWindow.Reset()
 		peakRSS = 0
 		androidLog("stage=instance begin backend=vulkan")
 		log.Printf("stage=instance backend=vulkan")
@@ -846,13 +913,18 @@ func (h *host) renderLoop() {
 					if desktop != nil {
 						desktop.SyncInput(offlineGame.InputState())
 					}
+					var phases androidFramePhases
+					phaseStarted := time.Now()
 					if mobile == nil || mobile.WorldActive() {
 						if err := offlineGame.Update(); err != nil {
 							androidLog(fmt.Sprintf("stage=offline-update error=%v", err))
 						}
 					}
+					phases.update = time.Since(phaseStarted)
 					if desktop != nil {
+						phaseStarted = time.Now()
 						desktop.Frame()
+						phases.uiFrame = time.Since(phaseStarted)
 						if desktop.TextInputActive() {
 							atomic.StoreUint32(&androidTextInputActive, 1)
 						} else {
@@ -869,7 +941,10 @@ func (h *host) renderLoop() {
 					} else {
 						frameBuffer.BeginFrame()
 					}
+					phaseStarted = time.Now()
 					offlineGame.Draw(frameBuffer)
+					phases.worldDraw = time.Since(phaseStarted)
+					phaseStarted = time.Now()
 					if mobile != nil && len(state.TouchPoints) == 1 && mobile.WorldTouchAvailable(state.TouchPoints[0]) {
 						touch := state.TouchPoints[0]
 						if target, ok := offlineGame.PickMobileTarget(input.WorldPosition{X: float64(touch.X), Y: float64(touch.Y)}); ok && target.Kind == input.TargetGround {
@@ -887,8 +962,13 @@ func (h *host) renderLoop() {
 						offlineGame.DrawUIOverlay(frameBuffer)
 						offlineGame.DrawOverlay(frameBuffer)
 					}
+					phases.presentation = time.Since(phaseStarted)
 					offlineGame.FrameSubmitted()
-					renderFrame(surface, device, goroRenderer, frameBuffer, width, height, surfaceFormat)
+					renderPhases := renderFrame(surface, device, goroRenderer, frameBuffer, width, height, surfaceFormat)
+					phases.acquire = renderPhases.acquire
+					phases.gpuDraw = renderPhases.gpuDraw
+					phases.present = renderPhases.present
+					phaseWindow.Add(phases)
 					frameDuration := time.Since(frameStarted)
 					renderedFrames++
 					cpuFrameTotal += frameDuration
@@ -916,9 +996,11 @@ func (h *host) renderLoop() {
 						if desktop != nil {
 							desktopMetrics = desktop.RasterMetrics()
 						}
-						metrics := androidRuntimeMetrics{Format: "goro-mobile-runtime-metrics", Version: 3, Map: startMap, MapLoadMS: mapReadyAt.Sub(surfaceStartedAt).Seconds() * 1000, TimeToFirstMapFrameMS: firstFrameMS, SteadyFPS: fps, AverageCPUFrameMS: cpuFrameTotal.Seconds() * 1000 / float64(renderedFrames), PeakProcessRSSBytes: peakRSS, SteadyProcessRSSBytes: rss, TerrainBuildMS: worldMetrics.TerrainBuildDuration.Seconds() * 1000, TerrainChunkBuilds: worldMetrics.TerrainChunkBuilds, TerrainTextureFallbacks: worldMetrics.TerrainTextureFallbacks, RSMTextureFallbacks: worldMetrics.RSMTextureFallbacks, RSMEmptyTextureFallbacks: worldMetrics.RSMEmptyTextureFallbacks, RSMTextureFallbackExamples: worldMetrics.RSMTextureFallbackExamples, TextureDecodeMS: worldMetrics.TextureDecodeDuration.Seconds() * 1000, TextureDecodeCount: worldMetrics.TextureDecodeCount, TextureEncodedBytes: worldMetrics.TextureEncodedBytes, TextureDecodedRGBABytes: worldMetrics.TextureDecodedRGBABytes, TextureUploadMS: uploadMetrics.Duration.Seconds() * 1000, TextureUploadCount: uploadMetrics.Count, TextureUploadedBytes: uploadMetrics.UploadedBytes, EstimatedTextureGPUBytes: uploadMetrics.EstimatedGPUBytes, TextureCreates: uploadMetrics.Creates, TextureUpdates: uploadMetrics.Updates, ResidentTextures: uploadMetrics.ResidentTextures, DesktopUIRasterCount: desktopMetrics.Count, DesktopUIRasterDeferred: desktopMetrics.Deferred, DesktopUIRasterMS: desktopMetrics.Duration.Seconds() * 1000, FrameBufferAllocations: frameBufferAllocations, LastFrameAt: time.Now().UTC().Format(time.RFC3339Nano)}
+						phaseAvg := phaseWindow.Average()
+						metrics := androidRuntimeMetrics{Format: "goro-mobile-runtime-metrics", Version: 3, Map: startMap, MapLoadMS: mapReadyAt.Sub(surfaceStartedAt).Seconds() * 1000, TimeToFirstMapFrameMS: firstFrameMS, SteadyFPS: fps, AverageCPUFrameMS: cpuFrameTotal.Seconds() * 1000 / float64(renderedFrames), PeakProcessRSSBytes: peakRSS, SteadyProcessRSSBytes: rss, TerrainBuildMS: worldMetrics.TerrainBuildDuration.Seconds() * 1000, TerrainChunkBuilds: worldMetrics.TerrainChunkBuilds, TerrainTextureFallbacks: worldMetrics.TerrainTextureFallbacks, RSMTextureFallbacks: worldMetrics.RSMTextureFallbacks, RSMEmptyTextureFallbacks: worldMetrics.RSMEmptyTextureFallbacks, RSMTextureFallbackExamples: worldMetrics.RSMTextureFallbackExamples, TextureDecodeMS: worldMetrics.TextureDecodeDuration.Seconds() * 1000, TextureDecodeCount: worldMetrics.TextureDecodeCount, TextureEncodedBytes: worldMetrics.TextureEncodedBytes, TextureDecodedRGBABytes: worldMetrics.TextureDecodedRGBABytes, TextureUploadMS: uploadMetrics.Duration.Seconds() * 1000, TextureUploadCount: uploadMetrics.Count, TextureUploadedBytes: uploadMetrics.UploadedBytes, EstimatedTextureGPUBytes: uploadMetrics.EstimatedGPUBytes, TextureCreates: uploadMetrics.Creates, TextureUpdates: uploadMetrics.Updates, ResidentTextures: uploadMetrics.ResidentTextures, DesktopUIRasterCount: desktopMetrics.Count, DesktopUIRasterDeferred: desktopMetrics.Deferred, DesktopUIRasterMS: desktopMetrics.Duration.Seconds() * 1000, PhaseUpdateMS: phaseAvg.update.Seconds() * 1000, PhaseUIFrameMS: phaseAvg.uiFrame.Seconds() * 1000, PhaseWorldDrawMS: phaseAvg.worldDraw.Seconds() * 1000, PhasePresentationMS: phaseAvg.presentation.Seconds() * 1000, PhaseAcquireMS: phaseAvg.acquire.Seconds() * 1000, PhaseGPUDrawMS: phaseAvg.gpuDraw.Seconds() * 1000, PhasePresentMS: phaseAvg.present.Seconds() * 1000, PhaseMaxMS: phaseWindow.max.Seconds() * 1000, FrameBufferAllocations: frameBufferAllocations, LastFrameAt: time.Now().UTC().Format(time.RFC3339Nano)}
 						writeAndroidRuntimeMetrics(runtimeMetricsPath, metrics)
-						androidLog(fmt.Sprintf("stage=mobile-metrics frames=%d fps=%.2f cpu-frame-ms=%.2f rss=%d frame-buffer-allocations=%d terrain-ms=%.2f terrain-fallbacks=%d rsm-fallbacks=%d rsm-empty-fallbacks=%d rsm-examples=%q texture-decode-ms=%.2f texture-upload-ms=%.2f texture-gpu-bytes=%d texture-creates=%d texture-updates=%d resident-textures=%d desktop-ui-rasters=%d desktop-ui-deferred=%d desktop-ui-raster-ms=%.2f", renderedFrames, fps, metrics.AverageCPUFrameMS, rss, metrics.FrameBufferAllocations, metrics.TerrainBuildMS, metrics.TerrainTextureFallbacks, metrics.RSMTextureFallbacks, metrics.RSMEmptyTextureFallbacks, metrics.RSMTextureFallbackExamples, metrics.TextureDecodeMS, metrics.TextureUploadMS, metrics.EstimatedTextureGPUBytes, metrics.TextureCreates, metrics.TextureUpdates, metrics.ResidentTextures, metrics.DesktopUIRasterCount, metrics.DesktopUIRasterDeferred, metrics.DesktopUIRasterMS))
+						androidLog(fmt.Sprintf("stage=mobile-metrics frames=%d fps=%.2f cpu-frame-ms=%.2f rss=%d frame-buffer-allocations=%d terrain-ms=%.2f terrain-fallbacks=%d rsm-fallbacks=%d rsm-empty-fallbacks=%d rsm-examples=%q texture-decode-ms=%.2f texture-upload-ms=%.2f texture-gpu-bytes=%d texture-creates=%d texture-updates=%d resident-textures=%d desktop-ui-rasters=%d desktop-ui-deferred=%d desktop-ui-raster-ms=%.2f phase-update-ms=%.2f phase-ui-frame-ms=%.2f phase-world-draw-ms=%.2f phase-presentation-ms=%.2f phase-acquire-ms=%.2f phase-gpu-draw-ms=%.2f phase-present-ms=%.2f phase-max-ms=%.2f", renderedFrames, fps, metrics.AverageCPUFrameMS, rss, metrics.FrameBufferAllocations, metrics.TerrainBuildMS, metrics.TerrainTextureFallbacks, metrics.RSMTextureFallbacks, metrics.RSMEmptyTextureFallbacks, metrics.RSMTextureFallbackExamples, metrics.TextureDecodeMS, metrics.TextureUploadMS, metrics.EstimatedTextureGPUBytes, metrics.TextureCreates, metrics.TextureUpdates, metrics.ResidentTextures, metrics.DesktopUIRasterCount, metrics.DesktopUIRasterDeferred, metrics.DesktopUIRasterMS, metrics.PhaseUpdateMS, metrics.PhaseUIFrameMS, metrics.PhaseWorldDrawMS, metrics.PhasePresentationMS, metrics.PhaseAcquireMS, metrics.PhaseGPUDrawMS, metrics.PhasePresentMS, metrics.PhaseMaxMS))
+						phaseWindow.Reset()
 					}
 				}
 			}
@@ -985,41 +1067,51 @@ func surfaceCapabilities(surface *wgpu.Surface, adapter *wgpu.Adapter) []gputype
 	return caps.Formats
 }
 
-func renderFrame(surface *wgpu.Surface, device *wgpu.Device, renderer *render.GPURenderer, frame *render.Frame, width, height int, format gputypes.TextureFormat) {
+func renderFrame(surface *wgpu.Surface, device *wgpu.Device, renderer *render.GPURenderer, frame *render.Frame, width, height int, format gputypes.TextureFormat) androidFramePhases {
+	var phases androidFramePhases
+	started := time.Now()
 	texture, _, err := surface.GetCurrentTexture()
+	phases.acquire = time.Since(started)
 	if err != nil {
 		log.Printf("stage=acquire error=%v", err)
-		return
+		return phases
 	}
+	started = time.Now()
 	view, err := texture.CreateView(nil)
+	phases.acquire += time.Since(started)
 	if err != nil {
 		surface.DiscardTexture()
 		log.Printf("stage=view error=%v", err)
-		return
+		return phases
 	}
 	if renderer == nil || frame == nil {
 		surface.DiscardTexture()
 		view.Release()
-		return
+		return phases
 	}
+	started = time.Now()
 	_, err = renderer.DrawTarget(render.FrameTarget{View: view, Texture: texture.AsTexture(), Width: width, Height: height, Format: format}, frame)
+	phases.gpuDraw = time.Since(started)
 	if err != nil {
 		view.Release()
 		surface.DiscardTexture()
 		androidLog(fmt.Sprintf("stage=render-pass error=%v", err))
-		return
+		return phases
 	}
+	started = time.Now()
 	err = surface.Present(texture)
+	phases.present = time.Since(started)
 	view.Release()
 	if err != nil {
 		log.Printf("stage=present error=%v", err)
 		androidLog(fmt.Sprintf("stage=present error=%v", err))
-		return
+		return phases
 	}
 	frames := atomic.AddUint64(&presentedFrames, 1)
 	if frames == 1 || frames%60 == 0 {
 		androidLog(fmt.Sprintf("stage=present map-frame=%d", frames))
 	}
+	return phases
 }
 
 func renderClear(surface *wgpu.Surface, device *wgpu.Device) {
