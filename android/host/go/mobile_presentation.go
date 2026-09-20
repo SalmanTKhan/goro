@@ -612,13 +612,59 @@ func (p *mobilePresentation) Back() bool {
 	return p.navigation.Back()
 }
 
+// visibleWidgetSnapshotChanged limits retained mobile UI invalidation to the
+// model actually visible on screen. World/network state can update dozens of
+// unrelated snapshot projections every tick; treating the aggregate snapshot
+// as one dirty bit caused full-screen UI rasterization and texture uploads even
+// while a static Settings/Inventory/etc. surface was open.
+func (p *mobilePresentation) visibleWidgetSnapshotChanged(previous, next app.MobileSnapshot) bool {
+	if p == nil {
+		return false
+	}
+	if p.tradeController != nil && p.tradeController.IsOpen() {
+		return !reflect.DeepEqual(previous.Trade, next.Trade)
+	}
+	if p.vendingController != nil && p.vendingController.IsOpen() {
+		return !reflect.DeepEqual(previous.Vending, next.Vending)
+	}
+	if p.chatController != nil && p.chatController.Model.Open {
+		return !reflect.DeepEqual(previous.Chat, next.Chat)
+	}
+	if p.economyController != nil {
+		switch p.economyController.Screen {
+		case mobileui.EconomyShop:
+			return !reflect.DeepEqual(previous.Shop, next.Shop)
+		case mobileui.EconomyStorage:
+			return !reflect.DeepEqual(previous.Storage, next.Storage)
+		}
+	}
+	switch p.navigation.Screen {
+	case mobileui.ScreenCharacter:
+		return !reflect.DeepEqual(previous.Character, next.Character)
+	case mobileui.ScreenSkills:
+		return !reflect.DeepEqual(previous.Skills, next.Skills)
+	case mobileui.ScreenMap:
+		return !reflect.DeepEqual(previous.Map, next.Map)
+	case mobileui.ScreenSocial:
+		return !reflect.DeepEqual(previous.Social, next.Social)
+	case mobileui.ScreenInventory:
+		return !reflect.DeepEqual(previous.Inventory, next.Inventory)
+	case mobileui.ScreenEquipment:
+		return !reflect.DeepEqual(previous.Equipment, next.Equipment)
+	case mobileui.ScreenSettings:
+		return false
+	default:
+		return !reflect.DeepEqual(previous.HUD, next.HUD)
+	}
+}
+
 func (p *mobilePresentation) Refresh() {
 	if p == nil || p.game == nil {
 		atomic.StoreUint32(&androidTextInputActive, 0)
 		return
 	}
 	snapshot := p.game.MobileSnapshot(0)
-	if p.widgetSnapshotSet && !reflect.DeepEqual(p.widgetSnapshot, snapshot) && p.widgets != nil {
+	if p.widgetSnapshotSet && p.visibleWidgetSnapshotChanged(p.widgetSnapshot, snapshot) && p.widgets != nil {
 		p.widgets.Invalidate()
 	}
 	p.widgetSnapshot = snapshot
