@@ -274,20 +274,21 @@ func (m *Manager) DrawMobileLoginCharacterPreview(screen *render.Frame, slot int
 		return
 	}
 	character, ok := characterBySlot(m.ctx.Session.Characters, slot)
-	if !ok || character.ID == 0 {
+	if !ok {
 		return
 	}
+	key := loginCharacterPreviewKey(character)
 	if m.loginPreviewTextures == nil {
 		m.loginPreviewTextures = make(map[uint32]*render.Image)
 	}
-	texture := m.loginPreviewTextures[character.ID]
+	texture := m.loginPreviewTextures[key]
 	if texture == nil {
 		img := mode.characterPreviewImage(m.ctx, character)
 		if img == nil {
 			return
 		}
 		texture = render.NewImageFromImage(img)
-		m.loginPreviewTextures[character.ID] = texture
+		m.loginPreviewTextures[key] = texture
 	}
 	bounds := texture.Bounds()
 	if bounds.Dx() <= 0 || bounds.Dy() <= 0 {
