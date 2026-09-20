@@ -454,6 +454,33 @@ func nextMobileVolume(value float64) float64 {
 	return values[0]
 }
 
+func (p *mobilePresentation) layoutHUD() mobileui.HUDLayout {
+	layout := mobileui.LayoutHUD(p.viewport, mobileui.DefaultTokens(), p.hudModel, p.navigation)
+	if p == nil || p.game == nil || !p.game.Online() || len(layout.MenuActions) == 0 {
+		return layout
+	}
+	// Profile is an offline-authority feature. Removing it from the online
+	// drawer also removes its hit target, so an online player cannot enter the
+	// offline character select/create workflow and become stranded there.
+	actions := make([]mobileui.MenuAction, 0, len(layout.MenuActions))
+	nextY := layout.MenuPanel.Y
+	for _, action := range layout.MenuActions {
+		if action.Screen == mobileui.ScreenProfile {
+			continue
+		}
+		action.Rect.Y = nextY
+		nextY += action.Rect.H
+		actions = append(actions, action)
+	}
+	layout.MenuActions = actions
+	if len(actions) == 0 {
+		layout.MenuPanel = mobileui.Rect{}
+	} else {
+		layout.MenuPanel.H = actions[len(actions)-1].Rect.Bottom() - layout.MenuPanel.Y
+	}
+	return layout
+}
+
 func (p *mobilePresentation) Resize(width, height int) {
 	if p == nil {
 		return
@@ -470,11 +497,11 @@ func (p *mobilePresentation) Resize(width, height int) {
 	snapshot := p.game.MobileSnapshot(0)
 	p.hudModel = snapshot.HUD
 	p.refreshMinimapImage()
-	p.hud = mobileui.LayoutHUD(p.viewport, mobileui.DefaultTokens(), p.hudModel, p.navigation)
+	p.hud = p.layoutHUD()
 	if p.hudController != nil {
 		p.hudController.Model = p.hudModel
 		p.hudController.Navigation = p.navigation
-		p.hudController.Layout = mobileui.LayoutHUD(p.viewport, mobileui.DefaultTokens(), p.hudModel, p.navigation)
+		p.hudController.Layout = p.hud
 	}
 	if p.inventory != nil {
 		p.inventory.Viewport = p.viewport
@@ -738,7 +765,7 @@ func (p *mobilePresentation) Refresh() {
 		p.hudModel.Minimap.MapName = offline.MapName
 	}
 	p.refreshMinimapImage()
-	p.hud = mobileui.LayoutHUD(p.viewport, mobileui.DefaultTokens(), p.hudModel, p.navigation)
+	p.hud = p.layoutHUD()
 	if p.hudController != nil {
 		p.hudController.Model = p.hudModel
 		p.hudController.Navigation = p.navigation
@@ -1130,7 +1157,7 @@ func (p *mobilePresentation) Release(id input.TouchID, x, y int) {
 		if p.hudController != nil && p.hudController.Layout.CombatCancel.Contains(float32(x), float32(y)) {
 			p.hudController.Tap(float32(x), float32(y))
 			p.navigation = p.hudController.Navigation
-			p.hud = mobileui.LayoutHUD(p.viewport, mobileui.DefaultTokens(), p.hudModel, p.navigation)
+			p.hud = p.layoutHUD()
 			return
 		}
 		if target, ok := p.game.PickMobileTarget(input.WorldPosition{X: float64(rawX), Y: float64(rawY)}); ok {
@@ -1138,7 +1165,7 @@ func (p *mobilePresentation) Release(id input.TouchID, x, y int) {
 				mobileCommandSink{game: p.game, presentation: p}.Emit(command)
 			}
 		}
-		p.hud = mobileui.LayoutHUD(p.viewport, mobileui.DefaultTokens(), p.hudModel, p.navigation)
+		p.hud = p.layoutHUD()
 		return
 	}
 	if p.inventory != nil && p.inventory.State.Screen != mobileui.ScreenWorldHUD {
@@ -1157,6 +1184,10 @@ func (p *mobilePresentation) Release(id input.TouchID, x, y int) {
 			p.inventory.Open(mobileui.ScreenInventory)
 			p.navigation.Open(mobileui.ScreenInventory)
 		} else if hit.Screen == mobileui.ScreenProfile {
+			if p.game != nil && p.game.Online() {
+				p.navigation.MenuOpen = false
+				break
+			}
 			p.profileController.OpenProfile(p.game.MobileProfileModel())
 			p.navigation.Open(mobileui.ScreenProfile)
 		} else if hit.Screen == mobileui.ScreenCharacter || hit.Screen == mobileui.ScreenSkills {
@@ -1197,7 +1228,7 @@ func (p *mobilePresentation) Release(id input.TouchID, x, y int) {
 			p.navigation.Open(mobileui.ScreenCharacter)
 		}
 	}
-	p.hud = mobileui.LayoutHUD(p.viewport, mobileui.DefaultTokens(), p.hudModel, p.navigation)
+	p.hud = p.layoutHUD()
 }
 
 func (p *mobilePresentation) Draw(frame *render.Frame) {
@@ -1215,6 +1246,12 @@ func (p *mobilePresentation) Draw(frame *render.Frame) {
 	if p.game != nil && p.game.Online() && !p.game.SessionPlaying() {
 		p.drawOnlineStatus(frame)
 		return
+	}
+	// The desktop world renderer suppresses UI while the native mobile surface
+	// is active. Reintroduce only the authoritative NPC cut-in here, beneath the
+	// mobile dialog/widget layer.
+	if p.game != nil {
+		p.game.DrawMobileNPCCutin(frame)
 	}
 	// The shared ui/mobile widget layer draws every screen that has a builder.
 	// Screens without one still fall through to the host's own drawing below.
