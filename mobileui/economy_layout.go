@@ -3,7 +3,7 @@ package mobileui
 type EconomyLayout struct {
 	Safe, Panel, Header, Close, ListViewport                                    Rect
 	CartPanel, CartSubtotal, CartConfirm                                         Rect
-	QuantityModal, QuantityMinus, QuantityPlus, QuantityConfirm, QuantityCancel Rect
+	QuantityModal, QuantityMinus, QuantityPlus, QuantityMax, QuantityConfirm, QuantityCancel Rect
 	Tabs                                                                        []EconomyTabRect
 	Rows                                                                        []Rect
 	RowIndices                                                                  []int
@@ -195,7 +195,7 @@ func LayoutStorageScrolled(viewport Viewport, rowCount int, offset float32) Econ
 	return layout
 }
 
-func LayoutEconomyQuantity(viewport Viewport) (modal, minus, plus, confirm, cancel Rect) {
+func LayoutEconomyQuantity(viewport Viewport) (modal, minus, plus, maximum, confirm, cancel Rect) {
 	safe := viewport.SafeRect()
 	if safe.W <= 0 || safe.H <= 0 {
 		return
@@ -207,10 +207,13 @@ func LayoutEconomyQuantity(viewport Viewport) (modal, minus, plus, confirm, canc
 	modalH := minf(300, maxf(240, safe.H*0.40))
 	modal = Rect{X: safe.X + (safe.W-modalW)/2, Y: safe.Y + (safe.H-modalH)/2, W: modalW, H: modalH}
 	buttonY := modal.Bottom() - 68
-	buttonW := (modal.W - 4*12) / 3
-	minus = Rect{X: modal.X + 12, Y: buttonY, W: buttonW, H: 56}
-	plus = Rect{X: minus.Right() + 12, Y: buttonY, W: buttonW, H: 56}
-	confirm = Rect{X: plus.Right() + 12, Y: buttonY, W: buttonW, H: 56}
+	gap := float32(8)
+	sidePad := float32(12)
+	buttonW := (modal.W - 2*sidePad - 3*gap) / 4
+	minus = Rect{X: modal.X + sidePad, Y: buttonY, W: buttonW, H: 56}
+	plus = Rect{X: minus.Right() + gap, Y: buttonY, W: buttonW, H: 56}
+	maximum = Rect{X: plus.Right() + gap, Y: buttonY, W: buttonW, H: 56}
+	confirm = Rect{X: maximum.Right() + gap, Y: buttonY, W: buttonW, H: 56}
 	cancel = Rect{X: modal.Right() - 112 - 12, Y: modal.Y + 12, W: 112, H: 52}
 	return
 }
