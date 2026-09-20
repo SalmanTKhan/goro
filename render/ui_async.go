@@ -9,6 +9,7 @@ import (
 
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gg/scene"
+	uiapp "github.com/gogpu/ui/app"
 	"github.com/gogpu/ui/geometry"
 	uirender "github.com/gogpu/ui/render"
 	"github.com/gogpu/ui/widget"
