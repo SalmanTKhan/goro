@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 	"math"
+	"time"
 
 	"github.com/gogpu/gpucontext"
 	uiapp "github.com/gogpu/ui/app"
@@ -20,6 +21,13 @@ import (
 )
 
 const (
+	// Full-surface desktop UI rasterization is intentionally decoupled from the
+	// game/render tick on Android. The desktop UI is drawn into one large RGBA
+	// texture, so rasterizing and uploading it every frame is expensive on
+	// phones even when only HP, cooldown text, or an animation marker changed.
+	// Explicit interaction/resize/root changes bypass this cadence.
+	desktopUIRasterInterval = time.Second / 15
+
 	// desktopUIWidth and desktopUIHeight are only a placeholder viewport for the
 	// moment between constructing the app and the first Resize, which computes
 	// the real logical size from the display.
@@ -68,8 +76,13 @@ type desktopPresentation struct {
 	offsetX, offsetY, scale float32
 	uiScale                 float32
 	dirty                   bool
+	urgentDirty             bool
 	captured                bool
 	debugLogged             bool
+	lastRaster              time.Time
+	rasterCount             int
+	rasterDeferred          int
+	rasterDuration          time.Duration
 
 	// pointer queues touches for the polled input path, in logical UI
 	// coordinates. Widget events reach gogpu immediately, but large parts of the
@@ -92,7 +105,7 @@ type pointerEvent struct {
 }
 
 func newDesktopPresentation(game *app.Game, width, height int) *desktopPresentation {
-	d := &desktopPresentation{game: game, win: &androidUIWindow{width: desktopUIWidth, height: desktopUIHeight}, uiWidth: desktopUIWidth, uiHeight: desktopUIHeight, uiScale: game.UISettings().Normalized().Scale, dirty: true}
+	d := &desktopPresentation{game: game, win: &androidUIWindow{width: desktopUIWidth, height: desktopUIHeight}, uiWidth: desktopUIWidth, uiHeight: desktopUIHeight, uiScale: game.UISettings().Normalized().Scale, dirty: true, urgentDirty: true}
 	theme := rotheme.Default.AsTheme()
 	theme.Colors.Background = widget.RGBA8(0, 0, 0, 0)
 	// RasterizeUI creates a fresh canvas for every redraw. Framework-managed
@@ -105,14 +118,19 @@ func newDesktopPresentation(game *app.Game, width, height int) *desktopPresentat
 	return d
 }
 
-func (d *desktopPresentation) SetUIRoot(root widget.Widget) { d.ui.SetRoot(root); d.dirty = true }
-func (d *desktopPresentation) Frame()                       { d.ui.Frame() }
-func (d *desktopPresentation) Invalidate()                  { d.dirty = true }
+func (d *desktopPresentation) SetUIRoot(root widget.Widget) {
+	d.ui.SetRoot(root)
+	d.dirty = true
+	d.urgentDirty = true
+}
+func (d *desktopPresentation) Frame()      { d.ui.Frame() }
+func (d *desktopPresentation) Invalidate() { d.dirty = true }
 func (d *desktopPresentation) SetUISettings(settings input.UISettings) {
 	if d == nil {
 		return
 	}
 	d.uiScale = settings.Normalized().Scale
+	d.urgentDirty = true
 	d.Resize(d.width, d.height)
 }
 
@@ -144,6 +162,8 @@ func (d *desktopPresentation) TextInputActive() bool {
 func (d *desktopPresentation) SetText(text string) {
 	if field, ok := d.ui.Window().Context().FocusedWidget().(*textfield.Widget); ok {
 		field.SetText(text)
+		d.dirty = true
+		d.urgentDirty = true
 	}
 }
 
@@ -195,6 +215,7 @@ func (d *desktopPresentation) Resize(width, height int) {
 	}
 	d.captured = false
 	d.dirty = true
+	d.urgentDirty = true
 }
 
 func maxInt(a, b int) int {
@@ -208,35 +229,49 @@ func (d *desktopPresentation) Draw(frame *render.Frame) {
 	if d == nil || frame == nil {
 		return
 	}
-	if d.dirty || d.ui.Window().NeedsRedraw() || d.ui.Window().NeedsAnimationFrame() {
-		firstDraw := !d.debugLogged
-		if firstDraw {
-			if d.ui.Window().Root() == nil {
-				androidLog("stage=desktop-ui root=nil")
-			} else {
-				androidLog("stage=desktop-ui root=present")
-			}
-		}
-		if image, _, err := render.RasterizeUI(d.ui, d.uiWidth, d.uiHeight, d.image); err == nil {
-			d.image = image
-			if d.image != nil && firstDraw {
-				nonzero := 0
-				for i := 3; i < len(d.image.RGBA().Pix); i += 4 {
-					if d.image.RGBA().Pix[i] != 0 {
-						nonzero++
-					}
+	needsRaster := d.dirty || d.ui.Window().NeedsRedraw() || d.ui.Window().NeedsAnimationFrame()
+	if needsRaster {
+		immediate := d.image == nil || d.urgentDirty
+		due := d.lastRaster.IsZero() || time.Since(d.lastRaster) >= desktopUIRasterInterval
+		if immediate || due {
+			firstDraw := !d.debugLogged
+			if firstDraw {
+				if d.ui.Window().Root() == nil {
+					androidLog("stage=desktop-ui root=nil")
+				} else {
+					androidLog("stage=desktop-ui root=present")
 				}
-				androidLog(fmt.Sprintf("stage=desktop-ui raster size=%dx%d alpha-pixels=%d", d.image.Bounds().Dx(), d.image.Bounds().Dy(), nonzero))
 			}
+			started := time.Now()
+			if image, rasterDrawn, err := render.RasterizeUI(d.ui, d.uiWidth, d.uiHeight, d.image); err == nil {
+				d.image = image
+				if rasterDrawn {
+					d.rasterCount++
+					d.rasterDuration += time.Since(started)
+					d.lastRaster = time.Now()
+				}
+				if d.image != nil && firstDraw {
+					nonzero := 0
+					for i := 3; i < len(d.image.RGBA().Pix); i += 4 {
+						if d.image.RGBA().Pix[i] != 0 {
+							nonzero++
+						}
+					}
+					androidLog(fmt.Sprintf("stage=desktop-ui raster size=%dx%d alpha-pixels=%d", d.image.Bounds().Dx(), d.image.Bounds().Dy(), nonzero))
+				}
+			} else {
+				androidLog(fmt.Sprintf("stage=desktop-ui raster-error=%v", err))
+			}
+			// Clear the animation request only when its new pixels have actually
+			// been published. A deferred request remains pending for the next
+			// cadence slot instead of being lost.
+			d.ui.Window().ClearAnimationFrame()
+			d.debugLogged = true
+			d.dirty = false
+			d.urgentDirty = false
 		} else {
-			androidLog(fmt.Sprintf("stage=desktop-ui raster-error=%v", err))
+			d.rasterDeferred++
 		}
-		// The desktop backend clears this after each raster (render/backend.go);
-		// without it the flag latches and every frame re-rasterizes the whole
-		// widget tree through a freshly allocated canvas.
-		d.ui.Window().ClearAnimationFrame()
-		d.debugLogged = true
-		d.dirty = false
 	}
 	if d.image != nil {
 		frame.SetScreenTransform(d.scale, d.scale, d.offsetX, d.offsetY)
@@ -298,6 +333,7 @@ func (d *desktopPresentation) Touch(action, x, y int, pressed bool) bool {
 	d.pointer = append(d.pointer, pointerEvent{x: lx, y: ly, pressed: down})
 
 	d.dirty = true
+	d.urgentDirty = true
 	if action == 1 || action == 3 || action == 6 {
 		d.captured = false
 	}
@@ -334,6 +370,22 @@ func (d *desktopPresentation) SyncInput(state *input.State) {
 		consumed++
 	}
 	d.pointer = d.pointer[consumed:]
+}
+
+
+// desktopUIRasterMetrics is host telemetry only. It intentionally stays local
+// to the Android bridge rather than leaking presentation details into app.Game.
+type desktopUIRasterMetrics struct {
+	Count    int
+	Deferred int
+	Duration time.Duration
+}
+
+func (d *desktopPresentation) RasterMetrics() desktopUIRasterMetrics {
+	if d == nil {
+		return desktopUIRasterMetrics{}
+	}
+	return desktopUIRasterMetrics{Count: d.rasterCount, Deferred: d.rasterDeferred, Duration: d.rasterDuration}
 }
 
 var _ client.UIApp = (*desktopPresentation)(nil)
