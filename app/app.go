@@ -413,6 +413,23 @@ func (g *Game) MobileHUDModel() mobileui.MobileHUDModel {
 				model.Skills[i].Name = name
 			}
 		}
+		for i := range model.Shortcuts {
+			switch model.Shortcuts[i].Kind {
+			case mobileui.ShortcutSkill:
+				if name, ok := g.resource.SkillDisplayName(int(model.Shortcuts[i].Skill.SkillID)); ok {
+					model.Shortcuts[i].Skill.Name = name
+				}
+			case mobileui.ShortcutItem:
+				item := &model.Shortcuts[i].Item
+				if name, ok := g.resource.ItemDisplayName(int(item.ItemID), item.Identified); ok {
+					item.DisplayName = name
+					item.NameAvailable = true
+				}
+				if icon, ok := g.resource.ItemResourceName(int(item.ItemID), item.Identified); ok {
+					item.IconKey = icon
+				}
+			}
+		}
 	}
 	if g.world != nil && g.world.GND != nil {
 		model.Minimap.Raster = mobileMinimapRaster(g.world.GND)
