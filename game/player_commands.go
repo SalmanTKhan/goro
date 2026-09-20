@@ -272,10 +272,27 @@ func (m *WorldMode) ApplyPlayerCommand(ctx client.Context, command input.PlayerC
 	case input.CommandNPCNext, input.CommandNPCMenuChoice, input.CommandNPCClose:
 		return m.ui.npcDialog.ApplyMobileCommand(ctx, command)
 	case input.CommandCloseShop:
-		if ctx.Network == nil || command.NPCID == 0 {
+		return m.mobileShopClose(ctx, command.NPCID)
+	case input.CommandShopCartAdd:
+		if command.Quantity <= 0 {
 			return false
 		}
-		return ctx.Network.SendNPCClose(command.NPCID) == nil
+		if ctx.Offline != nil {
+			// Offline shops retain their immediate transaction path; the staged
+			// cart is an online shared-ShopWindow feature.
+			return false
+		}
+		return m.mobileShopStage(ctx, command.ItemIndex, uint16(command.Quantity))
+	case input.CommandShopCartRemove:
+		if ctx.Offline != nil {
+			return false
+		}
+		return m.mobileShopRemoveCart(command.ItemIndex)
+	case input.CommandShopCartConfirm:
+		if ctx.Offline != nil {
+			return false
+		}
+		return m.mobileShopSubmit(ctx)
 	case input.CommandCloseStorage:
 		if ctx.Network == nil || ctx.Session == nil || !ctx.Session.Storage.Open {
 			return false
