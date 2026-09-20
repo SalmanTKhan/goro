@@ -67,28 +67,37 @@ func (c *Controller) Tap(x, y float32) bool {
 		if perPage <= 0 {
 			perPage = 4
 		}
-		if len(c.Model.Skills) > 0 && c.Navigation.SkillPage < (len(c.Model.Skills)-1)/perPage {
+		if ShortcutCount(c.Model) > 0 && c.Navigation.SkillPage < (ShortcutCount(c.Model)-1)/perPage {
 			c.Navigation.SkillPage++
 			c.relayout()
 		}
 		return true
 	case ControlSkill:
-		skillIndex := hit.SkillIndex + c.Layout.SkillStart
-		if skillIndex >= len(c.Model.Skills) {
-			return true
-		}
-		skill := c.Model.Skills[skillIndex]
-		if !skill.Usable || skill.SkillID == 0 || skill.CooldownRemaining > 0 {
+		shortcutIndex := hit.SkillIndex + c.Layout.SkillStart
+		shortcut, ok := ShortcutAt(c.Model, shortcutIndex)
+		if !ok {
 			return true
 		}
 		c.Navigation.EmoteOpen = false
-		switch skill.TargetMode {
-		case input.SkillTargetActor:
-			c.Navigation.Targeting.BeginActor(skill.SkillID, skill.Level)
-		case input.SkillTargetGround:
-			c.Navigation.Targeting.BeginGround(skill.SkillID, skill.Level)
-		default:
-			c.emit(input.PlayerCommand{Kind: input.CommandUseSkill, SkillID: skill.SkillID, Level: skill.Level})
+		switch shortcut.Kind {
+		case ShortcutItem:
+			item := shortcut.Item
+			if item.Usable && item.Index != 0 && item.Quantity > 0 {
+				c.emit(input.PlayerCommand{Kind: input.CommandUseItem, ItemIndex: item.Index, ItemID: uint32(item.ItemID)})
+			}
+		case ShortcutSkill:
+			skill := shortcut.Skill
+			if !skill.Usable || skill.SkillID == 0 || skill.CooldownRemaining > 0 {
+				return true
+			}
+			switch skill.TargetMode {
+			case input.SkillTargetActor:
+				c.Navigation.Targeting.BeginActor(skill.SkillID, skill.Level)
+			case input.SkillTargetGround:
+				c.Navigation.Targeting.BeginGround(skill.SkillID, skill.Level)
+			default:
+				c.emit(input.PlayerCommand{Kind: input.CommandUseSkill, SkillID: skill.SkillID, Level: skill.Level})
+			}
 		}
 		c.relayout()
 		return true
