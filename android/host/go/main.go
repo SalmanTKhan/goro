@@ -467,6 +467,10 @@ func (h *host) renderLoop() {
 	var peakRSS int64
 	var runtimeMetricsPath string
 	var surfaceVSync = true
+	// Pause rendering for every session type while Android is backgrounded.
+	// Online sessions keep networking/game authority alive, but must not keep
+	// acquiring/presenting against a Surface that Android may have invalidated.
+	var appPaused bool
 	var pendingOverlays []assetOverlayRequest
 	var pendingRelease *struct {
 		name  string
@@ -880,19 +884,31 @@ func (h *host) renderLoop() {
 					mobile.Back()
 				}
 			case commandPause:
+				appPaused = true
+				state = input.NewState()
+				if mobile != nil {
+					mobile.CancelTouch()
+				}
 				if offlineGame != nil && offlineGame.Offline() != nil {
 					offlineGame.Offline().Pause()
+					offlineGame.PauseAudio()
 					if err := offlineGame.SaveOfflineState(filepath.Join(currentResourceRoot(), "offline-save.json")); err != nil {
 						androidLog(fmt.Sprintf("stage=offline-save pause-error=%v", err))
 					} else {
 						androidLog("stage=offline-save reason=pause")
 					}
 				}
+				androidLog("stage=lifecycle paused")
 			case commandResume:
 				if offlineGame != nil && offlineGame.Offline() != nil {
 					offlineGame.Offline().Resume()
 					offlineGame.ResumeAudio()
 				}
+				appPaused = false
+				if mobile != nil && mobile.widgets != nil {
+					mobile.widgets.InvalidateSize()
+				}
+				androidLog("stage=lifecycle resumed")
 			case commandMountAssetOverlay:
 				if pendingRelease != nil {
 					if len(pendingReleaseOverlays) >= pendingRelease.count {
@@ -940,7 +956,7 @@ func (h *host) renderLoop() {
 			}
 			cmd.done <- err
 		case <-ticker.C:
-			if surface != nil && device != nil && width > 0 && height > 0 && (offlineGame == nil || offlineGame.Offline() == nil || !offlineGame.Offline().Paused) {
+			if !appPaused && surface != nil && device != nil && width > 0 && height > 0 && (offlineGame == nil || offlineGame.Offline() == nil || !offlineGame.Offline().Paused) {
 				if mobileInput != nil && len(state.TouchPoints) > 0 {
 					// MotionEvent does not generate a new callback while a finger
 					// is stationary. Feed the recognizer from the render tick so
