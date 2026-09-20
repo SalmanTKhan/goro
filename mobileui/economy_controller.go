@@ -133,9 +133,11 @@ func (c *MobileEconomyController) Tap(x, y float32) bool {
 				c.Scroll.Offset = 0
 				c.Quantity.Cancel()
 				c.relayout()
-				// Buy and Sell are distinct server deal modes. Request the newly
-				// selected mode even when the previous tab already has rows.
-				if c.Shop.NPCID != 0 {
+				// Online ShopWindow-backed shops expose only the active server
+				// deal mode, so changing tabs must request the newly selected
+				// mode even when the previous tab already has rows. Offline
+				// projected shops already carry both lists and need no request.
+				if c.Shop.NPCID != 0 && (c.Shop.CartEnabled || (len(c.Shop.Items) == 0 && len(c.Shop.SellItems) == 0)) {
 					c.emit(input.PlayerCommand{Kind: input.CommandOpenShop, NPCID: c.Shop.NPCID, Tab: uint8(tab.Tab)})
 				}
 				return true
