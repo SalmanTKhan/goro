@@ -354,7 +354,7 @@ func dialogActionColumns(width float32, actionCount int, gap float32, portrait b
 	return minInt(columns, 2)
 }
 
-func dialogLineCount(message string, maxChars int) int {func dialogLineCount(message string, maxChars int) int {
+func dialogLineCount(message string, maxChars int) int {
 	if maxChars < 1 {
 		maxChars = 1
 	}
