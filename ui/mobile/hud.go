@@ -30,6 +30,7 @@ func (k Kit) HUDTree(
 	k.placeMinimap(c, model.Minimap, layout.Minimap)
 	k.placeLoot(c, model.Loot, layout)
 	k.placeSkillBar(c, model.Skills, layout, nav)
+	k.placePrimaryAction(c, model.Target, layout.PrimaryAction)
 	k.placeChatBar(c, layout)
 	k.placeCombatBanner(c, layout, nav)
 	k.placeMenu(c, layout, nav)
@@ -101,9 +102,44 @@ func (k Kit) placeTargetPanel(c *Canvas, target mobileui.TargetHUDModel, area mo
 		return
 	}
 	half := inner.H / 2
-	c.Place(k.Content(target.Name, RoleValue), mobileui.Rect{X: inner.X, Y: inner.Y, W: inner.W, H: half})
+	relationW := min32(104, inner.W*0.28)
+	nameW := max32(0, inner.W-relationW-k.Theme.Metrics.TableGap)
+	c.Place(k.Content(target.Name, RoleValue), mobileui.Rect{X: inner.X, Y: inner.Y, W: nameW, H: half})
+	c.Place(k.RightAligned(targetRelationLabel(target.Relation), RoleMuted),
+		mobileui.Rect{X: inner.X + nameW + k.Theme.Metrics.TableGap, Y: inner.Y, W: relationW, H: half})
 	k.placeCompactMeter(c, mobileui.Rect{X: inner.X, Y: inner.Y + half, W: inner.W, H: half},
 		BarHP, int64(target.HP), int64(target.MaxHP))
+}
+
+func targetRelationLabel(relation mobileui.TargetRelation) string {
+	switch relation {
+	case mobileui.TargetHostile:
+		return "ENEMY"
+	case mobileui.TargetNPC:
+		return "NPC"
+	case mobileui.TargetFriendly:
+		return "ALLY"
+	default:
+		return "TARGET"
+	}
+}
+
+func primaryActionLabel(target mobileui.TargetHUDModel) string {
+	switch target.Relation {
+	case mobileui.TargetHostile:
+		return "Attack"
+	case mobileui.TargetNPC:
+		return "Talk"
+	default:
+		return "Target"
+	}
+}
+
+func (k Kit) placePrimaryAction(c *Canvas, target mobileui.TargetHUDModel, area mobileui.Rect) {
+	if !target.Visible || target.ID == 0 || area.W <= 0 || area.H <= 0 {
+		return
+	}
+	c.Place(k.Button(primaryActionLabel(target), ButtonPressed), area)
 }
 
 // placeStatusEffects lays buffs and debuffs out as a row of small squares.
