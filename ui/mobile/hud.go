@@ -259,7 +259,11 @@ func (k Kit) placeWorldUtilities(c *Canvas, model mobileui.MobileHUDModel, layou
 		c.Place(k.Button("Loot", state), layout.LootAction)
 	}
 	if layout.EmoteAction.W > 0 {
-		c.Place(k.Button("Emote", buttonStateForOpen(nav.EmoteOpen)), layout.EmoteAction)
+		state := buttonStateForOpen(nav.EmoteOpen)
+		if len(model.Emotes) == 0 {
+			state = ButtonDisabled
+		}
+		c.Place(k.Button("Emote", state), layout.EmoteAction)
 	}
 	if !nav.EmoteOpen || layout.EmotePanel.W <= 0 {
 		return
