@@ -355,49 +355,58 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 	// Three one-tap world utilities sit directly above the combat bar. They are
 	// deliberately separate from the overflow menu: sit/stand and pickup are
 	// moment-to-moment gameplay actions, and emotes need to be reachable without
-	// covering the world with a full screen.
-	utilityH := maxf(tokens.MinTouchTarget, 52)
-	utilityW := float32(88)
-	if portrait {
-		utilityW = 84
-	}
-	utilityGap := maxf(8, tokens.Gap)
-	utilityRight := safe.Right() - tokens.Edge
-	utilityY := skillY - utilityGap - utilityH
-	if utilityY < safe.Y+tokens.Edge {
-		utilityY = safe.Y + tokens.Edge
-	}
-	l.EmoteAction = Rect{X: utilityRight - utilityW, Y: utilityY, W: utilityW, H: utilityH}
-	l.LootAction = Rect{X: l.EmoteAction.X - utilityGap - utilityW, Y: utilityY, W: utilityW, H: utilityH}
-	l.SitAction = Rect{X: l.LootAction.X - utilityGap - utilityW, Y: utilityY, W: utilityW, H: utilityH}
-
-	if navigation.EmoteOpen && len(model.Emotes) > 0 {
-		columns := 6
+	// covering the world with a full screen. Skill targeting temporarily owns
+	// this strip, so hide the utilities while its Cancel banner is active.
+	if navigation.Targeting.Mode == input.SkillTargetIdle {
+		utilityH := maxf(tokens.MinTouchTarget, 52)
+		utilityW := float32(88)
 		if portrait {
-			columns = 4
+			utilityW = 84
 		}
-		if columns > len(model.Emotes) {
-			columns = len(model.Emotes)
+		utilityGap := maxf(8, tokens.Gap)
+		utilityRight := safe.Right() - tokens.Edge
+		if l.SkillBar.Right() > safe.X {
+			// When a combat target owns the far-right primary-action button,
+			// the skill bar has already moved left. Anchor to it so quick
+			// utilities cannot overlap Attack/Talk.
+			utilityRight = l.SkillBar.Right()
 		}
-		rows := (len(model.Emotes) + columns - 1) / columns
-		buttonW, buttonH := float32(68), maxf(tokens.MinTouchTarget, 48)
-		emoteGap, pad := float32(8), float32(10)
-		panelW := 2*pad + float32(columns)*buttonW + float32(columns-1)*emoteGap
-		panelH := 2*pad + float32(rows)*buttonH + float32(rows-1)*emoteGap
-		panelX := utilityRight - panelW
-		if panelX < safe.X+tokens.Edge {
-			panelX = safe.X + tokens.Edge
+		utilityY := skillY - utilityGap - utilityH
+		if utilityY < safe.Y+tokens.Edge {
+			utilityY = safe.Y + tokens.Edge
 		}
-		panelY := utilityY - utilityGap - panelH
-		if panelY < safe.Y+tokens.Edge {
-			panelY = safe.Y + tokens.Edge
-		}
-		l.EmotePanel = Rect{X: panelX, Y: panelY, W: panelW, H: panelH}
-		for i := range model.Emotes {
-			row, col := i/columns, i%columns
-			x := l.EmotePanel.X + pad + float32(col)*(buttonW+emoteGap)
-			y := l.EmotePanel.Y + pad + float32(row)*(buttonH+emoteGap)
-			l.EmoteRows = append(l.EmoteRows, Rect{X: x, Y: y, W: buttonW, H: buttonH})
+		l.EmoteAction = Rect{X: utilityRight - utilityW, Y: utilityY, W: utilityW, H: utilityH}
+		l.LootAction = Rect{X: l.EmoteAction.X - utilityGap - utilityW, Y: utilityY, W: utilityW, H: utilityH}
+		l.SitAction = Rect{X: l.LootAction.X - utilityGap - utilityW, Y: utilityY, W: utilityW, H: utilityH}
+
+		if navigation.EmoteOpen && len(model.Emotes) > 0 {
+			columns := 6
+			if portrait {
+				columns = 4
+			}
+			if columns > len(model.Emotes) {
+				columns = len(model.Emotes)
+			}
+			rows := (len(model.Emotes) + columns - 1) / columns
+			buttonW, buttonH := float32(68), maxf(tokens.MinTouchTarget, 48)
+			emoteGap, pad := float32(8), float32(10)
+			panelW := 2*pad + float32(columns)*buttonW + float32(columns-1)*emoteGap
+			panelH := 2*pad + float32(rows)*buttonH + float32(rows-1)*emoteGap
+			panelX := utilityRight - panelW
+			if panelX < safe.X+tokens.Edge {
+				panelX = safe.X + tokens.Edge
+			}
+			panelY := utilityY - utilityGap - panelH
+			if panelY < safe.Y+tokens.Edge {
+				panelY = safe.Y + tokens.Edge
+			}
+			l.EmotePanel = Rect{X: panelX, Y: panelY, W: panelW, H: panelH}
+			for i := range model.Emotes {
+				row, col := i/columns, i%columns
+				x := l.EmotePanel.X + pad + float32(col)*(buttonW+emoteGap)
+				y := l.EmotePanel.Y + pad + float32(row)*(buttonH+emoteGap)
+				l.EmoteRows = append(l.EmoteRows, Rect{X: x, Y: y, W: buttonW, H: buttonH})
+			}
 		}
 	}
 	if navigation.Targeting.Mode != input.SkillTargetIdle {
