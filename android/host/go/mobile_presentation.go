@@ -756,15 +756,20 @@ func (p *mobilePresentation) Refresh() {
 	}
 	if p.dialogController != nil {
 		p.dialogController.Resize(p.viewport)
-		// NPC dialog packets are consumed by the shared WorldMode. Keep the
-		// Android controller projected from that same authoritative model so a
-		// server-side dialog cannot leave the player looking at an apparently
-		// idle world while the zone connection is waiting for next/menu/close.
+		// NPC dialog state is not part of MobileSnapshot: it is driven directly
+		// by zone packets through the shared desktop NPCDialog. Invalidate the
+		// retained widget raster whenever that authoritative projection changes;
+		// otherwise the hit-test/model can advance to Next/Menu while Android
+		// keeps displaying the previous "Waiting for the server" raster.
+		previousDialog := p.dialogController.Model
 		dialog := p.game.MobileDialogModel()
 		if dialog.Open {
 			p.dialogController.SetModel(dialog)
 		} else if p.game.Online() {
 			p.dialogController.Close()
+		}
+		if p.widgets != nil && !reflect.DeepEqual(previousDialog, p.dialogController.Model) {
+			p.widgets.Invalidate()
 		}
 	}
 	if p.economyController != nil {
