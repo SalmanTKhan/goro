@@ -11,6 +11,7 @@ type CharacterSkillsController struct {
 	SkillsLayout    SkillsLayout
 	CharacterOffset float32
 	SkillOffset     float32
+	Sink            input.CommandSink
 }
 
 func NewCharacterSkillsController(character MobileCharacterModel, skills MobileSkillsModel, viewport Viewport) *CharacterSkillsController {
@@ -79,6 +80,21 @@ func (c *CharacterSkillsController) Tap(x, y float32) bool {
 	if c.SkillsLayout.CharacterButton.Contains(x, y) {
 		c.Screen = ScreenCharacter
 		c.relayout()
+		return true
+	}
+	if c.Skills.Selection.HasSelection && c.SkillsLayout.HotbarButton.Contains(x, y) {
+		if c.Sink != nil {
+			c.Sink.Emit(input.PlayerCommand{Kind: input.CommandAssignSkillHotkey, SkillID: c.Skills.Selection.Skill.SkillID})
+		}
+		return true
+	}
+	for index, button := range c.SkillsLayout.UpgradeButtons {
+		if button.W <= 0 || !button.Contains(x, y) || index >= len(c.Skills.Skills) {
+			continue
+		}
+		if c.Sink != nil {
+			c.Sink.Emit(input.PlayerCommand{Kind: input.CommandUpgradeSkill, SkillID: c.Skills.Skills[index].SkillID})
+		}
 		return true
 	}
 	for index, row := range c.SkillsLayout.Rows {
