@@ -226,7 +226,7 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 	if model.Target.Visible && model.Target.ID != 0 {
 		if portrait {
 			targetW := minf(panelWidth, maxf(220, safe.W-2*tokens.Edge))
-			l.TargetPanel = Rect{safe.X + (safe.W-targetW)/2, l.PlayerPanel.Bottom() + overlayGap, targetW, targetHeight}
+			l.TargetPanel = Rect{safe.X + (safe.W-targetW)/2, l.StatusArea.Bottom() + overlayGap, targetW, targetHeight}
 		} else {
 			targetW := minf(460, maxf(320, safe.W*0.24))
 			l.TargetPanel = Rect{safe.X + (safe.W-targetW)/2, safe.Y + tokens.Edge, targetW, targetHeight}
