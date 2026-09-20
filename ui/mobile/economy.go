@@ -26,7 +26,8 @@ func (k Kit) ShopTree(
 	if tab == mobileui.ShopSellTab {
 		items = model.SellItems
 	}
-	k.placeShopRows(c, items, layout, tab)
+	ready := !model.CartEnabled || (model.ModeReady && model.ActiveTab == tab)
+	k.placeShopRows(c, items, layout, tab, ready)
 	k.placeShopCart(c, model, layout, tab)
 	k.placeEconomyQuantity(c, layout, quantity)
 	return c
@@ -110,14 +111,18 @@ func (k Kit) placeShopRows(
 	items []mobileui.ShopItemModel,
 	layout mobileui.EconomyLayout,
 	tab mobileui.ShopTab,
+	ready bool,
 ) {
 	if layout.ListViewport.W > 0 && layout.ListViewport.H > 0 {
 		c.Place(k.Panel(), listPanel(layout))
 	}
 	if len(items) == 0 && layout.ListViewport.W > 0 && layout.ListViewport.H > 0 {
-		label := "No items available"
-		if tab == mobileui.ShopSellTab {
-			label = "No sellable items"
+		label := "Loading items…"
+		if ready {
+			label = "No items available"
+			if tab == mobileui.ShopSellTab {
+				label = "No sellable items"
+			}
 		}
 		c.Place(k.Centered(label, RoleMuted), layout.ListViewport)
 		return
