@@ -189,3 +189,25 @@ func TestTallPortraitSkillsUseCompactGrid(t *testing.T) {
 		t.Fatalf("overflowing portrait hotbar has no page controls: %+v", layout)
 	}
 }
+
+
+func TestProjectSessionCopiesProgressionIntoHUD(t *testing.T) {
+	s := &session.Session{}
+	s.Progress.BaseLevel = 16
+	s.Progress.JobLevel = 10
+	s.Progress.BaseExp = 1234
+	s.Progress.NextBaseExp = 5000
+	s.Progress.JobExp = 321
+	s.Progress.NextJobExp = 900
+	s.Stats.Points = 7
+	s.Skills.Points = 3
+
+	model := ProjectSession(s, TargetHUDModel{})
+	if model.Player.StatPoints != 7 || model.Player.SkillPoints != 3 {
+		t.Fatalf("progression points were not projected: %+v", model.Player)
+	}
+	if model.Player.BaseExp != 1234 || model.Player.NextBaseExp != 5000 ||
+		model.Player.JobExp != 321 || model.Player.NextJobExp != 900 {
+		t.Fatalf("experience progression was not projected: %+v", model.Player)
+	}
+}

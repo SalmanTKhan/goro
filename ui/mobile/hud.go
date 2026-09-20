@@ -52,8 +52,14 @@ func (k Kit) placePlayerPanel(c *Canvas, player mobileui.PlayerHUDModel, area mo
 		return
 	}
 
-	// Name and level share the first of three rows; HP and SP take the rest.
-	rowH := inner.H / 3
+	// Name / HP / SP remain the primary rows. Two thin strips at the bottom
+	// expose Base EXP and Job EXP continuously, matching the legacy client's
+	// progression feedback without increasing the card footprint.
+	expH := float32(5)
+	expGap := float32(2)
+	expBlockH := 2*expH + expGap
+	contentH := max32(0, inner.H-expBlockH-4)
+	rowH := contentH / 3
 	levelW := inner.W * 0.34
 	c.Place(k.Content(player.Name, RoleValue),
 		mobileui.Rect{X: inner.X, Y: inner.Y, W: inner.W - levelW, H: rowH})
@@ -64,10 +70,26 @@ func (k Kit) placePlayerPanel(c *Canvas, player mobileui.PlayerHUDModel, area mo
 		BarHP, int64(player.HP), int64(player.MaxHP))
 	k.placeCompactMeter(c, mobileui.Rect{X: inner.X, Y: inner.Y + 2*rowH, W: inner.W, H: rowH},
 		BarSP, int64(player.SP), int64(player.MaxSP))
+
+	expY := inner.Y + contentH + 4
+	c.Place(k.Bar(BarBaseEXP, fraction64(player.BaseExp, player.NextBaseExp)),
+		mobileui.Rect{X: inner.X, Y: expY, W: inner.W, H: expH})
+	c.Place(k.Bar(BarJobEXP, fraction64(player.JobExp, player.NextJobExp)),
+		mobileui.Rect{X: inner.X, Y: expY + expH + expGap, W: inner.W, H: expH})
 }
 
 func levelLine(player mobileui.PlayerHUDModel) string {
 	return "Lv " + strconv.Itoa(player.BaseLevel) + "/" + strconv.Itoa(player.JobLevel)
+}
+
+func fraction64(value, max int64) float32 {
+	if max <= 0 || value <= 0 {
+		return 0
+	}
+	if value >= max {
+		return 1
+	}
+	return float32(value) / float32(max)
 }
 
 func (k Kit) placeProgressionActions(c *Canvas, _ mobileui.PlayerHUDModel, layout mobileui.HUDLayout) {
