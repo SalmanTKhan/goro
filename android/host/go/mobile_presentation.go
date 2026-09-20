@@ -101,6 +101,9 @@ type mobilePresentation struct {
 	settingsController *mobileui.SurfaceController
 	settings           input.MobileSettings
 	controls           input.MobileControls
+	onlineInputMode    uint32
+	onlineUsername     string
+	onlinePassword     string
 	settingsChanged    func(input.MobileSettings) bool
 	controlsChanged    func(input.MobileControls) bool
 	chatController     *mobileui.ChatController
@@ -217,6 +220,8 @@ const (
 	// That window is a real desktop text field rather than the mobile on-screen
 	// keyboard, so the platform editor types into it.
 	androidTextInputCharacter
+	androidTextInputLoginUsername
+	androidTextInputLoginPassword
 )
 
 // SetTextInput routes the single host-native editor to the currently visible
@@ -236,6 +241,10 @@ func (p *mobilePresentation) SetTextInput(mode uint32, text string) {
 		if p.socialController != nil && p.socialController.TextInputActive() {
 			p.socialController.SetTextInputDraft(text)
 		}
+	case androidTextInputLoginUsername:
+		p.onlineUsername = text
+	case androidTextInputLoginPassword:
+		p.onlinePassword = text
 	default:
 		p.SetChatDraft(text)
 	}
@@ -247,6 +256,13 @@ func (p *mobilePresentation) syncTextInputState() {
 		// The character screen is an offline surface, so unlike chat and social
 		// this does not depend on being connected.
 		active = androidTextInputCharacter
+	} else if p != nil && p.game != nil && p.game.Online() && !p.game.SessionPlaying() &&
+		(p.onlineInputMode == androidTextInputLoginUsername || p.onlineInputMode == androidTextInputLoginPassword) {
+		if p.game.MobileLoginModel().Phase == mobileui.OnlineLoginCredentials {
+			active = p.onlineInputMode
+		} else {
+			p.onlineInputMode = androidTextInputNone
+		}
 	} else if p != nil && p.game != nil && p.game.Online() && p.chatController != nil && p.chatController.Model.Open && p.chatController.Model.CanSend {
 		active = androidTextInputChat
 	} else if p != nil && p.game != nil && p.game.Online() && p.socialController != nil && p.socialController.TextInputActive() {
@@ -503,6 +519,12 @@ func (p *mobilePresentation) Resize(width, height int) {
 		if !snapshot.Vending.Open && p.navigation.Screen == mobileui.ScreenVending {
 			p.navigation.Open(mobileui.ScreenWorldHUD)
 		}
+	}
+	// Orientation/surface changes are a hard retained-layout boundary. Drop
+	// touch capture and the old baked widget image before the next frame.
+	p.touch.Cancel()
+	if p.widgets != nil {
+		p.widgets.InvalidateSize()
 	}
 }
 
@@ -1150,6 +1172,10 @@ func (p *mobilePresentation) Draw(frame *render.Frame) {
 	if p.characters != nil && p.characters.draw(p, frame) {
 		return
 	}
+	if p.game != nil && p.game.Online() && !p.game.SessionPlaying() {
+		p.drawOnlineStatus(frame)
+		return
+	}
 	// The shared ui/mobile widget layer draws every screen that has a builder.
 	// Screens without one still fall through to the host's own drawing below.
 	if p.widgets != nil && p.widgets.drawWidgets(p, frame) {
@@ -1157,10 +1183,6 @@ func (p *mobilePresentation) Draw(frame *render.Frame) {
 	}
 	if p.startup != nil && p.startup.Phase == mobileui.StartupTitle {
 		p.drawStartup(frame)
-		return
-	}
-	if p.game.Online() && !p.game.SessionPlaying() {
-		p.drawOnlineStatus(frame)
 		return
 	}
 	if p.tradeController != nil && p.tradeController.IsOpen() {
