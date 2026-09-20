@@ -290,19 +290,31 @@ func (d *desktopPresentation) logicalPoint(x, y int) (int, int, bool) {
 
 func (d *desktopPresentation) Touch(action, x, y int, pressed bool) bool {
 	lx, ly, inside := d.logicalPoint(x, y)
+	capturedBefore := d.captured
+	blocked := inside
+	if d.game != nil {
+		if blocker, ok := d.game.ContextUIManager().(interface{ PointerBlocked(int, int) bool }); ok {
+			blocked = blocker.PointerBlocked(lx, ly)
+		}
+	}
 	if !inside && action == 0 {
+		if action == 0 || action == 1 || action == 3 || action == 6 {
+			androidLog(fmt.Sprintf("stage=desktop-touch action=%d physical=%d,%d logical=%d,%d inside=%t blocked=%t captured-before=%t consumed=false", action, x, y, lx, ly, inside, blocked, capturedBefore))
+		}
 		return false
 	}
 	// Only a gesture that began on a UI widget belongs to the desktop UI.
 	// Release events inside the fitted logical surface must otherwise fall
 	// through to the world (for example, a tap-to-move release).
 	if action != 0 && !d.captured {
+		if action == 1 || action == 3 || action == 6 {
+			androidLog(fmt.Sprintf("stage=desktop-touch action=%d physical=%d,%d logical=%d,%d inside=%t blocked=%t captured-before=%t consumed=false", action, x, y, lx, ly, inside, blocked, capturedBefore))
+		}
 		return false
 	}
-	if d.game != nil {
-		if blocker, ok := d.game.ContextUIManager().(interface{ PointerBlocked(int, int) bool }); ok && action == 0 && !blocker.PointerBlocked(lx, ly) {
-			return false
-		}
+	if action == 0 && !blocked {
+		androidLog(fmt.Sprintf("stage=desktop-touch action=%d physical=%d,%d logical=%d,%d inside=%t blocked=%t captured-before=%t consumed=false", action, x, y, lx, ly, inside, blocked, capturedBefore))
+		return false
 	}
 	if action == 0 {
 		d.captured = true
@@ -336,6 +348,9 @@ func (d *desktopPresentation) Touch(action, x, y int, pressed bool) bool {
 	d.urgentDirty = true
 	if action == 1 || action == 3 || action == 6 {
 		d.captured = false
+	}
+	if action == 0 || action == 1 || action == 3 || action == 6 {
+		androidLog(fmt.Sprintf("stage=desktop-touch action=%d physical=%d,%d logical=%d,%d inside=%t blocked=%t captured-before=%t consumed=true hovered=%T", action, x, y, lx, ly, inside, blocked, capturedBefore, d.HoveredWidget()))
 	}
 	return true
 }
