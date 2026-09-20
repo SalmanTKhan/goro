@@ -111,6 +111,9 @@ func (k Kit) placeItemDetail(c *Canvas, layout mobileui.MobileInventoryLayout, s
 	if detail.PrimaryAction != "" {
 		c.Place(k.Button(detail.PrimaryAction, buttonStateFor(detail.PrimaryEnabled)), layout.PrimaryAction)
 	}
+	if layout.ShortcutAction.W > 0 && detail.Item.Usable {
+		c.Place(k.Button("Add to Bar", ButtonNormal), layout.ShortcutAction)
+	}
 	if detail.SecondaryAction != "" {
 		c.Place(k.Button(detail.SecondaryAction, buttonStateFor(detail.SecondaryEnabled)), layout.SecondaryAction)
 	}
@@ -203,8 +206,9 @@ func IconRects(
 
 // IconPlacement pairs an item with the cell its sprite belongs in.
 type IconPlacement struct {
-	Item mobileui.InventoryItemModel
-	Rect mobileui.Rect
+	Item         mobileui.InventoryItemModel
+	Rect         mobileui.Rect
+	ShowQuantity bool
 }
 
 func inventoryItemAt(items []mobileui.InventoryItemModel, index uint16) (mobileui.InventoryItemModel, bool) {
