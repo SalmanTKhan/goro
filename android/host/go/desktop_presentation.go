@@ -302,8 +302,13 @@ func (d *desktopPresentation) Draw(frame *render.Frame) {
 		}
 	}
 	if d.image != nil {
+		// The fitted desktop UI uses a logical 1024x768-style surface. Scope
+		// that transform to this command only: gameplay overlays recorded after
+		// the UI (cursor/target hints), and actor overlays on the next frame,
+		// must remain in physical framebuffer coordinates.
 		frame.SetScreenTransform(d.scale, d.scale, d.offsetX, d.offsetY)
 		frame.DrawImage(d.image, nil)
+		frame.SetScreenTransform(1, 1, 0, 0)
 	}
 }
 
