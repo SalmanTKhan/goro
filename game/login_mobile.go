@@ -121,7 +121,14 @@ func (m *LoginMode) mobileCharacterLoginModel(ctx client.Context, model mobileui
 			entry.Occupied = true
 			entry.Name = character.Name
 			entry.Level = int(character.Level)
+			entry.JobLevel = int(character.JobLevel)
 			entry.JobName = db.JobDisplayName(int(character.Job))
+			entry.Exp = character.Exp
+			entry.Zeny = character.Money
+			entry.HP, entry.MaxHP = int(character.HP), int(character.MaxHP)
+			entry.SP, entry.MaxSP = int(character.SP), int(character.MaxSP)
+			entry.Str, entry.Agi, entry.Vit = int(character.Str), int(character.Agi), int(character.Vit)
+			entry.Int, entry.Dex, entry.Luk = int(character.Int), int(character.Dex), int(character.Luk)
 		}
 		model.Characters = append(model.Characters, entry)
 	}
@@ -188,11 +195,22 @@ func (m *LoginMode) ApplyPlayerCommand(ctx client.Context, command input.PlayerC
 		m.selectCharacterService(ctx, int(command.Slot), true)
 		return true
 
+	case input.CommandOnlineFocusCharacter:
+		if m.phase != loginPhaseCharacter || ctx.Session == nil {
+			return false
+		}
+		m.selectedSlot = clampCharacterSlot(int(command.Slot), m.maxSlots)
+		return true
+
 	case input.CommandOnlineSelectCharacter:
 		if m.phase != loginPhaseCharacter || ctx.Session == nil {
 			return false
 		}
 		m.selectedSlot = clampCharacterSlot(int(command.Slot), m.maxSlots)
+		if _, occupied := characterBySlot(ctx.Session.Characters, m.selectedSlot); !occupied {
+			m.status = "character slot is empty"
+			return false
+		}
 		m.submitSelectedCharacter(ctx)
 		return false
 
