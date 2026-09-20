@@ -124,3 +124,75 @@ func TestHUDDoesNotExposeBlankStatusControls(t *testing.T) {
 		t.Fatalf("unresolved status region remained a Character-screen hit target: %+v", hit)
 	}
 }
+
+func TestWorldUtilityControlsAreTouchSafeAndDoNotCoverSkills(t *testing.T) {
+	for _, viewport := range []Viewport{
+		FoldOuterViewport(),
+		{Width: 1280, Height: 800},
+		{Width: 390, Height: 844, SafeTop: 24, SafeBottom: 24},
+	} {
+		layout := LayoutHUD(viewport, DefaultTokens(), Fixture("loot-basic"), Navigation{})
+		controls := map[string]Rect{
+			"sit": layout.SitAction,
+			"loot": layout.LootAction,
+			"emote": layout.EmoteAction,
+		}
+		for name, rect := range controls {
+			if rect.W < DefaultTokens().MinTouchTarget || rect.H < DefaultTokens().MinTouchTarget {
+				t.Fatalf("%s control below touch target viewport=%+v rect=%+v", name, viewport, rect)
+			}
+			if rect.X < layout.Safe.X || rect.Y < layout.Safe.Y || rect.Right() > layout.Safe.Right()+0.01 || rect.Bottom() > layout.Safe.Bottom()+0.01 {
+				t.Fatalf("%s control escaped safe area viewport=%+v rect=%+v safe=%+v", name, viewport, rect, layout.Safe)
+			}
+			if rect.Intersects(layout.SkillBar) {
+				t.Fatalf("%s control overlaps skill bar viewport=%+v control=%+v skills=%+v", name, viewport, rect, layout.SkillBar)
+			}
+		}
+		if layout.SitAction.Intersects(layout.LootAction) || layout.LootAction.Intersects(layout.EmoteAction) || layout.SitAction.Intersects(layout.EmoteAction) {
+			t.Fatalf("world utility controls overlap viewport=%+v sit=%+v loot=%+v emote=%+v", viewport, layout.SitAction, layout.LootAction, layout.EmoteAction)
+		}
+	}
+}
+
+func TestQuickEmotePanelFitsSafeArea(t *testing.T) {
+	model := Fixture("normal")
+	for i := 0; i < 12; i++ {
+		model.Emotes = append(model.Emotes, EmoteModel{ID: uint8(i), Label: "emote"})
+	}
+	for _, viewport := range []Viewport{
+		FoldOuterViewport(),
+		{Width: 1280, Height: 800, SafeTop: 24, SafeRight: 24, SafeBottom: 32, SafeLeft: 24},
+		{Width: 390, Height: 844, SafeTop: 24, SafeBottom: 24},
+	} {
+		layout := LayoutHUD(viewport, DefaultTokens(), model, Navigation{EmoteOpen: true})
+		if layout.EmotePanel.W <= 0 || len(layout.EmoteRows) != len(model.Emotes) {
+			t.Fatalf("emote layout missing viewport=%+v panel=%+v rows=%d", viewport, layout.EmotePanel, len(layout.EmoteRows))
+		}
+		if layout.EmotePanel.X < layout.Safe.X || layout.EmotePanel.Y < layout.Safe.Y ||
+			layout.EmotePanel.Right() > layout.Safe.Right()+0.01 || layout.EmotePanel.Bottom() > layout.Safe.Bottom()+0.01 {
+			t.Fatalf("emote panel escaped safe area viewport=%+v panel=%+v safe=%+v", viewport, layout.EmotePanel, layout.Safe)
+		}
+		for i, row := range layout.EmoteRows {
+			if row.W < DefaultTokens().MinTouchTarget || row.H < DefaultTokens().MinTouchTarget {
+				t.Fatalf("emote %d below touch target viewport=%+v row=%+v", i, viewport, row)
+			}
+			if row.X < layout.EmotePanel.X || row.Y < layout.EmotePanel.Y ||
+				row.Right() > layout.EmotePanel.Right()+0.01 || row.Bottom() > layout.EmotePanel.Bottom()+0.01 {
+				t.Fatalf("emote %d escaped panel viewport=%+v row=%+v panel=%+v", i, viewport, row, layout.EmotePanel)
+			}
+		}
+	}
+}
+
+func TestStatusArtworkGetsConcreteIconSlots(t *testing.T) {
+	model := Fixture("many-status")
+	layout := LayoutHUD(FoldOuterViewport(), DefaultTokens(), model, Navigation{})
+	if layout.StatusArea.W <= 0 || len(layout.StatusSlots) == 0 {
+		t.Fatalf("status artwork did not produce HUD slots: area=%+v slots=%d", layout.StatusArea, len(layout.StatusSlots))
+	}
+	for i, slot := range layout.StatusSlots {
+		if slot.W <= 0 || slot.H <= 0 || !layout.StatusArea.Contains(slot.X, slot.Y) || slot.Right() > layout.StatusArea.Right()+0.01 {
+			t.Fatalf("status slot %d escaped status area: slot=%+v area=%+v", i, slot, layout.StatusArea)
+		}
+	}
+}
