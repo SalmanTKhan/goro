@@ -3196,6 +3196,7 @@ func (p *mobilePresentation) drawEconomyQuantity(frame *render.Frame) {
 	drawMobileText(frame, fmt.Sprintf("%s   %d / %d", action, c.Quantity.Value, c.Quantity.Maximum), l.QuantityModal.X+20, l.QuantityModal.Y+76, colors.text, textScale*1.08)
 	drawMobileButton(frame, l.QuantityMinus, "−", colors, textScale*1.15, false)
 	drawMobileButton(frame, l.QuantityPlus, "+", colors, textScale*1.15, false)
+	drawMobileButton(frame, l.QuantityMax, "MAX", colors, textScale*0.72, false)
 	confirmLabel := "CONFIRM"
 	if c.Shop.CartEnabled && (c.Quantity.Action == mobileui.EconomyQuantityBuy || c.Quantity.Action == mobileui.EconomyQuantitySell) {
 		confirmLabel = "ADD"
