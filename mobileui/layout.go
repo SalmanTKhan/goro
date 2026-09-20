@@ -387,9 +387,6 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 				panelX = safe.X + tokens.Edge
 			}
 			panelY := l.EmoteAction.Y - utilityGap - panelH
-			if portrait {
-				panelY = l.EmoteAction.Y
-			}
 			if panelY < safe.Y+tokens.Edge {
 				panelY = safe.Y + tokens.Edge
 			}
@@ -407,7 +404,10 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 	// utility stack. It never competes with the right combat dock.
 	lootTop := l.PlayerPanel.Bottom() + overlayGap
 	if portrait {
-		lootTop = maxf(l.StatusArea.Bottom(), l.TargetPanel.Bottom()) + tokens.Gap
+		topHUD := maxf(l.PlayerPanel.Bottom(), l.Minimap.Bottom())
+		topHUD = maxf(topHUD, l.StatusArea.Bottom())
+		topHUD = maxf(topHUD, l.TargetPanel.Bottom())
+		lootTop = topHUD + tokens.Gap
 	}
 	lootBottom := l.ChatBar.Y - overlayGap
 	for _, reserved := range []Rect{l.SitAction, l.EmoteAction} {
