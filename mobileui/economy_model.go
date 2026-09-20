@@ -34,13 +34,27 @@ type ShopItemModel struct {
 	DisabledReason string
 }
 
-type MobileShopModel struct {
-	Open      bool
-	NPCID     uint32
+type ShopCartItemModel struct {
+	ItemIndex uint16
+	ItemID    uint16
 	Name      string
-	Zeny      int64
-	Items     []ShopItemModel
-	SellItems []ShopItemModel
+	Quantity  int
+	UnitPrice int64
+	Total     int64
+}
+
+type MobileShopModel struct {
+	Open        bool
+	NPCID       uint32
+	Name        string
+	Zeny        int64
+	Items       []ShopItemModel
+	SellItems   []ShopItemModel
+	ActiveTab   ShopTab
+	ModeReady   bool
+	CartEnabled bool
+	Cart        []ShopCartItemModel
+	CartTotal   int64
 }
 
 type MobileStorageModel struct {
