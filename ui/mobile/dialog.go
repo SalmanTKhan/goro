@@ -171,6 +171,13 @@ func (w *dialogBodyWidget) Draw(_ widget.Context, canvas widget.Canvas) {
 			thumbY += travel * (offset / maxOffset)
 		}
 		canvas.DrawRoundRect(geometry.NewRect(railX, thumbY, 3, thumbH), widget.RGBA(0.20, 0.28, 0.36, 0.55), 1.5)
+		edgeW := bounds.Width() - 10
+		if offset > 0 {
+			canvas.DrawRect(geometry.NewRect(bounds.Min.X, bounds.Min.Y, edgeW, 2), widget.RGBA(0.10, 0.16, 0.22, 0.18))
+		}
+		if offset < maxOffset {
+			canvas.DrawRect(geometry.NewRect(bounds.Min.X, bounds.Max.Y-2, edgeW, 2), widget.RGBA(0.10, 0.16, 0.22, 0.18))
+		}
 	}
 }
 

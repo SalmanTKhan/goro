@@ -214,55 +214,54 @@ func LayoutDialog(viewport Viewport, model MobileDialogModel) DialogLayout {
 		pad = 16
 	}
 	messageW := maxf(0, panelW-2*pad)
+
 	actionCount := len(model.Options)
 	buttonH := float32(52)
 	if actionCount > 1 {
-		// Script menu labels are content, not authored chrome. Give them enough
-		// vertical room to wrap to two lines instead of ellipsizing the choice.
 		buttonH = 64
 	}
 	actionGap := float32(10)
+	actionColumns := dialogActionColumns(messageW, actionCount, actionGap, layout.Portrait)
 	actionH := float32(0)
-	actionColumns := 1
 	if actionCount > 0 {
-		if layout.Portrait {
-			actionH = float32(actionCount)*buttonH + float32(actionCount-1)*actionGap
-		} else {
-			actionColumns = dialogActionColumns(messageW, actionCount, actionGap)
-			rows := (actionCount + actionColumns - 1) / actionColumns
-			actionH = float32(rows)*buttonH + float32(rows-1)*actionGap
-		}
+		rows := (actionCount + actionColumns - 1) / actionColumns
+		actionH = float32(rows)*buttonH + float32(rows-1)*actionGap
 	}
+
 	noticeH := float32(0)
 	if strings.TrimSpace(model.Notice) != "" {
 		noticeH = 28
 	}
+
 	messageScale := dialogTextScale(viewport)
-	// The retained mobile theme renders body text at 28 logical pixels with
-	// ~1.3 line spacing. Use a deliberately conservative estimate here so the
-	// scroll range never ends before the real measured text does.
 	lineAdvance := maxf(36, float32(38)*messageScale)
 	messageMaxChars := maxInt(18, int(messageW/(15*messageScale)))
 	messages := dialogMessagesForLayout(model)
 	messageH := dialogMessageContentHeight(messages, messageMaxChars, lineAdvance, strings.TrimSpace(model.Title))
 	layout.MessageContentHeight = messageH
-	contentH := float32(16+56+12) + messageH
+
+	const (
+		panelTopPad    = float32(12)
+		headerH        = float32(46)
+		headerBodyGap  = float32(8)
+		sectionGap     = float32(10)
+		panelBottomPad = float32(12)
+	)
+	contentH := panelTopPad + headerH + headerBodyGap + messageH
 	if noticeH > 0 {
 		contentH += 8 + noticeH
 	}
 	if actionH > 0 {
-		contentH += 12 + actionH
+		contentH += sectionGap + actionH
 	}
-	contentH += 16
-	minimumH := float32(156)
+	contentH += panelBottomPad
+
+	minimumH := float32(148)
 	if layout.Portrait {
-		minimumH = 190
+		minimumH = 170
 	}
 	maxH := maxf(0, safe.H-24)
 	if layout.Portrait {
-		// Portrait also needs room for the NPC cut-in. Keep the conversation as
-		// a bottom sheet and scroll its body instead of allowing it to grow over
-		// the character illustration.
 		maxH = minf(maxH, safe.H*0.52)
 	} else {
 		maxH = minf(maxH, safe.H*0.72)
@@ -272,21 +271,24 @@ func LayoutDialog(viewport Viewport, model MobileDialogModel) DialogLayout {
 	if layout.Portrait {
 		panelY = safe.Bottom() - panelH - 12
 	}
+
 	layout.Panel = Rect{X: safe.X + (safe.W-panelW)/2, Y: panelY, W: panelW, H: panelH}
-	layout.Header = Rect{X: layout.Panel.X + pad, Y: layout.Panel.Y + 16, W: layout.Panel.W - 2*pad, H: 56}
-	actionBottom := layout.Panel.Bottom() - 16
+	layout.Header = Rect{X: layout.Panel.X + pad, Y: layout.Panel.Y + panelTopPad, W: layout.Panel.W - 2*pad, H: headerH}
+	actionBottom := layout.Panel.Bottom() - panelBottomPad
 	if actionH > 0 {
 		layout.Actions = Rect{X: layout.Panel.X + pad, Y: actionBottom - actionH, W: layout.Panel.W - 2*pad, H: actionH}
 	}
 	contentBottom := actionBottom
 	if actionH > 0 {
-		contentBottom = layout.Actions.Y - 12
+		contentBottom = layout.Actions.Y - sectionGap
 	}
 	if noticeH > 0 {
 		layout.Notice = Rect{X: layout.Panel.X + pad, Y: contentBottom - noticeH, W: layout.Panel.W - 2*pad, H: noticeH}
 		contentBottom = layout.Notice.Y - 8
 	}
-	layout.Message = Rect{X: layout.Panel.X + pad, Y: layout.Header.Bottom() + 12, W: layout.Panel.W - 2*pad, H: maxf(0, contentBottom-(layout.Header.Bottom()+12))}
+	messageTop := layout.Header.Bottom() + headerBodyGap
+	layout.Message = Rect{X: layout.Panel.X + pad, Y: messageTop, W: layout.Panel.W - 2*pad, H: maxf(0, contentBottom-messageTop)}
+
 	if len(model.Messages) > 0 {
 		cursorY := layout.Message.Y
 		previousSpeaker := strings.TrimSpace(model.Title)
@@ -308,54 +310,51 @@ func LayoutDialog(viewport Viewport, model MobileDialogModel) DialogLayout {
 			previousSpeaker = speaker
 		}
 	}
+
 	if actionH > 0 {
-		if layout.Portrait {
-			buttonW := maxf(0, layout.Actions.W)
-			for i, option := range model.Options {
-				y := layout.Actions.Y + float32(i)*(buttonH+actionGap)
-				layout.Options = append(layout.Options, Rect{X: layout.Actions.X, Y: y, W: buttonW, H: buttonH})
-				if option.Action == DialogClose || option.Action == DialogNPCClose {
-					layout.Close = layout.Options[len(layout.Options)-1]
-				}
-			}
-		} else {
-			columns := actionColumns
-			buttonW := minf(300, maxf(136, (layout.Actions.W-float32(columns-1)*actionGap)/float32(columns)))
-			if actionCount == 1 {
-				// A single Next/Close action is the primary conversation
-				// affordance on touch screens; make it deliberately generous.
+		columns := actionColumns
+		buttonW := (layout.Actions.W - float32(columns-1)*actionGap) / float32(columns)
+		if !layout.Portrait {
+			buttonW = minf(300, maxf(136, buttonW))
+		}
+		if actionCount == 1 {
+			if layout.Portrait {
+				buttonW = layout.Actions.W
+			} else {
 				buttonW = minf(320, layout.Actions.W)
 			}
-			for i, option := range model.Options {
-				row, column := i/columns, i%columns
-				rowStart := layout.Actions.X + (layout.Actions.W-(float32(columns)*buttonW+float32(columns-1)*actionGap))/2
-				x := rowStart + float32(column)*(buttonW+actionGap)
-				y := layout.Actions.Y + float32(row)*(buttonH+actionGap)
-				layout.Options = append(layout.Options, Rect{X: x, Y: y, W: buttonW, H: buttonH})
-				if option.Action == DialogClose || option.Action == DialogNPCClose {
-					layout.Close = layout.Options[len(layout.Options)-1]
-				}
+		}
+		for i, option := range model.Options {
+			row, column := i/columns, i%columns
+			rowStartIndex := row * columns
+			columnsInRow := minInt(columns, actionCount-rowStartIndex)
+			rowW := float32(columnsInRow)*buttonW + float32(columnsInRow-1)*actionGap
+			rowStart := layout.Actions.X + (layout.Actions.W-rowW)/2
+			x := rowStart + float32(column)*(buttonW+actionGap)
+			y := layout.Actions.Y + float32(row)*(buttonH+actionGap)
+			layout.Options = append(layout.Options, Rect{X: x, Y: y, W: buttonW, H: buttonH})
+			if option.Action == DialogClose || option.Action == DialogNPCClose {
+				layout.Close = layout.Options[len(layout.Options)-1]
 			}
 		}
 	}
 	return layout
 }
 
-func dialogActionColumns(width float32, actionCount int, gap float32) int {
+func dialogActionColumns(width float32, actionCount int, gap float32, portrait bool) int {
 	if actionCount <= 1 {
 		return 1
 	}
-	columns := maxInt(1, int((width+gap)/(220+gap)))
-	columns = minInt(columns, actionCount)
-	// More than two menu choices in a single row makes script labels unreadable
-	// on phones even when the framebuffer itself is wide.
-	if actionCount >= 3 {
-		columns = minInt(columns, 2)
+	minButtonW := float32(220)
+	if portrait {
+		minButtonW = 180
 	}
-	return columns
+	columns := maxInt(1, int((width+gap)/(minButtonW+gap)))
+	columns = minInt(columns, actionCount)
+	return minInt(columns, 2)
 }
 
-func dialogLineCount(message string, maxChars int) int {
+func dialogLineCount(message string, maxChars int) int {func dialogLineCount(message string, maxChars int) int {
 	if maxChars < 1 {
 		maxChars = 1
 	}

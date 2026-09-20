@@ -138,3 +138,47 @@ func TestNPCCutinOversizeImageAnchorsAtScreenOrigin(t *testing.T) {
 		}
 	}
 }
+
+
+func TestMobilePortraitCutinAnchorsAboveDialogAndRespectsSide(t *testing.T) {
+	screen := image.Rect(0, 0, 840, 2289)
+	texture := render.NewImage(260, 440)
+	dialogTop := 1340
+
+	right, ok := npcMobilePortraitPlacement(screen, network.NPCCutinRight, texture, dialogTop)
+	if !ok {
+		t.Fatal("right portrait cut-in placement failed")
+	}
+	rightBottom := right.Y + float64(texture.Bounds().Dy())*right.Scale
+	if rightBottom >= float64(dialogTop) || float64(dialogTop)-rightBottom > 24 {
+		t.Fatalf("right cut-in bottom %.1f is not closely anchored above dialog top %d", rightBottom, dialogTop)
+	}
+	if right.X <= float64(screen.Dx())/2 {
+		t.Fatalf("right-positioned cut-in was not placed on the right: %+v", right)
+	}
+
+	left, ok := npcMobilePortraitPlacement(screen, network.NPCCutinLeft, texture, dialogTop)
+	if !ok {
+		t.Fatal("left portrait cut-in placement failed")
+	}
+	if left.X >= right.X {
+		t.Fatalf("left/right portrait placement collapsed: left=%+v right=%+v", left, right)
+	}
+}
+
+func TestMobilePortraitCutinCapsScale(t *testing.T) {
+	screen := image.Rect(0, 0, 840, 2289)
+	texture := render.NewImage(1200, 1800)
+	placement, ok := npcMobilePortraitPlacement(screen, network.NPCCutinCenter, texture, 1400)
+	if !ok {
+		t.Fatal("portrait cut-in placement failed")
+	}
+	drawW := float64(texture.Bounds().Dx()) * placement.Scale
+	drawH := float64(texture.Bounds().Dy()) * placement.Scale
+	if drawW > float64(screen.Dx())*0.62+0.5 {
+		t.Fatalf("portrait cut-in exceeded width cap: %.2f", drawW)
+	}
+	if drawH > float64(screen.Dy())*0.34+0.5 {
+		t.Fatalf("portrait cut-in exceeded height cap: %.2f", drawH)
+	}
+}

@@ -690,11 +690,11 @@ func (g *Game) DrawMobileStatusIcon(screen *render.Frame, status mobileui.Status
 
 // DrawMobileNPCCutin reuses the desktop packet/resource state but bypasses the
 // desktop NoUI gate used by the native mobile presentation.
-func (g *Game) DrawMobileNPCCutin(screen *render.Frame) {
+func (g *Game) DrawMobileNPCCutin(screen *render.Frame, dialogTop ...int) {
 	if g == nil || g.modes == nil {
 		return
 	}
-	g.modes.DrawMobileNPCCutin(screen)
+	g.modes.DrawMobileNPCCutin(screen, dialogTop...)
 }
 
 func (g *Game) DrawMobileLoginCharacterPreview(screen *render.Frame, slot int, x, y, width, height int) {

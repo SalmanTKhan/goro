@@ -1273,9 +1273,13 @@ func (p *mobilePresentation) Draw(frame *render.Frame) {
 	}
 	// The desktop world renderer suppresses UI while the native mobile surface
 	// is active. Reintroduce only the authoritative NPC cut-in here, beneath the
-	// mobile dialog/widget layer.
+	// mobile dialog/widget layer. In portrait, anchor it to the dialog sheet.
 	if p.game != nil {
-		p.game.DrawMobileNPCCutin(frame)
+		dialogTop := 0
+		if p.dialogController != nil && p.dialogController.Model.Open {
+			dialogTop = int(p.dialogController.Layout.Panel.Y)
+		}
+		p.game.DrawMobileNPCCutin(frame, dialogTop)
 	}
 	// The shared ui/mobile widget layer draws every screen that has a builder.
 	// Screens without one still fall through to the host's own drawing below.

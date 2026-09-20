@@ -183,12 +183,12 @@ func (m *Manager) MobileDialogModel() mobileui.MobileDialogModel {
 	return mobileui.MobileDialogModel{}
 }
 
-func (m *Manager) DrawMobileNPCCutin(screen *render.Frame) {
+func (m *Manager) DrawMobileNPCCutin(screen *render.Frame, dialogTop ...int) {
 	if m == nil || screen == nil {
 		return
 	}
 	if mode, ok := m.mode.(*WorldMode); ok {
-		mode.ui.npcCutin.DrawMobile(screen)
+		mode.ui.npcCutin.DrawMobile(screen, dialogTop...)
 	}
 }
 
