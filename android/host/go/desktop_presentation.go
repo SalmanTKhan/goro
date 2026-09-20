@@ -83,6 +83,10 @@ type desktopPresentation struct {
 	rasterCount             int
 	rasterDeferred          int
 	rasterDuration          time.Duration
+	rasterMarkDuration      time.Duration
+	rasterDrawDuration      time.Duration
+	rasterFlushDuration     time.Duration
+	rasterImageDuration     time.Duration
 
 	// pointer queues touches for the polled input path, in logical UI
 	// coordinates. Widget events reach gogpu immediately, but large parts of the
@@ -242,12 +246,15 @@ func (d *desktopPresentation) Draw(frame *render.Frame) {
 					androidLog("stage=desktop-ui root=present")
 				}
 			}
-			started := time.Now()
-			if image, rasterDrawn, err := render.RasterizeUI(d.ui, d.uiWidth, d.uiHeight, d.image); err == nil {
+			if image, rasterDrawn, rasterMetrics, err := render.RasterizeUIProfiled(d.ui, d.uiWidth, d.uiHeight, d.image); err == nil {
 				d.image = image
 				if rasterDrawn {
 					d.rasterCount++
-					d.rasterDuration += time.Since(started)
+					d.rasterDuration += rasterMetrics.Total
+					d.rasterMarkDuration += rasterMetrics.MarkDirty
+					d.rasterDrawDuration += rasterMetrics.Draw
+					d.rasterFlushDuration += rasterMetrics.Flush
+					d.rasterImageDuration += rasterMetrics.ImageCopy
 					d.lastRaster = time.Now()
 				}
 				if d.image != nil && firstDraw {
@@ -391,16 +398,24 @@ func (d *desktopPresentation) SyncInput(state *input.State) {
 // desktopUIRasterMetrics is host telemetry only. It intentionally stays local
 // to the Android bridge rather than leaking presentation details into app.Game.
 type desktopUIRasterMetrics struct {
-	Count    int
-	Deferred int
-	Duration time.Duration
+	Count         int
+	Deferred      int
+	Duration      time.Duration
+	MarkDuration  time.Duration
+	DrawDuration  time.Duration
+	FlushDuration time.Duration
+	ImageDuration time.Duration
 }
 
 func (d *desktopPresentation) RasterMetrics() desktopUIRasterMetrics {
 	if d == nil {
 		return desktopUIRasterMetrics{}
 	}
-	return desktopUIRasterMetrics{Count: d.rasterCount, Deferred: d.rasterDeferred, Duration: d.rasterDuration}
+	return desktopUIRasterMetrics{
+		Count: d.rasterCount, Deferred: d.rasterDeferred, Duration: d.rasterDuration,
+		MarkDuration: d.rasterMarkDuration, DrawDuration: d.rasterDrawDuration,
+		FlushDuration: d.rasterFlushDuration, ImageDuration: d.rasterImageDuration,
+	}
 }
 
 var _ client.UIApp = (*desktopPresentation)(nil)
