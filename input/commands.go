@@ -92,6 +92,8 @@ const (
 	CommandAssignSkillHotkey
 	CommandOnlineCancelCharacterCreate
 	CommandOnlineFocusCharacter
+	// Mobile world-HUD utility actions are appended to preserve existing IDs.
+	CommandEmotion
 )
 
 // WorldPosition is a presentation-independent world target. Screen-space
@@ -121,6 +123,7 @@ type PlayerCommand struct {
 	Level            int
 	Tab              uint8
 	Choice           uint8
+	EmotionID        uint8
 	Slot             uint16
 	Text             string
 	TargetName       string
