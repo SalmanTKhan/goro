@@ -451,7 +451,7 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 	if l.LootAction.W > 0 && l.LootAction.Y < combatDockTop {
 		combatDockTop = l.LootAction.Y
 	}
-	if navigation.Targeting.Mode != input.SkillTargetIdle {	if navigation.Targeting.Mode != input.SkillTargetIdle {
+	if navigation.Targeting.Mode != input.SkillTargetIdle {
 		bannerW, bannerH := minf(440, maxf(300, safe.W*0.34)), float32(52)
 		bannerY := combatDockTop - tokens.Gap - bannerH
 		if portrait && l.TargetPanel.H > 0 {
