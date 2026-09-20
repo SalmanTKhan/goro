@@ -38,6 +38,9 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 public final class MainActivity extends Activity {
+    private static final int TEXT_INPUT_LOGIN_USERNAME = 4;
+    private static final int TEXT_INPUT_LOGIN_PASSWORD = 5;
+
     static {
         System.loadLibrary("goro_android");
         System.loadLibrary("goro_jni");
@@ -84,6 +87,17 @@ public final class MainActivity extends Activity {
         }
         getWindow().setFlags(1024, 1024);
         surfaceView = new HostSurfaceView();
+        surfaceView.addOnLayoutChangeListener((view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
+            int width = right - left;
+            int height = bottom - top;
+            if (width > 0 && height > 0 && (width != oldRight - oldLeft || height != oldBottom - oldTop)) {
+                // SurfaceHolder callbacks are not guaranteed to arrive in the
+                // same order on every device/fold posture. Report the measured
+                // layout too so the Go presentation always relayouts after a
+                // rotation or window-size change.
+                nativeSurfaceChanged(width, height);
+            }
+        });
         surfaceView.setOnApplyWindowInsetsListener((view, insets) -> {
             android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.systemBars());
             nativeSurfaceInsetsChanged(bars.left, bars.top, bars.right, bars.bottom);
@@ -154,6 +168,14 @@ public final class MainActivity extends Activity {
         chatInputMode = mode;
         chatInputActive = active;
         if (active) {
+            int inputType = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES;
+            if (mode == TEXT_INPUT_LOGIN_PASSWORD) {
+                inputType = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD;
+            } else if (mode == TEXT_INPUT_LOGIN_USERNAME) {
+                inputType = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD;
+            }
+            chatInput.setInputType(inputType);
+            chatInput.setImeOptions(EditorInfo.IME_ACTION_DONE);
             syncingChatInput = true;
             chatInput.setText("");
             syncingChatInput = false;
@@ -570,7 +592,12 @@ public final class MainActivity extends Activity {
     @Override public void onConfigurationChanged(Configuration configuration) {
         super.onConfigurationChanged(configuration);
         if (surfaceView != null) {
-            surfaceView.post(() -> surfaceView.requestApplyInsets());
+            surfaceView.post(() -> {
+                surfaceView.requestApplyInsets();
+                int width = surfaceView.getWidth();
+                int height = surfaceView.getHeight();
+                if (width > 0 && height > 0) nativeSurfaceChanged(width, height);
+            });
         }
     }
 
