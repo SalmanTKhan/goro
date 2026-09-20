@@ -449,6 +449,8 @@ func (h *host) renderLoop() {
 	var device *wgpu.Device
 	var surface *wgpu.Surface
 	var surfaceFormat gputypes.TextureFormat
+	var surfaceConfigured bool
+	var nextSurfaceConfigureAttempt time.Time
 	var state = input.NewState()
 	var goroRenderer *render.GPURenderer
 	var offlineGame *app.Game
@@ -524,21 +526,34 @@ func (h *host) renderLoop() {
 				androidLog(fmt.Sprintf("stage=surface-rebind error=%v", rebindErr))
 				return fmt.Errorf("surface rebind: %w", rebindErr)
 			}
+			surfaceConfigured = false
+			nextSurfaceConfigureAttempt = time.Time{}
 			previousFormat := surfaceFormat
-			surfaceFormat, rebindErr = configureSurface(surface, adapter, device, width, height, surfaceVSync)
+			configuredFormat, rebindErr := configureSurface(surface, adapter, device, width, height, surfaceVSync)
+			if rebindErr == errSurfaceCapabilitiesUnavailable {
+				// Android may deliver surfaceCreated before the replacement native
+				// window is ready to report Vulkan presentation capabilities. Keep
+				// the new WGPU surface alive and let surfaceChanged/resume finish the
+				// bind instead of guessing a swapchain format.
+				nextSurfaceConfigureAttempt = time.Now().Add(50 * time.Millisecond)
+				androidLog("stage=surface-rebind deferred reason=capabilities-empty")
+				return nil
+			}
 			if rebindErr != nil {
 				surface.Release()
 				surface = nil
 				return rebindErr
 			}
-			if previousFormat != surfaceFormat {
+			if previousFormat != configuredFormat {
 				// The existing renderer's pipelines target the previous swapchain
 				// format. A format change is exceptional on the same Android device;
 				// fail explicitly rather than drawing with incompatible pipelines.
 				surface.Release()
 				surface = nil
-				return fmt.Errorf("surface format changed during rebind: %s -> %s", previousFormat, surfaceFormat)
+				return fmt.Errorf("surface format changed during rebind: %s -> %s", previousFormat, configuredFormat)
 			}
+			surfaceFormat = configuredFormat
+			surfaceConfigured = true
 			offlineGame.Resize(width, height)
 			if mobile != nil {
 				mobile.Resize(width, height)
@@ -588,6 +603,8 @@ func (h *host) renderLoop() {
 		if err != nil {
 			return err
 		}
+		surfaceConfigured = true
+		nextSurfaceConfigureAttempt = time.Time{}
 		androidLog("stage=goro-renderer begin")
 		context, err := render.NewRawGPUContext(device, device.Queue(), surfaceFormat)
 		if err != nil {
@@ -648,10 +665,15 @@ func (h *host) renderLoop() {
 			cfg.Render.GraphicsAPI = "vulkan"
 			cfg.Render.NoUI = mobileSettings.Display.Presentation != input.MobilePresentationDesktop
 			surfaceVSync = cfg.Render.VSync
-			surfaceFormat, err = configureSurface(surface, adapter, device, width, height, surfaceVSync)
-			if err != nil {
-				return err
+			configuredFormat, configureErr := configureSurface(surface, adapter, device, width, height, surfaceVSync)
+			if configureErr != nil {
+				return configureErr
 			}
+			if configuredFormat != surfaceFormat {
+				return fmt.Errorf("surface format changed after renderer creation: %s -> %s", surfaceFormat, configuredFormat)
+			}
+			surfaceConfigured = true
+			nextSurfaceConfigureAttempt = time.Time{}
 			cfg.Render.Stats = false
 			cfg.Mobile = mobileSettings.Controls
 			cfg.MobileDisplay = mobileSettings.Display
@@ -798,6 +820,8 @@ func (h *host) renderLoop() {
 	}
 
 	releaseSurface := func() {
+		surfaceConfigured = false
+		nextSurfaceConfigureAttempt = time.Time{}
 		if surface != nil {
 			surface.Release()
 			surface = nil
@@ -818,16 +842,32 @@ func (h *host) renderLoop() {
 			case commandSurfaceChanged:
 				width, height = cmd.width, cmd.height
 				if surface != nil && device != nil && adapter != nil {
-					surfaceFormat, err = configureSurface(surface, adapter, device, width, height, surfaceVSync)
-					frameBuffer = nil
-					if offlineGame != nil {
-						offlineGame.Resize(width, height)
-					}
-					if mobile != nil {
-						mobile.Resize(width, height)
-					}
-					if desktop != nil {
-						desktop.Resize(width, height)
+					configuredFormat, configureErr := configureSurface(surface, adapter, device, width, height, surfaceVSync)
+					switch {
+					case configureErr == errSurfaceCapabilitiesUnavailable:
+						nextSurfaceConfigureAttempt = time.Now().Add(50 * time.Millisecond)
+						androidLog("stage=surface-configure deferred source=changed reason=capabilities-empty")
+					case configureErr != nil:
+						err = configureErr
+						releaseSurface()
+					case goroRenderer != nil && configuredFormat != surfaceFormat:
+						err = fmt.Errorf("surface format changed during resize: %s -> %s", surfaceFormat, configuredFormat)
+						releaseSurface()
+					default:
+						surfaceFormat = configuredFormat
+						surfaceConfigured = true
+						nextSurfaceConfigureAttempt = time.Time{}
+						frameBuffer = nil
+						if offlineGame != nil {
+							offlineGame.Resize(width, height)
+						}
+						if mobile != nil {
+							mobile.Resize(width, height)
+						}
+						if desktop != nil {
+							desktop.Resize(width, height)
+						}
+						androidLog(fmt.Sprintf("stage=surface-configure ready source=changed size=%dx%d", width, height))
 					}
 				}
 			case commandSurfaceInsetsChanged:
@@ -956,7 +996,38 @@ func (h *host) renderLoop() {
 			}
 			cmd.done <- err
 		case <-ticker.C:
-			if !appPaused && surface != nil && device != nil && width > 0 && height > 0 && (offlineGame == nil || offlineGame.Offline() == nil || !offlineGame.Offline().Paused) {
+			if !appPaused && surface != nil && !surfaceConfigured && device != nil && adapter != nil && width > 0 && height > 0 {
+				now := time.Now()
+				if nextSurfaceConfigureAttempt.IsZero() || !now.Before(nextSurfaceConfigureAttempt) {
+					configuredFormat, configureErr := configureSurface(surface, adapter, device, width, height, surfaceVSync)
+					switch {
+					case configureErr == errSurfaceCapabilitiesUnavailable:
+						nextSurfaceConfigureAttempt = now.Add(100 * time.Millisecond)
+					case configureErr != nil:
+						androidLog(fmt.Sprintf("stage=surface-configure retry-error=%v", configureErr))
+						releaseSurface()
+					case goroRenderer != nil && configuredFormat != surfaceFormat:
+						androidLog(fmt.Sprintf("stage=surface-configure retry-format-change old=%s new=%s", surfaceFormat, configuredFormat))
+						releaseSurface()
+					default:
+						surfaceFormat = configuredFormat
+						surfaceConfigured = true
+						nextSurfaceConfigureAttempt = time.Time{}
+						frameBuffer = nil
+						if offlineGame != nil {
+							offlineGame.Resize(width, height)
+						}
+						if mobile != nil {
+							mobile.Resize(width, height)
+						}
+						if desktop != nil {
+							desktop.Resize(width, height)
+						}
+						androidLog(fmt.Sprintf("stage=surface-rebind ready source=retry size=%dx%d", width, height))
+					}
+				}
+			}
+			if !appPaused && surfaceConfigured && surface != nil && device != nil && width > 0 && height > 0 && (offlineGame == nil || offlineGame.Offline() == nil || !offlineGame.Offline().Paused) {
 				if mobileInput != nil && len(state.TouchPoints) > 0 {
 					// MotionEvent does not generate a new callback while a finger
 					// is stationary. Feed the recognizer from the render tick so
@@ -1069,21 +1140,22 @@ func (h *host) renderLoop() {
 	}
 }
 
+var errSurfaceCapabilitiesUnavailable = fmt.Errorf("surface capabilities unavailable")
+
 func configureSurface(surface *wgpu.Surface, adapter *wgpu.Adapter, device *wgpu.Device, width, height int, vsync bool) (gputypes.TextureFormat, error) {
 	caps := adapter.GetSurfaceCapabilities(surface)
-	format := gputypes.TextureFormatBGRA8Unorm
 	alphaMode := gputypes.CompositeAlphaModeAuto
-	if caps != nil {
-		if len(caps.Formats) > 0 {
-			format = caps.Formats[0]
-		}
-		if len(caps.AlphaModes) > 0 {
-			alphaMode = caps.AlphaModes[0]
-			for _, candidate := range caps.AlphaModes {
-				if candidate == gputypes.CompositeAlphaModeOpaque {
-					alphaMode = candidate
-					break
-				}
+	if caps == nil || len(caps.Formats) == 0 {
+		androidLog(fmt.Sprintf("stage=surface-capabilities formats=%v alpha-modes=%v selected-alpha=%s", capsFormats(caps), capsAlphaModes(caps), alphaMode))
+		return 0, errSurfaceCapabilitiesUnavailable
+	}
+	format := caps.Formats[0]
+	if len(caps.AlphaModes) > 0 {
+		alphaMode = caps.AlphaModes[0]
+		for _, candidate := range caps.AlphaModes {
+			if candidate == gputypes.CompositeAlphaModeOpaque {
+				alphaMode = candidate
+				break
 			}
 		}
 	}
