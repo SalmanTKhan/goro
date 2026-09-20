@@ -58,6 +58,38 @@ func TestControllerTargetingCancelButtonEmitsCancel(t *testing.T) {
 	}
 }
 
+
+func TestControllerPrimaryActionAttacksHostileTarget(t *testing.T) {
+	var commands input.CommandBuffer
+	c := NewController(Fixture("monster"), FoldOuterViewport(), &commands)
+	if c.Layout.PrimaryAction.W < DefaultTokens().MinTouchTarget || c.Layout.PrimaryAction.H < DefaultTokens().MinTouchTarget {
+		t.Fatalf("primary action is not touch-safe: %+v", c.Layout.PrimaryAction)
+	}
+	if !c.ConsumeTouch(input.TouchPoint{X: int(c.Layout.PrimaryAction.X + 4), Y: int(c.Layout.PrimaryAction.Y + 4)}) {
+		t.Fatal("primary action touch was not owned by HUD")
+	}
+	if !c.Tap(c.Layout.PrimaryAction.X+4, c.Layout.PrimaryAction.Y+4) {
+		t.Fatal("primary action tap was not handled")
+	}
+	got := commands.Commands()
+	if len(got) != 1 || got[0].Kind != input.CommandAttackActor || got[0].ActorID != 9001 {
+		t.Fatalf("unexpected primary action command: %+v", got)
+	}
+}
+
+func TestControllerTargetFrameUsesRelationAction(t *testing.T) {
+	model := Fixture("long-target")
+	var commands input.CommandBuffer
+	c := NewController(model, FoldOuterViewport(), &commands)
+	if !c.Tap(c.Layout.TargetPanel.X+4, c.Layout.TargetPanel.Y+4) {
+		t.Fatal("target frame tap was not handled")
+	}
+	got := commands.Commands()
+	if len(got) != 1 || got[0].Kind != input.CommandInteractActor || got[0].ActorID != model.Target.ID {
+		t.Fatalf("unexpected target-frame command: %+v", got)
+	}
+}
+
 func TestControllerConsumesDisabledAndMenuControls(t *testing.T) {
 	model := Fixture("cooldowns")
 	var commands input.CommandBuffer
