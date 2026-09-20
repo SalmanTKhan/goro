@@ -166,7 +166,7 @@ func (c *NPCCutinOverlay) drawMobilePortrait(screen *render.Frame, dialogTop int
 	screen.DrawImage(c.texture, &opts)
 }
 
-func (c *NPCCutinOverlay) drawTexture(screen *render.Frame) {func (c *NPCCutinOverlay) drawTexture(screen *render.Frame) {
+func (c *NPCCutinOverlay) drawTexture(screen *render.Frame) {
 	if c == nil || screen == nil || !c.Visible() {
 		return
 	}
