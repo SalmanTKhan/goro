@@ -364,10 +364,11 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 		utilityW := float32(110)
 		utilityGap := maxf(8, tokens.Gap)
 		utilityRight := safe.Right() - tokens.Edge
-		if l.SkillBar.Right() > safe.X {
-			// When a combat target owns the far-right primary-action button,
-			// the skill bar has already moved left. Anchor to it so quick
-			// utilities cannot overlap Attack/Talk.
+		if !portrait && l.PrimaryAction.W > 0 && l.SkillBar.Right() > safe.X {
+			// In landscape the taller Attack/Talk action extends into this
+			// utility row. The skill bar has already moved left, so anchor to
+			// its right edge. Portrait keeps the row above the combat action and
+			// can use the full safe width.
 			utilityRight = l.SkillBar.Right()
 		}
 		utilityY := skillY - utilityGap - utilityH
