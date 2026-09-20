@@ -125,8 +125,10 @@ func (p *mobilePresentation) tree(k uimobile.Kit) (widget.Widget, sprites) {
 		if c.Tab == mobileui.ShopSellTab {
 			items = c.Shop.SellItems
 		}
+		art := uimobile.ShopIconRects(items, c.Layout)
+		art = append(art, uimobile.ShopCartIconRects(c.Shop.Cart, c.Layout)...)
 		return k.ShopTree(c.Shop, c.Layout, c.Tab, c.Quantity),
-			sprites{items: uimobile.ShopIconRects(items, c.Layout)}
+			sprites{items: art}
 
 	case p.economyController != nil && p.economyController.Screen == mobileui.EconomyStorage:
 		c := p.economyController
@@ -206,6 +208,20 @@ func (p *mobilePresentation) widgetStateKey() string {
 		inventoryScreen = p.inventory.State.Screen
 		inventoryOffset = p.inventory.State.Scroll.Offset
 	}
+	economyScreen := mobileui.EconomyClosed
+	economyTab := mobileui.ShopBuyTab
+	economyOffset := float32(0)
+	economyQuantityOpen := false
+	economyQuantityAction := mobileui.EconomyQuantityAction(0)
+	economyQuantityValue := 0
+	if p.economyController != nil {
+		economyScreen = p.economyController.Screen
+		economyTab = p.economyController.Tab
+		economyOffset = p.economyController.Scroll.Offset
+		economyQuantityOpen = p.economyController.Quantity.Open
+		economyQuantityAction = p.economyController.Quantity.Action
+		economyQuantityValue = p.economyController.Quantity.Value
+	}
 	characterOffset, skillOffset := float32(0), float32(0)
 	skillSelected, selectedSkill := false, -1
 	characterSkillsScreen := mobileui.ScreenWorldHUD
@@ -216,12 +232,10 @@ func (p *mobilePresentation) widgetStateKey() string {
 		skillSelected = p.characterSkills.Skills.Selection.HasSelection
 		selectedSkill = p.characterSkills.Skills.Selection.SelectedIndex
 	}
-	return fmt.Sprintf("%d|%#v|%t|%t|%t|%t|%t|%d|%d|%.2f|%d|%.2f|%.2f|%t|%d", phase, p.navigation, trade, vending, profile, chat, dialog, func() mobileui.EconomyScreen {
-		if p.economyController != nil {
-			return p.economyController.Screen
-		}
-		return mobileui.EconomyClosed
-	}(), inventoryScreen, inventoryOffset, characterSkillsScreen, characterOffset, skillOffset, skillSelected, selectedSkill)
+	return fmt.Sprintf("%d|%#v|%t|%t|%t|%t|%t|%d|%d|%.2f|%t|%d|%d|%d|%.2f|%d|%.2f|%.2f|%t|%d",
+		phase, p.navigation, trade, vending, profile, chat, dialog,
+		economyScreen, economyTab, economyOffset, economyQuantityOpen, economyQuantityAction, economyQuantityValue,
+		inventoryScreen, inventoryOffset, characterSkillsScreen, characterOffset, skillOffset, skillSelected, selectedSkill)
 }
 
 // drawWidgets renders the current screen through the widget layer. It reports
