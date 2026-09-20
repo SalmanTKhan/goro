@@ -3161,7 +3161,8 @@ func (p *mobilePresentation) drawEconomy(frame *render.Frame) {
 		if c.Tab == mobileui.ShopSellTab {
 			title, action = "SELLING", "SELL"
 		}
-		drawMobileTextFit(frame, title+" — TAP LINE TO REMOVE", layout.CartPanel.X+10, layout.CartPanel.Y+10, layout.CartPanel.W-20, colors.title, textScale*0.66)
+		drawMobileTextFit(frame, title, layout.CartPanel.X+10, layout.CartPanel.Y+7, layout.CartPanel.W-20, colors.title, textScale*0.72)
+		drawMobileTextFit(frame, "TAP ITEM TO REMOVE", layout.CartPanel.X+10, layout.CartPanel.Y+31, layout.CartPanel.W-20, colors.muted, textScale*0.54)
 		for i, row := range layout.CartRows {
 			if i >= len(shop.Cart) {
 				break
