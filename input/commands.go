@@ -95,6 +95,10 @@ const (
 	// Mobile world-HUD utility actions are appended to preserve existing IDs.
 	CommandEmotion
 	CommandAssignItemHotkey
+	// Mobile NPC shop cart actions are appended to preserve all existing command IDs.
+	CommandShopCartAdd
+	CommandShopCartRemove
+	CommandShopCartConfirm
 )
 
 // WorldPosition is a presentation-independent world target. Screen-space
