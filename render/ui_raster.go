@@ -13,11 +13,13 @@ import (
 // be optimized independently. Total includes context allocation/clear and any
 // small bookkeeping not represented by the named sub-phases.
 type UIRasterMetrics struct {
-	MarkDirty time.Duration
-	Draw      time.Duration
-	Flush     time.Duration
-	ImageCopy time.Duration
-	Total     time.Duration
+	MarkDirty    time.Duration
+	Draw         time.Duration
+	Flush        time.Duration
+	ImageCopy    time.Duration
+	Total        time.Duration
+	DirtyRegions int
+	FullRepaint  bool
 }
 
 // RasterizeUI draws the shared Gogpu widget tree into a retained Goro image.
@@ -62,6 +64,8 @@ func RasterizeUIProfiled(app *uiapp.App, width, height int, dst *Image) (*Image,
 	phase = time.Now()
 	drawn := win.DrawTo(uirender.NewCanvas(dc, width, height))
 	metrics.Draw = time.Since(phase)
+	metrics.DirtyRegions = win.DirtyRegionCount()
+	metrics.FullRepaint = win.WasFullRepaint()
 	if !drawn {
 		metrics.Total = time.Since(started)
 		return dst, false, metrics, nil
@@ -145,6 +149,8 @@ func (r *IncrementalUIRasterizer) Rasterize(app *uiapp.App, width, height int, d
 	phase := time.Now()
 	drawn := win.DrawTo(uirender.NewCanvas(r.dc, width, height))
 	metrics.Draw = time.Since(phase)
+	metrics.DirtyRegions = win.DirtyRegionCount()
+	metrics.FullRepaint = win.WasFullRepaint()
 	if !drawn {
 		metrics.Total = time.Since(started)
 		return dst, false, metrics, nil
