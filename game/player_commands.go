@@ -110,6 +110,11 @@ func (m *WorldMode) ApplyPlayerCommand(ctx client.Context, command input.PlayerC
 		return true
 	case input.CommandToggleSit:
 		return m.toggleControllerSit(ctx)
+	case input.CommandEmotion:
+		if ctx.Network == nil {
+			return false
+		}
+		return ctx.Network.SendEmotion(command.EmotionID) == nil
 	case input.CommandCancelAction:
 		m.cancelControllerAction(ctx)
 		if ctx.Offline != nil {
