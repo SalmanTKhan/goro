@@ -191,19 +191,20 @@ func (k Kit) placeShopCart(c *Canvas, model mobileui.MobileShopModel, layout mob
 	if tab == mobileui.ShopSellTab {
 		title = "Selling"
 	}
-	titleRect := mobileui.Rect{X: layout.CartPanel.X + 10, Y: layout.CartPanel.Y + 4, W: layout.CartPanel.W - 20, H: 34}
-	c.Place(k.Content(title+" — tap line to remove", RoleTitle), titleRect)
+	titleRect := mobileui.Rect{X: layout.CartPanel.X + 10, Y: layout.CartPanel.Y + 4, W: layout.CartPanel.W - 20, H: 28}
+	hintRect := mobileui.Rect{X: titleRect.X, Y: titleRect.Bottom(), W: titleRect.W, H: 22}
+	c.Place(k.Content(title, RoleTitle), titleRect)
+	c.Place(k.Text("Tap item to remove", RoleMuted), hintRect)
 
 	if len(model.Cart) == 0 {
 		body := mobileui.Rect{
-			X: layout.CartPanel.X + 12, Y: titleRect.Bottom(),
-			W: layout.CartPanel.W - 24, H: max32(0, layout.CartSubtotal.Y-titleRect.Bottom()),
+			X: layout.CartPanel.X + 12, Y: hintRect.Bottom(),
+			W: layout.CartPanel.W - 24, H: max32(0, layout.CartSubtotal.Y-hintRect.Bottom()),
 		}
 		if body.H > 0 {
 			c.Place(k.Centered("No items selected", RoleMuted), body)
 		}
 	}
-	pad := k.Theme.Metrics.TableCellPadX
 	for i, row := range layout.CartRows {
 		if i >= len(model.Cart) {
 			break
@@ -211,13 +212,18 @@ func (k Kit) placeShopCart(c *Canvas, model mobileui.MobileShopModel, layout mob
 		item := model.Cart[i]
 		c.Place(k.Card(false), row)
 		iconW := row.H
-		textX := row.X + iconW + pad
-		textW := max32(0, row.Right()-pad-textX)
-		priceW := textW * 0.40
-		nameW := max32(0, textW-priceW)
-		c.Place(k.Content(item.Name, RoleValue), mobileui.Rect{X: textX, Y: row.Y, W: nameW, H: row.H * 0.55})
-		c.Place(k.Content("x"+strconv.Itoa(item.Quantity), RoleMuted), mobileui.Rect{X: textX, Y: row.Y + row.H*0.52, W: nameW, H: row.H * 0.44})
-		c.Place(k.RightAligned(zenyLabel(item.Total), RoleValue), mobileui.Rect{X: textX + nameW, Y: row.Y, W: priceW, H: row.H})
+		titleLine, subtitleLine := k.RowLines(row, iconW)
+		if titleLine.W <= 0 {
+			continue
+		}
+		priceW := titleLine.W * 0.40
+		nameW := max32(0, titleLine.W-priceW)
+		c.Place(k.Content(item.Name, RoleValue),
+			mobileui.Rect{X: titleLine.X, Y: titleLine.Y, W: nameW, H: titleLine.H})
+		c.Place(k.Text("x"+strconv.Itoa(item.Quantity), RoleMuted),
+			mobileui.Rect{X: subtitleLine.X, Y: subtitleLine.Y, W: nameW, H: subtitleLine.H})
+		c.Place(k.RightAligned(zenyLabel(item.Total), RoleValue),
+			mobileui.Rect{X: titleLine.X + nameW, Y: titleLine.Y, W: priceW, H: titleLine.H + subtitleLine.H})
 	}
 	if layout.CartSubtotal.W > 0 {
 		c.Place(k.RightAligned("Subtotal "+zenyLabel(model.CartTotal), RoleValue), layout.CartSubtotal)
