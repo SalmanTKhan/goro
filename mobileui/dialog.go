@@ -175,23 +175,26 @@ func dialogMessagesForLayout(model MobileDialogModel) []DialogMessage {
 	return []DialogMessage{{Text: model.Message}}
 }
 
-func dialogMessageContentHeight(messages []DialogMessage, maxChars int, lineAdvance float32) float32 {
+func dialogMessageContentHeight(messages []DialogMessage, maxChars int, lineAdvance float32, initialSpeaker string) float32 {
 	height := float32(0)
-	previousSpeaker := ""
+	previousSpeaker := strings.TrimSpace(initialSpeaker)
 	for i, message := range messages {
-		if speaker := strings.TrimSpace(message.Speaker); speaker != "" && speaker != previousSpeaker {
-			height += 28
+		speaker := strings.TrimSpace(message.Speaker)
+		if speaker != "" && speaker != previousSpeaker {
+			height += 24
 			if height > 0 {
-				height += 4
+				height += 3
 			}
 		}
 		if i > 0 {
-			height += 8
+			height += 3
 		}
 		height += float32(dialogLineCount(message.Text, maxChars)) * lineAdvance
-		previousSpeaker = strings.TrimSpace(message.Speaker)
+		if speaker != "" {
+			previousSpeaker = speaker
+		}
 	}
-	return maxf(72, height)
+	return maxf(64, height)
 }
 
 func LayoutDialog(viewport Viewport, model MobileDialogModel) DialogLayout {
@@ -201,9 +204,9 @@ func LayoutDialog(viewport Viewport, model MobileDialogModel) DialogLayout {
 		return layout
 	}
 	layout.Portrait = viewport.IsPortrait()
-	panelW := minf(760, maxf(0, safe.W*0.68))
+	panelW := minf(680, maxf(0, safe.W*0.62))
 	if layout.Portrait {
-		panelW = maxf(0, safe.W-24)
+		panelW = maxf(0, safe.W-20)
 	}
 	pad := float32(20)
 	if layout.Portrait {
@@ -211,8 +214,8 @@ func LayoutDialog(viewport Viewport, model MobileDialogModel) DialogLayout {
 	}
 	messageW := maxf(0, panelW-2*pad)
 	actionCount := len(model.Options)
-	buttonH := float32(56)
-	actionGap := float32(12)
+	buttonH := float32(52)
+	actionGap := float32(10)
 	actionH := float32(0)
 	if actionCount > 0 {
 		if layout.Portrait {
@@ -228,11 +231,11 @@ func LayoutDialog(viewport Viewport, model MobileDialogModel) DialogLayout {
 	if strings.TrimSpace(model.Notice) != "" {
 		noticeH = 28
 	}
-	messageScale := dialogTextScale(viewport) * 1.08
-	lineAdvance := maxf(24, float32(27)*dialogTextScale(viewport))
+	messageScale := dialogTextScale(viewport)
+	lineAdvance := maxf(20, float32(23)*dialogTextScale(viewport))
 	messageMaxChars := maxInt(28, int(messageW/(11*messageScale)))
 	messages := dialogMessagesForLayout(model)
-	messageH := dialogMessageContentHeight(messages, messageMaxChars, lineAdvance)
+	messageH := dialogMessageContentHeight(messages, messageMaxChars, lineAdvance, strings.TrimSpace(model.Title))
 	contentH := float32(16+56+12) + messageH
 	if noticeH > 0 {
 		contentH += 8 + noticeH
@@ -241,9 +244,9 @@ func LayoutDialog(viewport Viewport, model MobileDialogModel) DialogLayout {
 		contentH += 12 + actionH
 	}
 	contentH += 16
-	minimumH := float32(180)
+	minimumH := float32(156)
 	if layout.Portrait {
-		minimumH = 220
+		minimumH = 190
 	}
 	maxH := maxf(0, safe.H-24)
 	if !layout.Portrait {
@@ -271,16 +274,16 @@ func LayoutDialog(viewport Viewport, model MobileDialogModel) DialogLayout {
 	layout.Message = Rect{X: layout.Panel.X + pad, Y: layout.Header.Bottom() + 12, W: layout.Panel.W - 2*pad, H: maxf(0, contentBottom-(layout.Header.Bottom()+12))}
 	if len(model.Messages) > 0 {
 		cursorY := layout.Message.Y
-		previousSpeaker := ""
+		previousSpeaker := strings.TrimSpace(model.Title)
 		for i, message := range messages {
 			speaker := strings.TrimSpace(message.Speaker)
 			if speaker != "" && speaker != previousSpeaker {
-				speakerRect := Rect{X: layout.Message.X, Y: cursorY, W: layout.Message.W, H: 28}
+				speakerRect := Rect{X: layout.Message.X, Y: cursorY, W: layout.Message.W, H: 24}
 				layout.MessageBlocks = append(layout.MessageBlocks, DialogMessageLayout{Speaker: speaker, Text: message.Text, SpeakerRect: speakerRect})
 				cursorY = speakerRect.Bottom() + 4
 			} else {
 				if i > 0 {
-					cursorY += 8
+					cursorY += 3
 				}
 				layout.MessageBlocks = append(layout.MessageBlocks, DialogMessageLayout{Speaker: speaker, Text: message.Text})
 			}
