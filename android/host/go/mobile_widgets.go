@@ -206,12 +206,22 @@ func (p *mobilePresentation) widgetStateKey() string {
 		inventoryScreen = p.inventory.State.Screen
 		inventoryOffset = p.inventory.State.Scroll.Offset
 	}
-	return fmt.Sprintf("%d|%#v|%t|%t|%t|%t|%t|%d|%d|%.2f", phase, p.navigation, trade, vending, profile, chat, dialog, func() mobileui.EconomyScreen {
+	characterOffset, skillOffset := float32(0), float32(0)
+	skillSelected, selectedSkill := false, -1
+	characterSkillsScreen := mobileui.ScreenWorldHUD
+	if p.characterSkills != nil {
+		characterSkillsScreen = p.characterSkills.Screen
+		characterOffset = p.characterSkills.CharacterOffset
+		skillOffset = p.characterSkills.SkillOffset
+		skillSelected = p.characterSkills.Skills.Selection.HasSelection
+		selectedSkill = p.characterSkills.Skills.Selection.SelectedIndex
+	}
+	return fmt.Sprintf("%d|%#v|%t|%t|%t|%t|%t|%d|%d|%.2f|%d|%.2f|%.2f|%t|%d", phase, p.navigation, trade, vending, profile, chat, dialog, func() mobileui.EconomyScreen {
 		if p.economyController != nil {
 			return p.economyController.Screen
 		}
 		return mobileui.EconomyClosed
-	}(), inventoryScreen, inventoryOffset)
+	}(), inventoryScreen, inventoryOffset, characterSkillsScreen, characterOffset, skillOffset, skillSelected, selectedSkill)
 }
 
 // drawWidgets renders the current screen through the widget layer. It reports
