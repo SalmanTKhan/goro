@@ -385,9 +385,24 @@ func (g *Game) MobileHUDModel() mobileui.MobileHUDModel {
 	}
 	target := inputTargetHUD(g.offline)
 	if g.mobileTarget.Visible {
-		target = g.mobileTarget
+		if refreshed, ok := g.modes.InspectMobileTarget(g.modeContext(), g.mobileTarget.ID); ok &&
+			refreshed.Visible && !(refreshed.Relation == mobileui.TargetHostile && refreshed.MaxHP > 0 && refreshed.HP <= 0) {
+			g.mobileTarget = refreshed
+			target = refreshed
+		} else {
+			// Mobile selection is presentation state. Never let a dead/despawned
+			// actor pin the target frame after world authority removed it.
+			g.mobileTarget = mobileui.TargetHUDModel{}
+		}
 	}
 	model := mobileui.ProjectSession(g.session, target)
+	if g.resource != nil {
+		for i := range model.Skills {
+			if name, ok := g.resource.SkillDisplayName(int(model.Skills[i].SkillID)); ok {
+				model.Skills[i].Name = name
+			}
+		}
+	}
 	if g.world != nil && g.world.GND != nil {
 		model.Minimap.Raster = mobileMinimapRaster(g.world.GND)
 	}
@@ -544,7 +559,23 @@ func (g *Game) MobileSkillsModel() mobileui.MobileSkillsModel {
 	if g == nil {
 		return mobileui.MobileSkillsModel{}
 	}
-	return mobileui.ProjectSkills(g.session)
+	model := mobileui.ProjectSkills(g.session)
+	if g.resource == nil {
+		return model
+	}
+	for i := range model.Skills {
+		skill := &model.Skills[i]
+		if name, ok := g.resource.SkillDisplayName(int(skill.SkillID)); ok {
+			skill.Name = name
+		}
+		if description, ok := g.resource.SkillDescription(int(skill.SkillID)); ok {
+			skill.Description = description
+		}
+		if maximum, ok := g.resource.SkillMaxLevel(int(skill.SkillID)); ok && maximum > 0 {
+			skill.MaxLevel = maximum
+		}
+	}
+	return model
 }
 
 func (g *Game) MobileShopModel(npcID uint32) mobileui.MobileShopModel {
