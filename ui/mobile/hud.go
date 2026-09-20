@@ -30,7 +30,7 @@ func (k Kit) HUDTree(
 	k.placeStatusEffects(c, model.Statuses, layout.StatusSlots)
 	k.placeMinimap(c, model.Minimap, layout.Minimap)
 	k.placeLoot(c, model.Loot, layout)
-	k.placeSkillBar(c, model.Skills, layout, nav)
+	k.placeSkillBar(c, model, layout, nav)
 	k.placePrimaryAction(c, model.Target, layout.PrimaryAction)
 	k.placeWorldUtilities(c, model, layout, nav)
 	k.placeChatBar(c, layout)
@@ -237,7 +237,7 @@ func lootLabel(item mobileui.LootItemModel) string {
 // placeSkillBar draws the hotbar plus its paging controls.
 func (k Kit) placeSkillBar(
 	c *Canvas,
-	skills []mobileui.SkillSlotModel,
+	model mobileui.MobileHUDModel,
 	layout mobileui.HUDLayout,
 	nav mobileui.Navigation,
 ) {
@@ -249,23 +249,27 @@ func (k Kit) placeSkillBar(
 			continue
 		}
 		index := layout.SkillStart + i
-		if index >= len(skills) {
-			// An empty hotbar position still reads as a slot.
+		shortcut, ok := mobileui.ShortcutAt(model, index)
+		if !ok {
 			c.Place(k.Slot(false, false), slot)
 			continue
 		}
-		skill := skills[index]
-		targeting := nav.Targeting.Mode != 0 && nav.Targeting.SkillID == skill.SkillID
-		c.Place(k.Slot(true, targeting), slot)
-
-		// Level sits along the bottom of the slot, out of the sprite's way; a
-		// skill that cannot be used right now is shown muted rather than hidden.
-		role := RoleMuted
-		if !skill.Usable {
-			role = RoleLabel
+		switch shortcut.Kind {
+		case mobileui.ShortcutItem:
+			c.Place(k.Slot(true, false), slot)
+		case mobileui.ShortcutSkill:
+			skill := shortcut.Skill
+			targeting := nav.Targeting.Mode != 0 && nav.Targeting.SkillID == skill.SkillID
+			c.Place(k.Slot(true, targeting), slot)
+			role := RoleMuted
+			if !skill.Usable {
+				role = RoleLabel
+			}
+			c.Place(k.Centered("Lv"+strconv.Itoa(skill.Level), role),
+				quantityBadgeRect(slot, k.Theme.Metrics.TableCellPadX))
+		default:
+			c.Place(k.Slot(false, false), slot)
 		}
-		c.Place(k.Centered("Lv"+strconv.Itoa(skill.Level), role),
-			quantityBadgeRect(slot, k.Theme.Metrics.TableCellPadX))
 	}
 	if layout.SkillPagePrev.W > 0 {
 		c.Place(k.Button("‹", ButtonNormal), layout.SkillPagePrev)
@@ -406,18 +410,30 @@ func HUDIconRects(
 ) (skills []SkillIconPlacement, loot []IconPlacement) {
 	for i, slot := range layout.SkillSlots {
 		index := layout.SkillStart + i
-		if index >= len(model.Skills) || slot.W <= 0 {
+		shortcut, ok := mobileui.ShortcutAt(model, index)
+		if !ok || slot.W <= 0 {
 			continue
 		}
-		skills = append(skills, SkillIconPlacement{
-			Skill: mobileui.MobileSkillModel{
-				SkillID: model.Skills[index].SkillID,
-				Name:    model.Skills[index].Name,
-				Level:   model.Skills[index].Level,
-				IconKey: model.Skills[index].IconKey,
-			},
-			Rect: slot,
-		})
+		switch shortcut.Kind {
+		case mobileui.ShortcutSkill:
+			skill := shortcut.Skill
+			skills = append(skills, SkillIconPlacement{
+				Skill: mobileui.MobileSkillModel{
+					SkillID: skill.SkillID,
+					Name:    skill.Name,
+					Level:   skill.Level,
+					IconKey: skill.IconKey,
+				},
+				Rect: slot,
+			})
+		case mobileui.ShortcutItem:
+			inset := slot.W * 0.08
+			loot = append(loot, IconPlacement{
+				Item: shortcut.Item,
+				Rect: mobileui.Rect{X: slot.X + inset, Y: slot.Y + inset, W: slot.W - 2*inset, H: slot.H - 2*inset},
+				ShowQuantity: true,
+			})
+		}
 	}
 	for i, row := range layout.LootRows {
 		if i >= len(model.Loot) || row.W <= 0 {
