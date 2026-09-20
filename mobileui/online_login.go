@@ -164,19 +164,21 @@ func LayoutOnlineLogin(viewport Viewport, model MobileOnlineLoginModel) OnlineLo
 			}
 			layout.CharacterInfo = Rect{X: innerX + slotAreaW + gap, Y: pageTop, W: infoW, H: slotH}
 		} else {
-			infoH := minf(190, maxf(130, (contentBottom-pageTop)*0.42))
-			slotAreaBottom := contentBottom - infoH - gap
-			slotH := maxf(96, slotAreaBottom-pageTop)
+			availableH := maxf(0, contentBottom-pageTop)
+			infoH := minf(190, maxf(130, availableH*0.30))
+			slotH := minf(320, maxf(140, availableH-infoH-gap))
+			usedH := slotH + gap + infoH
+			contentY := pageTop + maxf(0, (availableH-usedH)/2)
 			cellW := (innerW - 2*gap) / 3
 			for i := 0; i < 3; i++ {
 				layout.Slots = append(layout.Slots, Rect{
 					X: innerX + float32(i)*(cellW+gap),
-					Y: pageTop,
+					Y: contentY,
 					W: cellW,
 					H: slotH,
 				})
 			}
-			layout.CharacterInfo = Rect{X: innerX, Y: slotAreaBottom + gap, W: innerW, H: infoH}
+			layout.CharacterInfo = Rect{X: innerX, Y: contentY + slotH + gap, W: innerW, H: infoH}
 		}
 		layout.PageLabel = Rect{X: innerX, Y: footerY - 26, W: innerW, H: 22}
 
