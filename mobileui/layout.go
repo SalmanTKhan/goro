@@ -119,12 +119,14 @@ func LayoutMobileScreenHeader(panel Rect, backWidth, actionWidth float32) Mobile
 }
 
 type HUDLayout struct {
-	Safe, PlayerPanel, TargetPanel, LootPanel, Minimap, Menu, StatusArea, ChatBar, ChatLabel, ChatPrompt, ChatButton, SkillBar, SkillPagePrev, SkillPageNext, PrimaryAction, MenuPanel, CombatBanner, CombatCancel Rect
-	SkillSlots                                                                                                                                                                                      []Rect
-	SkillStart                                                                                                                                                                                      int
-	SkillsPerPage                                                                                                                                                                                   int
-	LootRows                                                                                                                                                                                        []Rect
-	MenuActions                                                                                                                                                                                     []MenuAction
+	Safe, PlayerPanel, TargetPanel, LootPanel, Minimap, Menu, StatusArea, ChatBar, ChatLabel, ChatPrompt, ChatButton, SkillBar, SkillPagePrev, SkillPageNext, PrimaryAction, SitAction, LootAction, EmoteAction, EmotePanel, MenuPanel, CombatBanner, CombatCancel Rect
+	SkillSlots                                                                                                                                                                                                                       []Rect
+	StatusSlots                                                                                                                                                                                                                      []Rect
+	EmoteRows                                                                                                                                                                                                                        []Rect
+	SkillStart                                                                                                                                                                                                                       int
+	SkillsPerPage                                                                                                                                                                                                                    int
+	LootRows                                                                                                                                                                                                                         []Rect
+	MenuActions                                                                                                                                                                                                                      []MenuAction
 }
 
 func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, navigation Navigation) HUDLayout {
@@ -193,7 +195,7 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 		}
 	}
 	if hasStatusArtwork {
-		statusW := minf(320, maxf(150, safe.W*0.26))
+		statusW := minf(360, maxf(150, safe.W*0.26))
 		if portrait {
 			statusW = maxf(0, safe.W-2*tokens.Edge)
 			l.StatusArea = Rect{safe.X + tokens.Edge, maxf(l.PlayerPanel.Bottom(), l.Minimap.Bottom()) + tokens.Gap, statusW, 64}
@@ -202,6 +204,16 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 				statusW = maxf(0, safe.Right()-l.PlayerPanel.Right()-2*overlayGap)
 			}
 			l.StatusArea = Rect{l.PlayerPanel.Right() + overlayGap, l.PlayerPanel.Y, statusW, 48}
+		}
+		side := minf(l.StatusArea.H, 48)
+		gap := maxf(4, tokens.Gap/2)
+		x := l.StatusArea.X
+		for range model.Statuses {
+			if x+side > l.StatusArea.Right()+0.01 {
+				break
+			}
+			l.StatusSlots = append(l.StatusSlots, Rect{X: x, Y: l.StatusArea.Y, W: side, H: side})
+			x += side + gap
 		}
 	}
 	chatW := minf(380, maxf(240, safe.W*0.30))
@@ -339,6 +351,55 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 		layoutX := l.SkillBar.X + float32(i)*(slotW+tokens.Gap)
 		l.SkillSlots = append(l.SkillSlots, Rect{layoutX, l.SkillBar.Y, slotW, l.SkillBar.H})
 	}
+
+	// Three one-tap world utilities sit directly above the combat bar. They are
+	// deliberately separate from the overflow menu: sit/stand and pickup are
+	// moment-to-moment gameplay actions, and emotes need to be reachable without
+	// covering the world with a full screen.
+	utilityH := maxf(tokens.MinTouchTarget, 52)
+	utilityW := float32(88)
+	if portrait {
+		utilityW = 84
+	}
+	utilityGap := maxf(8, tokens.Gap)
+	utilityRight := safe.Right() - tokens.Edge
+	utilityY := skillY - utilityGap - utilityH
+	if utilityY < safe.Y+tokens.Edge {
+		utilityY = safe.Y + tokens.Edge
+	}
+	l.EmoteAction = Rect{X: utilityRight - utilityW, Y: utilityY, W: utilityW, H: utilityH}
+	l.LootAction = Rect{X: l.EmoteAction.X - utilityGap - utilityW, Y: utilityY, W: utilityW, H: utilityH}
+	l.SitAction = Rect{X: l.LootAction.X - utilityGap - utilityW, Y: utilityY, W: utilityW, H: utilityH}
+
+	if navigation.EmoteOpen && len(model.Emotes) > 0 {
+		columns := 6
+		if portrait {
+			columns = 4
+		}
+		if columns > len(model.Emotes) {
+			columns = len(model.Emotes)
+		}
+		rows := (len(model.Emotes) + columns - 1) / columns
+		buttonW, buttonH := float32(68), maxf(tokens.MinTouchTarget, 48)
+		emoteGap, pad := float32(8), float32(10)
+		panelW := 2*pad + float32(columns)*buttonW + float32(columns-1)*emoteGap
+		panelH := 2*pad + float32(rows)*buttonH + float32(rows-1)*emoteGap
+		panelX := utilityRight - panelW
+		if panelX < safe.X+tokens.Edge {
+			panelX = safe.X + tokens.Edge
+		}
+		panelY := utilityY - utilityGap - panelH
+		if panelY < safe.Y+tokens.Edge {
+			panelY = safe.Y + tokens.Edge
+		}
+		l.EmotePanel = Rect{X: panelX, Y: panelY, W: panelW, H: panelH}
+		for i := range model.Emotes {
+			row, col := i/columns, i%columns
+			x := l.EmotePanel.X + pad + float32(col)*(buttonW+emoteGap)
+			y := l.EmotePanel.Y + pad + float32(row)*(buttonH+emoteGap)
+			l.EmoteRows = append(l.EmoteRows, Rect{X: x, Y: y, W: buttonW, H: buttonH})
+		}
+	}
 	if navigation.Targeting.Mode != input.SkillTargetIdle {
 		bannerW, bannerH := minf(440, maxf(300, safe.W*0.34)), float32(52)
 		bannerY := l.SkillBar.Y - tokens.Gap - bannerH
@@ -387,16 +448,35 @@ const (
 	ControlSkillPagePrev
 	ControlSkillPageNext
 	ControlPrimaryAction
+	ControlSit
+	ControlLoot
+	ControlEmoteToggle
+	ControlEmote
 )
 
 type Hit struct {
 	Control    ControlID
 	SkillIndex int
 	LootIndex  int
+	EmoteIndex int
 	Screen     Screen
 }
 
 func (l HUDLayout) HitTest(x, y float32) Hit {
+	for i, rect := range l.EmoteRows {
+		if rect.Contains(x, y) {
+			return Hit{Control: ControlEmote, EmoteIndex: i}
+		}
+	}
+	if l.EmoteAction.Contains(x, y) {
+		return Hit{Control: ControlEmoteToggle}
+	}
+	if l.LootAction.Contains(x, y) {
+		return Hit{Control: ControlLoot}
+	}
+	if l.SitAction.Contains(x, y) {
+		return Hit{Control: ControlSit}
+	}
 	if l.CombatCancel.Contains(x, y) {
 		return Hit{Control: ControlCancelAction}
 	}
