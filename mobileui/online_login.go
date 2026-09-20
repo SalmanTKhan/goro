@@ -84,6 +84,11 @@ func LayoutOnlineLogin(viewport Viewport, model MobileOnlineLoginModel) OnlineLo
 	panelW := minf(1120, maxf(0, safe.W-32))
 	if !portrait {
 		panelW = minf(920, maxf(0, safe.W*0.72))
+		if model.Phase == OnlineLoginCharacters {
+			// Character cards plus the desktop-style stat summary benefit from
+			// the wide landscape canvas; login forms remain deliberately narrow.
+			panelW = minf(1120, maxf(0, safe.W-48))
+		}
 	}
 	panelH := maxf(0, safe.H-32)
 	layout.Panel = Rect{X: safe.X + (safe.W-panelW)/2, Y: safe.Y + (safe.H-panelH)/2, W: panelW, H: panelH}
