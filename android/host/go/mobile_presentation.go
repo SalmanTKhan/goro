@@ -1252,6 +1252,16 @@ func (p *mobilePresentation) Release(id input.TouchID, x, y int) {
 			p.chatController.Open(p.game.MobileChatModel())
 			p.navigation.OpenLayer(mobileui.ScreenWorldHUD, mobileui.NavigationDetailSheet, "chat")
 		}
+	case mobileui.ControlLevelUp:
+		if p.characterSkills != nil {
+			p.characterSkills.Open(mobileui.ScreenCharacter)
+			p.navigation.Open(mobileui.ScreenCharacter)
+		}
+	case mobileui.ControlSkillUp:
+		if p.characterSkills != nil {
+			p.characterSkills.Open(mobileui.ScreenSkills)
+			p.navigation.Open(mobileui.ScreenSkills)
+		}
 	case mobileui.ControlSkill, mobileui.ControlLootItem, mobileui.ControlSkillPagePrev, mobileui.ControlSkillPageNext,
 		mobileui.ControlPrimaryAction, mobileui.ControlTarget, mobileui.ControlSit, mobileui.ControlLoot,
 		mobileui.ControlEmoteToggle, mobileui.ControlEmote:
@@ -1840,6 +1850,12 @@ func (p *mobilePresentation) drawHUD(frame *render.Frame) {
 	drawMobileBar(frame, "HP", l.PlayerPanel.X+12, l.PlayerPanel.Y+68, l.PlayerPanel.W-24, 22, p.hudModel.Player.HP, p.hudModel.Player.MaxHP, colors.hp, colors, textScale)
 	drawMobileBar(frame, "SP", l.PlayerPanel.X+12, l.PlayerPanel.Y+101, l.PlayerPanel.W-24, 22, p.hudModel.Player.SP, p.hudModel.Player.MaxSP, colors.sp, colors, textScale)
 	drawMobileStatuses(frame, l.StatusArea, p.hudModel.Statuses, colors, textScale)
+	if l.LevelUpAction.W > 0 {
+		drawMobileButton(frame, l.LevelUpAction, "LV+", colors, textScale*0.72, true)
+	}
+	if l.SkillUpAction.W > 0 {
+		drawMobileButton(frame, l.SkillUpAction, "SK+", colors, textScale*0.72, true)
+	}
 
 	if p.hudModel.Target.Visible && p.settings.Controls.ShowTargetNames {
 		drawMobilePanel(frame, l.TargetPanel)

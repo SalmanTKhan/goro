@@ -119,7 +119,7 @@ func LayoutMobileScreenHeader(panel Rect, backWidth, actionWidth float32) Mobile
 }
 
 type HUDLayout struct {
-	Safe, PlayerPanel, TargetPanel, LootPanel, Minimap, Menu, StatusArea, ChatBar, ChatLabel, ChatPrompt, ChatButton, SkillBar, SkillPagePrev, SkillPageNext, PrimaryAction, SitAction, LootAction, EmoteAction, EmotePanel, MenuPanel, CombatBanner, CombatCancel Rect
+	Safe, PlayerPanel, LevelUpAction, SkillUpAction, TargetPanel, LootPanel, Minimap, Menu, StatusArea, ChatBar, ChatLabel, ChatPrompt, ChatButton, SkillBar, SkillPagePrev, SkillPageNext, PrimaryAction, SitAction, LootAction, EmoteAction, EmotePanel, MenuPanel, CombatBanner, CombatCancel Rect
 	SkillSlots                                                                                                                                                                                                                       []Rect
 	StatusSlots                                                                                                                                                                                                                      []Rect
 	EmoteRows                                                                                                                                                                                                                        []Rect
@@ -167,6 +167,37 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 	}
 	l.PlayerPanel = Rect{safe.X + tokens.Edge, safe.Y + tokens.Edge, panelWidth, panelHeight}
 	l.Menu = Rect{safe.Right() - tokens.Edge - menuSize, safe.Y + tokens.Edge, menuSize, menuSize}
+
+	// Legacy-style progression alerts stay physically attached to the player
+	// status card. They only exist while points are spendable, so the world
+	// HUD remains quiet once progression has been handled.
+	progressBottom := l.PlayerPanel.Bottom()
+	if model.Player.StatPoints > 0 || model.Player.SkillPoints > 0 {
+		progressGap := maxf(8, tokens.Gap)
+		progressH := maxf(tokens.MinTouchTarget, 52)
+		progressW := maxf(tokens.MinTouchTarget, ControlWidth("SK+", DefaultTypography().Button))
+		availableW := l.PlayerPanel.W
+		visible := 0
+		if model.Player.StatPoints > 0 {
+			visible++
+		}
+		if model.Player.SkillPoints > 0 {
+			visible++
+		}
+		if visible > 1 && float32(visible)*progressW+float32(visible-1)*progressGap > availableW {
+			progressW = maxf(tokens.MinTouchTarget, (availableW-float32(visible-1)*progressGap)/float32(visible))
+		}
+		x := l.PlayerPanel.X
+		y := l.PlayerPanel.Bottom() + progressGap
+		if model.Player.StatPoints > 0 {
+			l.LevelUpAction = Rect{X: x, Y: y, W: progressW, H: progressH}
+			x = l.LevelUpAction.Right() + progressGap
+		}
+		if model.Player.SkillPoints > 0 {
+			l.SkillUpAction = Rect{X: x, Y: y, W: progressW, H: progressH}
+		}
+		progressBottom = y + progressH
+	}
 	miniW := minf(216, maxf(156, safe.W*0.18))
 	if miniW > safe.W/2 {
 		miniW = maxf(0, safe.W/2)
@@ -195,7 +226,8 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 		statusW := minf(360, maxf(150, safe.W*0.26))
 		if portrait {
 			statusW = maxf(0, safe.W-2*tokens.Edge)
-			l.StatusArea = Rect{safe.X + tokens.Edge, maxf(l.PlayerPanel.Bottom(), l.Minimap.Bottom()) + tokens.Gap, statusW, 64}
+			statusTop := maxf(progressBottom, l.Minimap.Bottom())
+			l.StatusArea = Rect{safe.X + tokens.Edge, statusTop + tokens.Gap, statusW, 64}
 		} else {
 			if statusW > safe.Right()-l.PlayerPanel.Right()-2*overlayGap {
 				statusW = maxf(0, safe.Right()-l.PlayerPanel.Right()-2*overlayGap)
@@ -410,9 +442,9 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 
 	// The nearby-loot list occupies the left rail and stops before the left
 	// utility stack. It never competes with the right combat dock.
-	lootTop := l.PlayerPanel.Bottom() + overlayGap
+	lootTop := maxf(l.PlayerPanel.Bottom(), progressBottom) + overlayGap
 	if portrait {
-		topHUD := maxf(l.PlayerPanel.Bottom(), l.Minimap.Bottom())
+		topHUD := maxf(progressBottom, l.Minimap.Bottom())
 		topHUD = maxf(topHUD, l.StatusArea.Bottom())
 		topHUD = maxf(topHUD, l.TargetPanel.Bottom())
 		lootTop = topHUD + tokens.Gap
@@ -507,6 +539,8 @@ const (
 	ControlSkillPagePrev
 	ControlSkillPageNext
 	ControlPrimaryAction
+	ControlLevelUp
+	ControlSkillUp
 	ControlSit
 	ControlLoot
 	ControlEmoteToggle
@@ -547,6 +581,12 @@ func (l HUDLayout) HitTest(x, y float32) Hit {
 	}
 	if l.PrimaryAction.Contains(x, y) {
 		return Hit{Control: ControlPrimaryAction}
+	}
+	if l.LevelUpAction.Contains(x, y) {
+		return Hit{Control: ControlLevelUp}
+	}
+	if l.SkillUpAction.Contains(x, y) {
+		return Hit{Control: ControlSkillUp}
 	}
 	for _, action := range l.MenuActions {
 		if action.Rect.Contains(x, y) {

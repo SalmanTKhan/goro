@@ -268,3 +268,39 @@ func TestLootIsSeparatedFromSit(t *testing.T) {
 		}
 	}
 }
+
+
+func TestProgressionAlertsAppearOnlyWithSpendablePoints(t *testing.T) {
+	for _, viewport := range []Viewport{
+		{Width: 390, Height: 844, SafeTop: 24, SafeBottom: 24},
+		{Width: 840, Height: 2289, SafeTop: 48, SafeBottom: 96},
+		FoldOuterViewport(),
+	} {
+		quiet := LayoutHUD(viewport, DefaultTokens(), Fixture("normal"), Navigation{})
+		if quiet.LevelUpAction.W != 0 || quiet.SkillUpAction.W != 0 {
+			t.Fatalf("progression alerts visible without points viewport=%+v level=%+v skill=%+v", viewport, quiet.LevelUpAction, quiet.SkillUpAction)
+		}
+
+		layout := LayoutHUD(viewport, DefaultTokens(), Fixture("progression"), Navigation{})
+		for name, rect := range map[string]Rect{"level-up": layout.LevelUpAction, "skill-up": layout.SkillUpAction} {
+			if rect.W < DefaultTokens().MinTouchTarget || rect.H < DefaultTokens().MinTouchTarget {
+				t.Fatalf("%s is not touch-safe viewport=%+v rect=%+v", name, viewport, rect)
+			}
+			if rect.X < layout.Safe.X || rect.Y < layout.Safe.Y || rect.Right() > layout.Safe.Right()+0.01 || rect.Bottom() > layout.Safe.Bottom()+0.01 {
+				t.Fatalf("%s escapes safe area viewport=%+v rect=%+v safe=%+v", name, viewport, rect, layout.Safe)
+			}
+			if rect.Intersects(layout.PlayerPanel) {
+				t.Fatalf("%s overlaps player panel viewport=%+v rect=%+v player=%+v", name, viewport, rect, layout.PlayerPanel)
+			}
+		}
+		if layout.LevelUpAction.Intersects(layout.SkillUpAction) {
+			t.Fatalf("progression alerts overlap viewport=%+v level=%+v skill=%+v", viewport, layout.LevelUpAction, layout.SkillUpAction)
+		}
+		if hit := layout.HitTest(layout.LevelUpAction.X+2, layout.LevelUpAction.Y+2); hit.Control != ControlLevelUp {
+			t.Fatalf("level-up hit=%v, want ControlLevelUp", hit.Control)
+		}
+		if hit := layout.HitTest(layout.SkillUpAction.X+2, layout.SkillUpAction.Y+2); hit.Control != ControlSkillUp {
+			t.Fatalf("skill-up hit=%v, want ControlSkillUp", hit.Control)
+		}
+	}
+}

@@ -48,6 +48,14 @@ func (c *Controller) Tap(x, y float32) bool {
 		c.emit(input.PlayerCommand{Kind: input.CommandCancelAction})
 		c.relayout()
 		return true
+	case ControlLevelUp:
+		c.Navigation.Open(ScreenCharacter)
+		c.relayout()
+		return true
+	case ControlSkillUp:
+		c.Navigation.Open(ScreenSkills)
+		c.relayout()
+		return true
 	case ControlSkillPagePrev:
 		if c.Navigation.SkillPage > 0 {
 			c.Navigation.SkillPage--

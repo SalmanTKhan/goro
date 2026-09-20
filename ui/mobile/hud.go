@@ -25,6 +25,7 @@ func (k Kit) HUDTree(
 	c := NewCanvas(layout.Safe.W+2*layout.Safe.X, layout.Safe.H+2*layout.Safe.Y)
 
 	k.placePlayerPanel(c, model.Player, layout.PlayerPanel)
+	k.placeProgressionActions(c, model.Player, layout)
 	k.placeTargetPanel(c, model.Target, layout.TargetPanel)
 	k.placeStatusEffects(c, model.Statuses, layout.StatusSlots)
 	k.placeMinimap(c, model.Minimap, layout.Minimap)
@@ -67,6 +68,23 @@ func (k Kit) placePlayerPanel(c *Canvas, player mobileui.PlayerHUDModel, area mo
 
 func levelLine(player mobileui.PlayerHUDModel) string {
 	return "Lv " + strconv.Itoa(player.BaseLevel) + "/" + strconv.Itoa(player.JobLevel)
+}
+
+func (k Kit) placeProgressionActions(c *Canvas, player mobileui.PlayerHUDModel, layout mobileui.HUDLayout) {
+	if layout.LevelUpAction.W > 0 {
+		c.Place(k.Button("LV+", ButtonPressed), layout.LevelUpAction)
+		if player.StatPoints > 0 {
+			c.Place(k.RightAligned(strconv.Itoa(player.StatPoints), RoleMuted),
+				mobileui.Rect{X: layout.LevelUpAction.Right() - 28, Y: layout.LevelUpAction.Y + 2, W: 22, H: 20})
+		}
+	}
+	if layout.SkillUpAction.W > 0 {
+		c.Place(k.Button("SK+", ButtonPressed), layout.SkillUpAction)
+		if player.SkillPoints > 0 {
+			c.Place(k.RightAligned(strconv.Itoa(player.SkillPoints), RoleMuted),
+				mobileui.Rect{X: layout.SkillUpAction.Right() - 28, Y: layout.SkillUpAction.Y + 2, W: 22, H: 20})
+		}
+	}
 }
 
 // placeCompactMeter is the HUD's meter: a bar with its numbers in a column

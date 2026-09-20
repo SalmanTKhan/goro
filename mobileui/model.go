@@ -24,9 +24,11 @@ type PlayerHUDModel struct {
 	MaxHP     int
 	SP        int
 	MaxSP     int
-	BaseLevel int
-	JobLevel  int
-	Sitting   bool
+	BaseLevel  int
+	JobLevel   int
+	StatPoints int
+	SkillPoints int
+	Sitting    bool
 }
 
 type TargetHUDModel struct {
@@ -189,7 +191,13 @@ func ProjectSession(s *session.Session, target TargetHUDModel) MobileHUDModel {
 		return MobileHUDModel{Target: target}
 	}
 	model := MobileHUDModel{
-		Player:  PlayerHUDModel{Name: s.SelectedCharacter().Name, HP: s.Vitals.HP, MaxHP: s.Vitals.MaxHP, SP: s.Vitals.SP, MaxSP: s.Vitals.MaxSP, BaseLevel: s.Progress.BaseLevel, JobLevel: s.Progress.JobLevel},
+		Player: PlayerHUDModel{
+			Name: s.SelectedCharacter().Name,
+			HP: s.Vitals.HP, MaxHP: s.Vitals.MaxHP,
+			SP: s.Vitals.SP, MaxSP: s.Vitals.MaxSP,
+			BaseLevel: s.Progress.BaseLevel, JobLevel: s.Progress.JobLevel,
+			StatPoints: s.Stats.Points, SkillPoints: s.Skills.Points,
+		},
 		Target:  target,
 		Minimap: MinimapModel{Visible: true, MapName: s.Zone.MapName, PlayerX: s.PlayerX, PlayerY: s.PlayerY, PlayerDir: s.PlayerDir},
 	}

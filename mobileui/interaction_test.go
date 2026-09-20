@@ -175,3 +175,21 @@ func TestControllerUnavailableEmotesStayClosed(t *testing.T) {
 		t.Fatal("disabled emote control opened an empty picker")
 	}
 }
+
+
+func TestProgressionAlertsOpenCharacterAndSkills(t *testing.T) {
+	viewport := Viewport{Width: 840, Height: 2289, SafeTop: 48, SafeBottom: 96}
+	c := NewController(Fixture("progression"), viewport, nil)
+
+	level := c.Layout.LevelUpAction
+	if !c.Tap(level.X+2, level.Y+2) || c.Navigation.Screen != ScreenCharacter {
+		t.Fatalf("level-up did not open character screen: nav=%+v", c.Navigation)
+	}
+
+	c.Navigation.Open(ScreenWorldHUD)
+	c.relayout()
+	skill := c.Layout.SkillUpAction
+	if !c.Tap(skill.X+2, skill.Y+2) || c.Navigation.Screen != ScreenSkills {
+		t.Fatalf("skill-up did not open skills screen: nav=%+v", c.Navigation)
+	}
+}
