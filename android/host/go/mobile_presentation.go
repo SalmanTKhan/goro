@@ -1194,6 +1194,9 @@ func (p *mobilePresentation) Release(id input.TouchID, x, y int) {
 	switch hit.Control {
 	case mobileui.ControlMenu:
 		p.navigation.MenuOpen = !p.navigation.MenuOpen
+		if p.navigation.MenuOpen {
+			p.navigation.EmoteOpen = false
+		}
 	case mobileui.ControlMenuAction:
 		if hit.Screen == mobileui.ScreenInventory {
 			p.inventory.Open(mobileui.ScreenInventory)
@@ -1224,7 +1227,9 @@ func (p *mobilePresentation) Release(id input.TouchID, x, y int) {
 			p.chatController.Open(p.game.MobileChatModel())
 			p.navigation.OpenLayer(mobileui.ScreenWorldHUD, mobileui.NavigationDetailSheet, "chat")
 		}
-	case mobileui.ControlSkill, mobileui.ControlLootItem, mobileui.ControlSkillPagePrev, mobileui.ControlSkillPageNext, mobileui.ControlPrimaryAction, mobileui.ControlTarget:
+	case mobileui.ControlSkill, mobileui.ControlLootItem, mobileui.ControlSkillPagePrev, mobileui.ControlSkillPageNext,
+		mobileui.ControlPrimaryAction, mobileui.ControlTarget, mobileui.ControlSit, mobileui.ControlLoot,
+		mobileui.ControlEmoteToggle, mobileui.ControlEmote:
 		if p.hudController != nil {
 			p.hudController.Model = p.hudModel
 			p.hudController.Navigation = p.navigation
