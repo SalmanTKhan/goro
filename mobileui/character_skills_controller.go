@@ -117,11 +117,16 @@ func (c *CharacterSkillsController) ScrollBy(delta float32) bool {
 		return false
 	}
 	if c.Screen == ScreenCharacter {
+		before := c.CharacterOffset
 		maxOffset := maxf(0, c.CharacterLayout.ContentExtent-c.CharacterLayout.ContentViewport.H)
 		c.CharacterOffset = clampf(c.CharacterOffset+delta, 0, maxOffset)
+		if c.CharacterOffset == before {
+			return false
+		}
 		c.relayout()
 		return true
 	}
+	before := c.SkillOffset
 	viewportExtent := c.SkillsLayout.ListViewport.H - 16
 	if viewportExtent < 0 {
 		viewportExtent = 0
@@ -137,6 +142,9 @@ func (c *CharacterSkillsController) ScrollBy(delta float32) bool {
 	}
 	if c.SkillOffset > maxOffset {
 		c.SkillOffset = maxOffset
+	}
+	if c.SkillOffset == before {
+		return false
 	}
 	c.relayout()
 	return true
