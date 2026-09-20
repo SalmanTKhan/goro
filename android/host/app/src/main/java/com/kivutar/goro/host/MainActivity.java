@@ -125,8 +125,10 @@ public final class MainActivity extends Activity {
                 if (!syncingChatInput) nativeTextInputChanged(value.toString());
             }
         });
-        FrameLayout.LayoutParams chatInputLayout = new FrameLayout.LayoutParams(720, 64, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
-        chatInputLayout.bottomMargin = 24;
+        // This EditText is only an IME bridge. The actual field is rendered by
+        // the Go mobile UI, so keep the native view out of the interactive
+        // surface instead of laying an invisible 720px-wide control over it.
+        FrameLayout.LayoutParams chatInputLayout = new FrameLayout.LayoutParams(1, 1, Gravity.TOP | Gravity.START);
         rootView.addView(chatInput, chatInputLayout);
         setContentView(rootView);
         uiHandler.post(chatInputPoll);
@@ -182,7 +184,10 @@ public final class MainActivity extends Activity {
             chatInput.setVisibility(EditText.VISIBLE);
             chatInput.requestFocus();
             InputMethodManager inputMethod = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
-            if (inputMethod != null) inputMethod.showSoftInput(chatInput, InputMethodManager.SHOW_IMPLICIT);
+            if (inputMethod != null) {
+                inputMethod.restartInput(chatInput);
+                inputMethod.showSoftInput(chatInput, InputMethodManager.SHOW_IMPLICIT);
+            }
         } else {
             InputMethodManager inputMethod = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
             if (inputMethod != null) inputMethod.hideSoftInputFromWindow(chatInput.getWindowToken(), 0);
@@ -192,19 +197,6 @@ public final class MainActivity extends Activity {
             syncingChatInput = false;
             chatInput.setVisibility(EditText.GONE);
         }
-    }
-
-    // Dismissing the Android IME does not change the Go-side text-input mode.
-    // The next tap is therefore the explicit request to show it again.
-    private void reopenNativeKeyboard() {
-        if (chatInput == null || !chatInputActive) return;
-        chatInput.setVisibility(EditText.VISIBLE);
-        chatInput.requestFocus();
-        chatInput.postDelayed(() -> {
-            if (!chatInputActive || isFinishing()) return;
-            InputMethodManager inputMethod = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
-            if (inputMethod != null) inputMethod.showSoftInput(chatInput, InputMethodManager.SHOW_IMPLICIT);
-        }, 50);
     }
 
     private File installMobileAssetsFromFile(File sourceRoot) throws Exception {
@@ -657,7 +649,8 @@ public final class MainActivity extends Activity {
             final int index = event.getActionIndex();
             final boolean pressed = action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_POINTER_DOWN;
             final boolean released = action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_POINTER_UP;
-            if (pressed && nativeTextInputMode() != 0) reopenNativeKeyboard();
+            // Field activation is owned by the Go hit-test. Reopening the IME
+            // here made every tap behave like a tap on the last text field.
             if (pressed || released) {
                 nativeTouch(action, event.getPointerId(index), event.getX(index), event.getY(index), pressed);
             }
