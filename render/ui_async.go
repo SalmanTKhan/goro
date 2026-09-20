@@ -98,6 +98,7 @@ func (r *AsyncHostUIRasterizer) Poll(dst *Image) (*Image, AsyncHostUIResult, err
 	select {
 	case result := <-r.worker.done:
 		r.busy = false
+		hadPending := r.pending != nil
 		if r.pending != nil {
 			next := *r.pending
 			r.pending = nil
@@ -110,7 +111,10 @@ func (r *AsyncHostUIRasterizer) Poll(dst *Image) (*Image, AsyncHostUIResult, err
 		if result.err != nil {
 			return dst, AsyncHostUIResult{}, result.err
 		}
-		if result.generation < r.published {
+		// If a newer complete UI frame is already queued, do not publish this
+		// obsolete result for a single frame. This matters across window/root
+		// transitions and orientation changes.
+		if hadPending || result.generation < r.published {
 			return dst, AsyncHostUIResult{}, nil
 		}
 		r.published = result.generation
