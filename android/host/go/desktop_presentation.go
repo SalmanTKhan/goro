@@ -77,6 +77,7 @@ type desktopPresentation struct {
 	uiScale                 float32
 	dirty                   bool
 	urgentDirty             bool
+	forceFullRaster         bool
 	captured                bool
 	debugLogged             bool
 	lastRaster              time.Time
@@ -87,6 +88,7 @@ type desktopPresentation struct {
 	rasterDrawDuration      time.Duration
 	rasterFlushDuration     time.Duration
 	rasterImageDuration     time.Duration
+	raster                  render.IncrementalUIRasterizer
 
 	// pointer queues touches for the polled input path, in logical UI
 	// coordinates. Widget events reach gogpu immediately, but large parts of the
@@ -109,14 +111,13 @@ type pointerEvent struct {
 }
 
 func newDesktopPresentation(game *app.Game, width, height int) *desktopPresentation {
-	d := &desktopPresentation{game: game, win: &androidUIWindow{width: desktopUIWidth, height: desktopUIHeight}, uiWidth: desktopUIWidth, uiHeight: desktopUIHeight, uiScale: game.UISettings().Normalized().Scale, dirty: true, urgentDirty: true}
+	d := &desktopPresentation{game: game, win: &androidUIWindow{width: desktopUIWidth, height: desktopUIHeight}, uiWidth: desktopUIWidth, uiHeight: desktopUIHeight, uiScale: game.UISettings().Normalized().Scale, dirty: true, urgentDirty: true, forceFullRaster: true}
 	theme := rotheme.Default.AsTheme()
 	theme.Colors.Background = widget.RGBA8(0, 0, 0, 0)
-	// RasterizeUI creates a fresh canvas for every redraw. Framework-managed
-	// rendering is incremental and assumes a persistent backing pixmap, so a
-	// touch would redraw only its dirty widget into an otherwise empty canvas.
-	// Host-managed mode redraws the complete widget tree into each fresh raster.
-	d.ui = uiapp.New(uiapp.WithWindowProvider(d.win), uiapp.WithTheme(theme), uiapp.WithRenderMode(uiapp.RenderModeHostManaged))
+	// Android now retains its backing raster surface, matching the desktop
+	// renderer's ownership model. FrameworkManaged mode enables frame skip and
+	// dirty-region redraws while input/event dispatch remains on this goroutine.
+	d.ui = uiapp.New(uiapp.WithWindowProvider(d.win), uiapp.WithTheme(theme), uiapp.WithRenderMode(uiapp.RenderModeFrameworkManaged))
 	game.SetUIApp(d)
 	d.Resize(width, height)
 	return d
@@ -126,15 +127,27 @@ func (d *desktopPresentation) SetUIRoot(root widget.Widget) {
 	d.ui.SetRoot(root)
 	d.dirty = true
 	d.urgentDirty = true
+	d.forceFullRaster = true
 }
-func (d *desktopPresentation) Frame()      { d.ui.Frame() }
-func (d *desktopPresentation) Invalidate() { d.dirty = true }
+func (d *desktopPresentation) Frame() { d.ui.Frame() }
+func (d *desktopPresentation) Invalidate() {
+	if d == nil {
+		return
+	}
+	d.dirty = true
+	if d.ui != nil && d.ui.Window() != nil {
+		if ctx := d.ui.Window().Context(); ctx != nil {
+			ctx.Invalidate()
+		}
+	}
+}
 func (d *desktopPresentation) SetUISettings(settings input.UISettings) {
 	if d == nil {
 		return
 	}
 	d.uiScale = settings.Normalized().Scale
 	d.urgentDirty = true
+	d.forceFullRaster = true
 	d.Resize(d.width, d.height)
 }
 
@@ -220,6 +233,7 @@ func (d *desktopPresentation) Resize(width, height int) {
 	d.captured = false
 	d.dirty = true
 	d.urgentDirty = true
+	d.forceFullRaster = true
 }
 
 func maxInt(a, b int) int {
@@ -246,7 +260,7 @@ func (d *desktopPresentation) Draw(frame *render.Frame) {
 					androidLog("stage=desktop-ui root=present")
 				}
 			}
-			if image, rasterDrawn, rasterMetrics, err := render.RasterizeUIProfiled(d.ui, d.uiWidth, d.uiHeight, d.image); err == nil {
+			if image, rasterDrawn, rasterMetrics, err := d.raster.Rasterize(d.ui, d.uiWidth, d.uiHeight, d.image, d.forceFullRaster || d.image == nil); err == nil {
 				d.image = image
 				if rasterDrawn {
 					d.rasterCount++
@@ -276,6 +290,7 @@ func (d *desktopPresentation) Draw(frame *render.Frame) {
 			d.debugLogged = true
 			d.dirty = false
 			d.urgentDirty = false
+			d.forceFullRaster = false
 		} else {
 			d.rasterDeferred++
 		}
