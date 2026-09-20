@@ -2804,7 +2804,7 @@ func mapMarkerPosition(rect mobileui.Rect, raster mobileui.MinimapRaster, x, y i
 	drawY := float64(rect.Y) + (float64(rect.H)-drawHeight)/2
 	mapX := clampMinimapCoordinate(float64(x)*0.5, raster.Width)
 	mapY := clampMinimapCoordinate(float64(y)*0.5, raster.Height)
-	return drawX + (mapX+0.5)*drawWidth/imageWidth, drawY + (mapY+0.5)*drawHeight/imageHeight, true
+	return drawX + (mapX+0.5)*drawWidth/imageWidth, drawY + drawHeight - (mapY+0.5)*drawHeight/imageHeight, true
 }
 
 func (p *mobilePresentation) drawDialog(frame *render.Frame) {
