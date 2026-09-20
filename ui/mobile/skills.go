@@ -89,8 +89,8 @@ func (k Kit) placeSkillList(c *Canvas, model mobileui.MobileSkillsModel, layout 
 		iconW := row.H
 		textX := row.X + iconW + pad
 		textW := row.Right() - pad - textX
-		if skill.Upgradable {
-			textW -= touch + pad
+		if i < len(layout.UpgradeButtons) && layout.UpgradeButtons[i].W > 0 {
+			textW -= layout.UpgradeButtons[i].W + pad
 		}
 		if textW <= 0 {
 			continue
