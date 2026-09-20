@@ -94,6 +94,7 @@ const (
 	CommandOnlineFocusCharacter
 	// Mobile world-HUD utility actions are appended to preserve existing IDs.
 	CommandEmotion
+	CommandAssignItemHotkey
 )
 
 // WorldPosition is a presentation-independent world target. Screen-space
