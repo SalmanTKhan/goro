@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"image/color"
 	"time"
 
 	uiapp "github.com/gogpu/ui/app"
