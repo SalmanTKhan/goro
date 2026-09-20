@@ -145,7 +145,6 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 	targetHeight := tokens.TargetHeight
 	chatHeight := tokens.ChatHeight
 	skillWidth := maxf(tokens.MinTouchTarget, tokens.SkillSize)
-	skillHeight := skillWidth
 	if !portrait {
 		// Landscape is the primary phone/tablet gameplay posture. Keep the RO
 		// visual vocabulary, but reduce the desktop-window footprint and reserve
@@ -156,7 +155,6 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 		targetHeight = 96
 		chatHeight = 56
 		skillWidth = 88
-		skillHeight = 88
 	}
 	panelWidth := minf(340, maxf(240, safe.W*0.22))
 	if portrait {
