@@ -58,6 +58,20 @@ func (m *mobileWidgets) Invalidate() {
 	}
 }
 
+// InvalidateSize drops the retained raster after an orientation or surface
+// size change. Reusing a baked image with the previous dimensions can expose a
+// partially laid-out frame while Android is rotating.
+func (m *mobileWidgets) InvalidateSize() {
+	if m == nil {
+		return
+	}
+	m.dirty = true
+	m.baked = nil
+	m.w, m.h = 0, 0
+	m.key = ""
+	m.logged = false
+}
+
 // sprites is the art a screen wants composited over its raster.
 type sprites struct {
 	items  []uimobile.IconPlacement
@@ -75,6 +89,10 @@ type sprites struct {
 func (p *mobilePresentation) tree(k uimobile.Kit) (widget.Widget, sprites) {
 	vp := p.viewport
 	switch {
+	case p.game != nil && p.game.Online() && !p.game.SessionPlaying():
+		// Pre-world online login is drawn by drawOnlineStatus. Never let a
+		// retained world HUD cover server/account/character-service selection.
+		return nil, sprites{}
 	case p.startup != nil && p.startup.Phase == mobileui.StartupTitle:
 		return k.StartupTree(p.startup.Model, mobileui.LayoutStartup(vp)), sprites{}
 
