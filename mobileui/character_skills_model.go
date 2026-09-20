@@ -72,6 +72,7 @@ type MobileSkillModel struct {
 	Upgradable     bool
 	Usable         bool
 	DisabledReason string
+	Description    []string
 	IconKey        string
 }
 
