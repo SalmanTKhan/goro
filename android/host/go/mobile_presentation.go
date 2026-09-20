@@ -1047,7 +1047,9 @@ func (p *mobilePresentation) Move(id input.TouchID, x, y int) {
 	case mobileui.TouchEconomy:
 		p.economyController.ScrollBy(-dy)
 	case mobileui.TouchCharacter, mobileui.TouchSkills:
-		p.characterSkills.ScrollBy(-dy)
+		if p.characterSkills.ScrollBy(-dy) && p.widgets != nil {
+			p.widgets.Invalidate()
+		}
 	case mobileui.TouchMap:
 		p.mapController.ScrollBy(-dy)
 	case mobileui.TouchSocial:
