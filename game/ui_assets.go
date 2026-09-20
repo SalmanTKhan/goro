@@ -51,11 +51,11 @@ func (m *WorldMode) DrawMobileStatusIcon(screen *render.Frame, manager *res.Mana
 	if screen == nil || manager == nil || size <= 0 {
 		return
 	}
-	img := m.StatusIconImage(manager, statusID)
-	if img == nil {
+	texture := m.statusIconTexture(manager, statusID)
+	if texture == nil {
 		return
 	}
-	bounds := img.Bounds()
+	bounds := texture.Bounds()
 	if bounds.Dx() <= 0 || bounds.Dy() <= 0 {
 		return
 	}
@@ -66,10 +66,10 @@ func (m *WorldMode) DrawMobileStatusIcon(screen *render.Frame, manager *res.Mana
 	opts.Filter = render.FilterNearest
 	opts.GeoM.Scale(scale, scale)
 	opts.GeoM.Translate(float64(x)+(float64(size)-drawW)/2, float64(y)+(float64(size)-drawH)/2)
-	screen.DrawImage(render.NewImageFromImage(img), &opts)
+	screen.DrawImage(texture, &opts)
 }
 
-func (m *WorldMode) StatusIconImage(manager *res.Manager, statusID uint16) image.Image {
+func (m *WorldMode) statusIconTexture(manager *res.Manager, statusID uint16) *render.Image {
 	if manager == nil {
 		return nil
 	}
@@ -77,26 +77,27 @@ func (m *WorldMode) StatusIconImage(manager *res.Manager, statusID uint16) image
 	if !ok || strings.TrimSpace(info.Icon) == "" {
 		return nil
 	}
-	key := fmt.Sprintf("__status_icon_image_%d_%s", statusID, info.Icon)
-	if m.imageCache == nil {
-		m.imageCache = make(map[string]image.Image)
+	key := fmt.Sprintf("__status_icon_%d_%s", statusID, info.Icon)
+	if m.textures == nil {
+		m.textures = make(map[string]*render.Image)
 	}
-	if m.imageMiss == nil {
-		m.imageMiss = make(map[string]struct{})
+	if m.textureMiss == nil {
+		m.textureMiss = make(map[string]struct{})
 	}
-	if img := m.imageCache[key]; img != nil {
-		return img
+	if texture := m.textures[key]; texture != nil {
+		return texture
 	}
-	if _, missed := m.imageMiss[key]; missed {
+	if _, missed := m.textureMiss[key]; missed {
 		return nil
 	}
 	img, _, err := res.LoadImage(manager, res.EffectTextureCandidates(info.Icon))
 	if err != nil {
-		m.imageMiss[key] = struct{}{}
+		m.textureMiss[key] = struct{}{}
 		return nil
 	}
-	m.imageCache[key] = img
-	return img
+	texture := render.NewImageFromImage(img)
+	m.textures[key] = texture
+	return texture
 }
 
 // DrawEquipmentPreview is the shared paper-doll character preview used by
