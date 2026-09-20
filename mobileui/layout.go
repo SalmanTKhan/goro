@@ -181,15 +181,28 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 	if !model.Minimap.Visible {
 		l.Minimap = Rect{}
 	}
-	statusW := minf(320, maxf(150, safe.W*0.26))
-	if portrait {
-		statusW = maxf(0, safe.W-2*tokens.Edge)
-		l.StatusArea = Rect{safe.X + tokens.Edge, maxf(l.PlayerPanel.Bottom(), l.Minimap.Bottom()) + tokens.Gap, statusW, 64}
-	} else {
-		if statusW > safe.Right()-l.PlayerPanel.Right()-2*overlayGap {
-			statusW = maxf(0, safe.Right()-l.PlayerPanel.Right()-2*overlayGap)
+	// Status projection currently carries IDs/durations but no resolved icon
+	// artwork for live online effects. Do not expose empty slot-shaped controls
+	// (or a hidden Character-screen hit target) until there is something the HUD
+	// can actually render.
+	hasStatusArtwork := false
+	for _, status := range model.Statuses {
+		if status.IconKey != "" {
+			hasStatusArtwork = true
+			break
 		}
-		l.StatusArea = Rect{l.PlayerPanel.Right() + overlayGap, l.PlayerPanel.Y, statusW, 48}
+	}
+	if hasStatusArtwork {
+		statusW := minf(320, maxf(150, safe.W*0.26))
+		if portrait {
+			statusW = maxf(0, safe.W-2*tokens.Edge)
+			l.StatusArea = Rect{safe.X + tokens.Edge, maxf(l.PlayerPanel.Bottom(), l.Minimap.Bottom()) + tokens.Gap, statusW, 64}
+		} else {
+			if statusW > safe.Right()-l.PlayerPanel.Right()-2*overlayGap {
+				statusW = maxf(0, safe.Right()-l.PlayerPanel.Right()-2*overlayGap)
+			}
+			l.StatusArea = Rect{l.PlayerPanel.Right() + overlayGap, l.PlayerPanel.Y, statusW, 48}
+		}
 	}
 	chatW := minf(380, maxf(240, safe.W*0.30))
 	if portrait {
@@ -415,9 +428,6 @@ func (l HUDLayout) HitTest(x, y float32) Hit {
 		if rect.Contains(x, y) {
 			return Hit{Control: ControlLootItem, LootIndex: i}
 		}
-	}
-	if l.StatusArea.Contains(x, y) {
-		return Hit{Control: ControlStatus}
 	}
 	if l.ChatBar.Contains(x, y) {
 		return Hit{Control: ControlChat}
