@@ -996,6 +996,16 @@ func (p *mobilePresentation) Release(id input.TouchID, x, y int) {
 	if owner == mobileui.TouchUnclaimed || moved {
 		return
 	}
+	// Controllers mutate selection, tabs, detail sheets, navigation, and other
+	// presentation state synchronously on tap. Their geometry is recomputed
+	// immediately, but the retained widget raster is separate state. Always
+	// invalidate it after a claimed tap so sprite overlays and widget chrome
+	// cannot diverge for a frame (or indefinitely on otherwise-static screens).
+	defer func() {
+		if p.widgets != nil {
+			p.widgets.Invalidate()
+		}
+	}()
 	if owner == mobileui.TouchStartup {
 		action := p.startup.ActionAt(float32(x), float32(y))
 		if action == mobileui.StartupSwitchOnline {
