@@ -298,37 +298,18 @@ func (m *WorldMode) ApplyPlayerCommand(ctx client.Context, command input.PlayerC
 		if !ok || skill.Level <= 0 || skill.Type == 0 {
 			return false
 		}
-		slot := -1
-		for i, hotkey := range ctx.Session.Hotkeys.Slots {
-			if hotkey.ID == uint32(skill.ID) && hotkey.Type == network.HotkeyTypeSkill {
-				slot = i
-				break
-			}
-			if slot < 0 && hotkey.ID == 0 {
-				slot = i
-			}
-		}
-		if slot < 0 && len(ctx.Session.Hotkeys.Slots) < network.HotkeyListSlots2008 {
-			slot = len(ctx.Session.Hotkeys.Slots)
-		}
-		if slot < 0 {
+		return assignMobileHotkey(ctx, network.HotkeySlot{
+			Type: network.HotkeyTypeSkill, ID: uint32(skill.ID), Level: uint16(skill.Level),
+		})
+	case input.CommandAssignItemHotkey:
+		if ctx.Session == nil {
 			return false
 		}
-		hotkey := network.HotkeySlot{Type: network.HotkeyTypeSkill, ID: uint32(skill.ID), Level: uint16(skill.Level)}
-		if ctx.Network != nil && slot < network.HotkeyListSlots2008 {
-			if err := ctx.Network.SendHotkey(uint16(slot), hotkey); err != nil {
-				return false
-			}
+		item, ok := mobileHotkeyInventoryItem(ctx.Session, command.ItemIndex, uint16(command.ItemID))
+		if !ok || !db.ItemTypeIsUsable(item.Type) {
+			return false
 		}
-		if len(ctx.Session.Hotkeys.Slots) <= slot {
-			next := make([]session.HotkeySlot, slot+1)
-			copy(next, ctx.Session.Hotkeys.Slots)
-			ctx.Session.Hotkeys.Slots = next
-		}
-		ctx.Session.Hotkeys.Slots[slot] = session.HotkeySlot{Type: hotkey.Type, ID: hotkey.ID, Level: hotkey.Level}
-		ctx.Session.Hotkeys.Loaded = true
-		ctx.Session.Hotkeys.Version++
-		return true
+		return assignMobileHotkey(ctx, network.HotkeySlot{Type: network.HotkeyTypeItem, ID: uint32(item.ItemID)})
 	case input.CommandUseSkill, input.CommandUseSkillOnActor, input.CommandUseSkillAtPosition,
 		input.CommandOpenShop, input.CommandBuyItem, input.CommandSellItem,
 		input.CommandOpenStorage, input.CommandDepositItem, input.CommandWithdrawItem:
@@ -360,6 +341,65 @@ func (m *WorldMode) ApplyPlayerCommand(ctx client.Context, command input.PlayerC
 	default:
 		return false
 	}
+}
+
+func assignMobileHotkey(ctx client.Context, hotkey network.HotkeySlot) bool {
+	if ctx.Session == nil || hotkey.ID == 0 {
+		return false
+	}
+	slot := -1
+	for i, current := range ctx.Session.Hotkeys.Slots {
+		if current.ID == hotkey.ID && current.Type == hotkey.Type {
+			slot = i
+			break
+		}
+		if slot < 0 && current.ID == 0 {
+			slot = i
+		}
+	}
+	if slot < 0 && len(ctx.Session.Hotkeys.Slots) < network.HotkeyListSlots2008 {
+		slot = len(ctx.Session.Hotkeys.Slots)
+	}
+	if slot < 0 {
+		return false
+	}
+	if ctx.Network != nil {
+		if err := ctx.Network.SendHotkey(uint16(slot), hotkey); err != nil {
+			return false
+		}
+	}
+	if len(ctx.Session.Hotkeys.Slots) <= slot {
+		next := make([]session.HotkeySlot, slot+1)
+		copy(next, ctx.Session.Hotkeys.Slots)
+		ctx.Session.Hotkeys.Slots = next
+	}
+	ctx.Session.Hotkeys.Slots[slot] = session.HotkeySlot{Type: hotkey.Type, ID: hotkey.ID, Level: hotkey.Level}
+	ctx.Session.Hotkeys.Loaded = true
+	ctx.Session.Hotkeys.Version++
+	return true
+}
+
+func mobileHotkeyInventoryItem(s *session.Session, index, itemID uint16) (session.InventoryItem, bool) {
+	if s == nil {
+		return session.InventoryItem{}, false
+	}
+	for _, item := range s.Inventory.Items {
+		if item.Amount <= 0 {
+			continue
+		}
+		if index != 0 && item.Index == index && (itemID == 0 || item.ItemID == itemID) {
+			return item, true
+		}
+	}
+	if itemID == 0 {
+		return session.InventoryItem{}, false
+	}
+	for _, item := range s.Inventory.Items {
+		if item.Amount > 0 && item.ItemID == itemID {
+			return item, true
+		}
+	}
+	return session.InventoryItem{}, false
 }
 
 func (m *WorldMode) useItemCommand(ctx client.Context, command input.PlayerCommand) bool {
