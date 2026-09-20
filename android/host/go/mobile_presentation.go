@@ -60,6 +60,13 @@ func (s mobileCommandSink) Emit(command input.PlayerCommand) bool {
 	if accepted && command.Kind == input.CommandDepositItem && s.presentation != nil {
 		s.presentation.economyController.SetStorage(game.MobileStorageModel())
 	}
+	if accepted && s.presentation != nil &&
+		(command.Kind == input.CommandAssignSkillHotkey || command.Kind == input.CommandAssignItemHotkey) {
+		s.presentation.Refresh()
+		if s.presentation.widgets != nil {
+			s.presentation.widgets.Invalidate()
+		}
+	}
 	return accepted
 }
 
@@ -1911,11 +1918,20 @@ func (p *mobilePresentation) drawHUD(frame *render.Frame) {
 	drawMobileButton(frame, l.Menu, "MENU", colors, textScale*0.86, false)
 
 	for i, slot := range l.SkillSlots {
-		skill := mobileui.SkillSlotModel{Index: i + l.SkillStart, Name: fmt.Sprintf("Skill %d", i+l.SkillStart+1), Usable: true}
-		if i+l.SkillStart < len(p.hudModel.Skills) {
-			skill = p.hudModel.Skills[i+l.SkillStart]
+		index := i + l.SkillStart
+		shortcut, ok := mobileui.ShortcutAt(p.hudModel, index)
+		if !ok {
+			drawMobileEmptySlot(frame, slot, colors)
+			continue
 		}
-		drawMobileSkill(frame, slot, skill, i, p.game, colors, textScale)
+		switch shortcut.Kind {
+		case mobileui.ShortcutItem:
+			drawMobileItemShortcut(frame, slot, shortcut.Item, i, p.game, colors, textScale)
+		case mobileui.ShortcutSkill:
+			drawMobileSkill(frame, slot, shortcut.Skill, i, p.game, colors, textScale)
+		default:
+			drawMobileEmptySlot(frame, slot, colors)
+		}
 	}
 	if l.SkillPagePrev.W > 0 {
 		perPage := l.SkillsPerPage
@@ -1923,7 +1939,7 @@ func (p *mobilePresentation) drawHUD(frame *render.Frame) {
 			perPage = 4
 		}
 		drawMobileButton(frame, l.SkillPagePrev, "‹", colors, textScale*1.05, p.navigation.SkillPage > 0)
-		drawMobileButton(frame, l.SkillPageNext, "›", colors, textScale*1.05, (p.navigation.SkillPage+1)*perPage < len(p.hudModel.Skills))
+		drawMobileButton(frame, l.SkillPageNext, "›", colors, textScale*1.05, (p.navigation.SkillPage+1)*perPage < mobileui.ShortcutCount(p.hudModel))
 	}
 	if p.navigation.Targeting.Mode != input.SkillTargetIdle {
 		drawMobilePanel(frame, l.CombatBanner)
@@ -2318,6 +2334,9 @@ func (p *mobilePresentation) drawInventory(frame *render.Frame) {
 		}
 		if l.PrimaryAction.W > 0 {
 			drawMobileButton(frame, l.PrimaryAction, strings.ToUpper(c.State.Selection.Detail.PrimaryAction), colors, textScale*0.82, c.State.Selection.Detail.PrimaryEnabled)
+		}
+		if l.ShortcutAction.W > 0 && d.Usable {
+			drawMobileButton(frame, l.ShortcutAction, "ADD TO BAR", colors, textScale*0.72, true)
 		}
 		if l.SecondaryAction.W > 0 {
 			drawMobileButton(frame, l.SecondaryAction, "DROP", colors, textScale*0.82, c.State.Selection.Detail.SecondaryEnabled)
@@ -3494,6 +3513,24 @@ func drawMobileStatuses(frame *render.Frame, rect mobileui.Rect, statuses []mobi
 	}
 	if maxVisible < len(statuses) {
 		drawMobileText(frame, fmt.Sprintf("+%d", len(statuses)-maxVisible), rect.Right()-36, rect.Y+16, colors.accent, scale*0.72)
+	}
+}
+
+func drawMobileItemShortcut(frame *render.Frame, rect mobileui.Rect, item mobileui.InventoryItemModel, index int, game *app.Game, colors mobilePalette, scale float64) {
+	active := item.Usable && item.Index != 0 && item.Quantity > 0
+	drawMobileCard(frame, rect, colors, active)
+	drawMobileTextFit(frame, fmt.Sprintf("F%d", index+1), rect.X+7, rect.Y+7, rect.W*0.30, colors.accent, scale*0.52)
+	iconSize := minf32(64, maxf32(40, rect.H-26))
+	iconX := rect.X + (rect.W-iconSize)/2
+	iconY := rect.Y + 12
+	if game != nil && item.ItemID != 0 {
+		game.DrawMobileInventoryItemIcon(frame, item, int(iconX), int(iconY), int(iconSize))
+	}
+	if item.Quantity > 1 {
+		drawMobileTextFit(frame, fmt.Sprintf("x%d", item.Quantity), rect.X+4, rect.Bottom()-19, rect.W-8, colors.title, scale*0.56)
+	}
+	if !active {
+		render.DrawRect(frame, float64(rect.X+3), float64(rect.Y+3), float64(rect.W-6), float64(rect.H-6), color.RGBA{R: 30, G: 46, B: 66, A: 120})
 	}
 }
 
