@@ -175,7 +175,7 @@ func inventoryGridSpec(portrait, fold bool, itemCount int) GridSpec {
 	if itemCount > 0 && itemCount < preferred {
 		preferred = maxInt(3, itemCount)
 	}
-	return GridSpec{MinCellWidth: 96, MaxCellWidth: 248, MinRowHeight: 0, HorizontalGap: 16, VerticalGap: 16, PreferredColumns: preferred, MinColumns: minInt(3, preferred), MaxColumns: maxInt(3, preferred), AspectRatio: 1, FillWidth: true, OuterPadding: 16}
+	return GridSpec{MinCellWidth: 96, MaxCellWidth: 248, MinRowHeight: 0, HorizontalGap: 16, VerticalGap: 16, PreferredColumns: preferred, MinColumns: 3, MaxColumns: preferred, AspectRatio: 1, FillWidth: true, OuterPadding: 16}
 }
 
 func ScrollExtent(model MobileInventoryModel, state InventoryInteractionState, tokens InventoryTokens, viewport Rect) InventoryScrollState {
