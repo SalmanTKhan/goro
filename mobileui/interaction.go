@@ -92,6 +92,9 @@ func (c *Controller) Tap(x, y float32) bool {
 		}
 		return true
 	case ControlEmoteToggle:
+		if len(c.Model.Emotes) == 0 {
+			return true
+		}
 		c.Navigation.EmoteOpen = !c.Navigation.EmoteOpen
 		if c.Navigation.EmoteOpen {
 			c.Navigation.MenuOpen = false
