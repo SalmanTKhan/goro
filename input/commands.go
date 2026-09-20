@@ -91,6 +91,7 @@ const (
 	CommandUpgradeSkill
 	CommandAssignSkillHotkey
 	CommandOnlineCancelCharacterCreate
+	CommandOnlineFocusCharacter
 )
 
 // WorldPosition is a presentation-independent world target. Screen-space
