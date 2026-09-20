@@ -102,18 +102,35 @@ func (w *ShopWindow) MobileModel(state *session.Session, metadata *res.Manager) 
 	model.Open = true
 	model.NPCID = w.dealNPCID
 	model.Name = "Shop"
+	model.CartEnabled = true
+	model.ModeReady = w.mode == shopModeBuy || w.mode == shopModeSell
+	if w.mode == shopModeSell {
+		model.ActiveTab = mobileui.ShopSellTab
+	}
 	if state != nil {
 		model.Zeny = int64(state.Inventory.Zeny)
 	}
 	if w.mode == shopModeBuy {
+		remainingZeny := model.Zeny - w.total()
 		for i, item := range w.buyItems {
 			price := shopBuyItemPrice(item)
 			maxQuantity := 999
 			if price > 0 {
-				maxQuantity = int(model.Zeny / int64(price))
+				maxQuantity = int(remainingZeny / int64(price))
+				if maxQuantity < 0 {
+					maxQuantity = 0
+				}
 			}
 			name := mobileShopItemName(metadata, item.ItemID)
 			model.Items = append(model.Items, mobileui.ShopItemModel{Index: uint16(i), ItemID: item.ItemID, Name: name, Price: int64(price), SellPrice: int64(price), MaxQuantity: maxQuantity, CanBuy: maxQuantity > 0})
+		}
+		for _, item := range w.buyCart {
+			price := int64(shopBuyItemPrice(item.item))
+			name := mobileShopItemName(metadata, item.item.ItemID)
+			model.Cart = append(model.Cart, mobileui.ShopCartItemModel{
+				ItemID: item.item.ItemID, Name: name, Quantity: int(item.amount),
+				UnitPrice: price, Total: price * int64(item.amount),
+			})
 		}
 	}
 	if w.mode == shopModeSell {
@@ -129,12 +146,146 @@ func (w *ShopWindow) MobileModel(state *session.Session, metadata *res.Manager) 
 			if state != nil {
 				if inventoryItem, ok := findInventoryItemByIndex(state, index); ok {
 					name = mobileShopItemName(metadata, inventoryItem.ItemID)
-					model.SellItems = append(model.SellItems, mobileui.ShopItemModel{Index: index, ItemID: inventoryItem.ItemID, Name: name, Price: int64(item.Price), SellPrice: int64(item.OverchargePrice), Quantity: int(inventoryItem.Amount), MaxQuantity: int(inventoryItem.Amount), CanSell: inventoryItem.Amount > 0})
+					remaining := inventoryItem.Amount - w.stagedSellAmount(index)
+					if remaining < 0 {
+						remaining = 0
+					}
+					model.SellItems = append(model.SellItems, mobileui.ShopItemModel{
+						Index: index, ItemID: inventoryItem.ItemID, Name: name,
+						Price: int64(item.Price), SellPrice: int64(item.OverchargePrice),
+						Quantity: remaining, MaxQuantity: remaining, CanSell: remaining > 0,
+					})
 				}
 			}
 		}
+		for _, item := range w.cart {
+			price := int64(item.over)
+			name := mobileShopItemName(metadata, item.item.ItemID)
+			model.Cart = append(model.Cart, mobileui.ShopCartItemModel{
+				ItemIndex: item.item.Index, ItemID: item.item.ItemID, Name: name,
+				Quantity: int(item.amount), UnitPrice: price, Total: price * int64(item.amount),
+			})
+		}
 	}
+	model.CartTotal = w.total()
 	return model
+}
+
+// MobileStage adds a quantity to the same cart used by the desktop shop.
+func (w *ShopWindow) MobileStage(ctx Context, index, amount uint16) bool {
+	if w == nil || amount == 0 {
+		return false
+	}
+	switch w.mode {
+	case shopModeBuy:
+		if int(index) >= len(w.buyItems) {
+			return false
+		}
+		item := w.buyItems[index]
+		price := int64(shopBuyItemPrice(item))
+		if ctx.Session != nil && price > 0 && w.total()+price*int64(amount) > ctx.Session.Inventory.Zeny {
+			return false
+		}
+		w.addBuyItemAmount(ctx, item, amount)
+		return true
+	case shopModeSell:
+		sell, ok := w.sellable[index]
+		if !ok || ctx.Session == nil {
+			return false
+		}
+		item, ok := findInventoryItemByIndex(ctx.Session, index)
+		if !ok {
+			return false
+		}
+		remaining := item.Amount - w.stagedSellAmount(index)
+		if remaining <= 0 || int(amount) > remaining {
+			return false
+		}
+		w.addCartItemAmount(item, sell, amount)
+		return true
+	default:
+		return false
+	}
+}
+
+// MobileRemoveCart removes one staged line. Quantity editing can be done by
+// removing and adding again, keeping the touch surface intentionally simple.
+func (w *ShopWindow) MobileRemoveCart(row int) bool {
+	if w == nil || row < 0 {
+		return false
+	}
+	switch w.mode {
+	case shopModeBuy:
+		if row >= len(w.buyCart) {
+			return false
+		}
+		w.decrementBuyCartRowAmount(row, w.buyCart[row].amount)
+		return true
+	case shopModeSell:
+		if row >= len(w.cart) {
+			return false
+		}
+		w.decrementSellCartRowAmount(row, w.cart[row].amount)
+		return true
+	default:
+		return false
+	}
+}
+
+// MobileSubmit uses the desktop shop's batched protocol path.
+func (w *ShopWindow) MobileSubmit(ctx Context) bool {
+	if w == nil || ctx.Network == nil {
+		return false
+	}
+	switch w.mode {
+	case shopModeBuy:
+		if len(w.buyCart) == 0 || (ctx.Session != nil && w.total() > ctx.Session.Inventory.Zeny) {
+			return false
+		}
+		items := make([]network.BuyRequestItem, 0, len(w.buyCart))
+		for _, item := range w.buyCart {
+			items = append(items, network.BuyRequestItem{ItemID: item.item.ItemID, Amount: item.amount})
+		}
+		if err := ctx.Network.SendShopBuyItems(items); err != nil {
+			return false
+		}
+	case shopModeSell:
+		if len(w.cart) == 0 {
+			return false
+		}
+		items := make([]network.SellRequestItem, 0, len(w.cart))
+		for _, item := range w.cart {
+			items = append(items, network.SellRequestItem{Index: item.item.Index, Amount: item.amount})
+		}
+		if err := ctx.Network.SendShopSellItems(items); err != nil {
+			return false
+		}
+	default:
+		return false
+	}
+	w.closePacketSent = true
+	return true
+}
+
+// MobileClose mirrors the desktop Cancel behavior so the authoritative
+// ShopWindow closes immediately instead of being re-projected on the next
+// Android refresh while a server close acknowledgement is still in flight.
+func (w *ShopWindow) MobileClose(ctx Context) bool {
+	if w == nil {
+		return false
+	}
+	if w.mode == shopModeBuy || w.mode == shopModeSell {
+		w.cancel(ctx)
+		return true
+	}
+	if w.dealWindow.IsOpen() {
+		w.closeDealWindow(ctx)
+		if ctx.Network != nil && w.dealNPCID != 0 {
+			_ = ctx.Network.SendNPCClose(w.dealNPCID)
+		}
+		return true
+	}
+	return false
 }
 
 func (w *ShopWindow) MobileBuyRequest(index, amount uint16) (network.BuyRequestItem, bool) {
