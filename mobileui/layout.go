@@ -235,6 +235,12 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 	}
 	if portrait {
 		l.ChatButton = l.ChatBar
+		// Keep the unused sub-regions anchored inside the collapsed control.
+		// Several layout contracts validate every child rect, including empty
+		// ones, so a zero rect at the origin is not a valid "hidden" child once
+		// the chat button lives elsewhere in the safe area.
+		l.ChatLabel = Rect{X: l.ChatBar.X, Y: l.ChatBar.Y}
+		l.ChatPrompt = Rect{X: l.ChatBar.X, Y: l.ChatBar.Y}
 	} else {
 		chatButtonW := minf(112, l.ChatBar.W)
 		l.ChatButton = Rect{l.ChatBar.Right() - chatButtonW, l.ChatBar.Y, chatButtonW, l.ChatBar.H}
@@ -350,10 +356,11 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 			utilityW = l.ChatBar.W
 		}
 		l.SitAction = Rect{X: l.ChatBar.X, Y: l.ChatBar.Y - utilityGap - utilityH, W: utilityW, H: utilityH}
+		emoteW := maxf(utilityW, ControlWidth("Emote", DefaultTypography().Button))
 		if portrait {
-			l.EmoteAction = Rect{X: l.ChatBar.X, Y: l.SitAction.Y - utilityGap - utilityH, W: utilityW, H: utilityH}
+			l.EmoteAction = Rect{X: l.ChatBar.X, Y: l.SitAction.Y - utilityGap - utilityH, W: emoteW, H: utilityH}
 		} else {
-			l.EmoteAction = Rect{X: l.SitAction.Right() + utilityGap, Y: l.SitAction.Y, W: maxf(104, utilityW), H: utilityH}
+			l.EmoteAction = Rect{X: l.SitAction.Right() + utilityGap, Y: l.SitAction.Y, W: emoteW, H: utilityH}
 		}
 
 		lootW := minf(primarySlot.W, 112)
