@@ -503,8 +503,8 @@ func enrichMobileStatuses(model *mobileui.MobileHUDModel, s *session.Session) {
 		}
 	}
 
-	for i := range model.Statuses {
-		status := &model.Statuses[i]
+	visible := model.Statuses[:0]
+	for _, status := range model.Statuses {
 		info, ok := db.StatusIconInfoByID(status.ID)
 		if !ok || strings.TrimSpace(info.Icon) == "" {
 			continue
@@ -518,7 +518,9 @@ func enrichMobileStatuses(model *mobileui.MobileHUDModel, s *session.Session) {
 				break
 			}
 		}
+		visible = append(visible, status)
 	}
+	model.Statuses = visible
 	sort.SliceStable(model.Statuses, func(i, j int) bool { return model.Statuses[i].ID < model.Statuses[j].ID })
 }
 
