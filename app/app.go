@@ -584,7 +584,7 @@ func (g *Game) DrawMobileMinimap(frame *render.Frame, rect mobileui.Rect) bool {
 	render.DrawRect(frame, mx-4, my-4, 9, 9, color.RGBA{A: 190})
 	render.DrawRect(frame, mx-3, my-3, 7, 7, marker)
 	render.DrawLine(frame, mx, my-9, mx, my+9, marker)
-	render.DrawLine(frame, mx-9, my, mx+9, marker)
+	render.DrawLine(frame, mx-9, my, mx+9, my, marker)
 	return true
 }
 
