@@ -88,6 +88,8 @@ type desktopPresentation struct {
 	rasterDrawDuration      time.Duration
 	rasterFlushDuration     time.Duration
 	rasterImageDuration     time.Duration
+	rasterFullCount         int
+	rasterDirtyRegions      int64
 	raster                  render.IncrementalUIRasterizer
 
 	// pointer queues touches for the polled input path, in logical UI
@@ -269,6 +271,10 @@ func (d *desktopPresentation) Draw(frame *render.Frame) {
 					d.rasterDrawDuration += rasterMetrics.Draw
 					d.rasterFlushDuration += rasterMetrics.Flush
 					d.rasterImageDuration += rasterMetrics.ImageCopy
+					d.rasterDirtyRegions += int64(rasterMetrics.DirtyRegions)
+					if rasterMetrics.FullRepaint {
+						d.rasterFullCount++
+					}
 					d.lastRaster = time.Now()
 				}
 				if d.image != nil && firstDraw {
@@ -415,6 +421,8 @@ func (d *desktopPresentation) SyncInput(state *input.State) {
 type desktopUIRasterMetrics struct {
 	Count         int
 	Deferred      int
+	FullCount     int
+	DirtyRegions  int64
 	Duration      time.Duration
 	MarkDuration  time.Duration
 	DrawDuration  time.Duration
@@ -427,7 +435,8 @@ func (d *desktopPresentation) RasterMetrics() desktopUIRasterMetrics {
 		return desktopUIRasterMetrics{}
 	}
 	return desktopUIRasterMetrics{
-		Count: d.rasterCount, Deferred: d.rasterDeferred, Duration: d.rasterDuration,
+		Count: d.rasterCount, Deferred: d.rasterDeferred, FullCount: d.rasterFullCount,
+		DirtyRegions: d.rasterDirtyRegions, Duration: d.rasterDuration,
 		MarkDuration: d.rasterMarkDuration, DrawDuration: d.rasterDrawDuration,
 		FlushDuration: d.rasterFlushDuration, ImageDuration: d.rasterImageDuration,
 	}
