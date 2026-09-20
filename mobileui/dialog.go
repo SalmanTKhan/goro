@@ -432,39 +432,50 @@ func (c *DialogController) Tap(x, y float32) bool {
 		if i >= len(c.Layout.Options) || !c.Layout.Options[i].Contains(x, y) {
 			continue
 		}
-		if !option.Enabled {
-			return true
-		}
-		switch option.Action {
-		case DialogOpenShop:
-			if c.Sink != nil {
-				c.Sink.Emit(input.PlayerCommand{Kind: input.CommandOpenShop, NPCID: c.Model.NPCID})
-			}
-			c.Close()
-		case DialogNext:
-			if c.Sink != nil {
-				c.Sink.Emit(input.PlayerCommand{Kind: input.CommandNPCNext, NPCID: c.Model.NPCID})
-			}
-		case DialogMenuChoice:
-			if c.Sink != nil {
-				c.Sink.Emit(input.PlayerCommand{Kind: input.CommandNPCMenuChoice, NPCID: c.Model.NPCID, Choice: uint8(option.Value)})
-			}
-		case DialogOpenStorage:
-			if c.Sink != nil {
-				c.Sink.Emit(input.PlayerCommand{Kind: input.CommandOpenStorage, NPCID: c.Model.NPCID})
-			}
-			c.Close()
-		case DialogNPCClose:
-			if c.Sink != nil {
-				c.Sink.Emit(input.PlayerCommand{Kind: input.CommandNPCClose, NPCID: c.Model.NPCID})
-			}
-			c.Close()
-		default:
-			c.Close()
-		}
+		c.activate(option)
+		return true
+	}
+	// Next/Close dialogs have one obvious action. Treat the complete action
+	// strip as its touch target so small raster/layout differences cannot make
+	// the visibly large mobile button inert.
+	if len(c.Model.Options) == 1 && c.Layout.Actions.Contains(x, y) {
+		c.activate(c.Model.Options[0])
 		return true
 	}
 	return c.Layout.Safe.Contains(x, y)
+}
+
+func (c *DialogController) activate(option DialogOption) {
+	if c == nil || !option.Enabled {
+		return
+	}
+	switch option.Action {
+	case DialogOpenShop:
+		if c.Sink != nil {
+			c.Sink.Emit(input.PlayerCommand{Kind: input.CommandOpenShop, NPCID: c.Model.NPCID})
+		}
+		c.Close()
+	case DialogNext:
+		if c.Sink != nil {
+			c.Sink.Emit(input.PlayerCommand{Kind: input.CommandNPCNext, NPCID: c.Model.NPCID})
+		}
+	case DialogMenuChoice:
+		if c.Sink != nil {
+			c.Sink.Emit(input.PlayerCommand{Kind: input.CommandNPCMenuChoice, NPCID: c.Model.NPCID, Choice: uint8(option.Value)})
+		}
+	case DialogOpenStorage:
+		if c.Sink != nil {
+			c.Sink.Emit(input.PlayerCommand{Kind: input.CommandOpenStorage, NPCID: c.Model.NPCID})
+		}
+		c.Close()
+	case DialogNPCClose:
+		if c.Sink != nil {
+			c.Sink.Emit(input.PlayerCommand{Kind: input.CommandNPCClose, NPCID: c.Model.NPCID})
+		}
+		c.Close()
+	default:
+		c.Close()
+	}
 }
 
 func (c *DialogController) Back() bool {
