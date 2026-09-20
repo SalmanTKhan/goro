@@ -324,9 +324,10 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 
 	perPage := visibleSkillCap(safe, portrait)
 	l.SkillsPerPage = perPage
-	visibleSkills := minInt(perPage, len(model.Skills))
+	shortcutCount := ShortcutCount(model)
+	visibleSkills := minInt(perPage, shortcutCount)
 	if visibleSkills > 0 {
-		pages := (len(model.Skills) + perPage - 1) / perPage
+		pages := (shortcutCount + perPage - 1) / perPage
 		page := navigation.SkillPage
 		if page < 0 {
 			page = 0
@@ -362,7 +363,7 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 		l.SkillSlots = append(l.SkillSlots, Rect{X: x, Y: y, W: skillSize, H: skillSize})
 	}
 
-	if len(model.Skills) > visibleSkills && l.SkillBar.W > 0 {
+	if shortcutCount > visibleSkills && l.SkillBar.W > 0 {
 		pageSize := maxf(tokens.MinTouchTarget, 52)
 		pairW := 2*pageSize + tokens.Gap
 		pageX := l.SkillBar.X + (l.SkillBar.W-pairW)/2
