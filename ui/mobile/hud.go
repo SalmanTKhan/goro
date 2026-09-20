@@ -70,20 +70,12 @@ func levelLine(player mobileui.PlayerHUDModel) string {
 	return "Lv " + strconv.Itoa(player.BaseLevel) + "/" + strconv.Itoa(player.JobLevel)
 }
 
-func (k Kit) placeProgressionActions(c *Canvas, player mobileui.PlayerHUDModel, layout mobileui.HUDLayout) {
+func (k Kit) placeProgressionActions(c *Canvas, _ mobileui.PlayerHUDModel, layout mobileui.HUDLayout) {
 	if layout.LevelUpAction.W > 0 {
 		c.Place(k.Button("LV+", ButtonPressed), layout.LevelUpAction)
-		if player.StatPoints > 0 {
-			c.Place(k.RightAligned(strconv.Itoa(player.StatPoints), RoleMuted),
-				mobileui.Rect{X: layout.LevelUpAction.Right() - 28, Y: layout.LevelUpAction.Y + 2, W: 22, H: 20})
-		}
 	}
 	if layout.SkillUpAction.W > 0 {
 		c.Place(k.Button("SK+", ButtonPressed), layout.SkillUpAction)
-		if player.SkillPoints > 0 {
-			c.Place(k.RightAligned(strconv.Itoa(player.SkillPoints), RoleMuted),
-				mobileui.Rect{X: layout.SkillUpAction.Right() - 28, Y: layout.SkillUpAction.Y + 2, W: 22, H: 20})
-		}
 	}
 }
 
