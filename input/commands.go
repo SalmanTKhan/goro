@@ -84,6 +84,10 @@ const (
 	CommandUseShortcut
 	CommandResetCamera
 	CommandToggleSit
+	// Mobile online-login intents are appended to preserve existing command IDs.
+	CommandOnlineSelectLoginServer
+	CommandOnlineSubmitCredentials
+	CommandOnlineSelectCharacterService
 )
 
 // WorldPosition is a presentation-independent world target. Screen-space
@@ -116,6 +120,10 @@ type PlayerCommand struct {
 	Slot             uint16
 	Text             string
 	TargetName       string
+	// Username and Password are used only by the transient online-login command.
+	// They are never persisted by the command layer or included in diagnostics.
+	Username         string
+	Password         string
 	TargetAccountID  uint32
 	TargetCharID     uint32
 	RequestID        uint32
