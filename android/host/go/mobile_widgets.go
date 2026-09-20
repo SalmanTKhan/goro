@@ -274,6 +274,11 @@ func (m *mobileWidgets) drawWidgets(p *mobilePresentation, frame *render.Frame) 
 	var opts render.DrawImageOptions
 	opts.Filter = render.FilterNearest
 	frame.DrawImage(m.baked, &opts)
+	if p.navigation.Screen == mobileui.ScreenMap && p.mapController != nil && p.mapController.Layout.MapViewport.W > 0 {
+		v := p.mapController.Layout.MapViewport
+		mapRect := mobileui.Rect{X: v.X + 12, Y: v.Y + 12, W: v.W - 24, H: v.H - 24}
+		p.game.DrawMobileMinimap(frame, mapRect)
+	}
 	if p.widgetHUDActive() && p.settings.Display.ShowMinimap && p.hud.Minimap.W > 0 {
 		mapRect := mobileui.Rect{X: p.hud.Minimap.X + 10, Y: p.hud.Minimap.Y + 34, W: p.hud.Minimap.W - 20, H: p.hud.Minimap.H - 70}
 		render.DrawRect(frame, float64(mapRect.X), float64(mapRect.Y), float64(mapRect.W), float64(mapRect.H), mobileColors().mapBackground)
