@@ -26,6 +26,19 @@ type OnlineCharacterSlot struct {
 	Name     string
 	JobName  string
 	Level    int
+	JobLevel int
+	Exp      int64
+	Zeny     int64
+	HP       int
+	MaxHP    int
+	SP       int
+	MaxSP    int
+	Str      int
+	Agi      int
+	Vit      int
+	Int      int
+	Dex      int
+	Luk      int
 	Occupied bool
 }
 
@@ -55,6 +68,8 @@ type OnlineLoginLayout struct {
 	Options                                      []Rect
 	Username, Password, Submit, Cancel           Rect
 	Slots                                        []Rect
+	CharacterInfo                                Rect
+	PagePrev, PageNext, PageLabel                Rect
 	Reconnect, Disconnect, Create, Mode          Rect
 }
 
@@ -117,23 +132,37 @@ func LayoutOnlineLogin(viewport Viewport, model MobileOnlineLoginModel) OnlineLo
 		layout.Mode = Rect{X: formX, Y: layout.Submit.Bottom() + 10, W: formW, H: 44}
 
 	case OnlineLoginCharacters:
-		count := len(model.Characters)
-		if count == 0 {
-			count = 9
+		// Match the desktop selector's three-slots-per-page contract, but use
+		// a touch-friendly card row plus a dedicated selected-character info
+		// surface instead of squeezing nine slots into one phone screen.
+		pageTop := layout.Notice.Bottom() + 10
+		footerH := float32(56)
+		footerY := layout.Panel.Bottom() - footerH - 16
+		infoH := float32(132)
+		if portrait {
+			infoH = 174
 		}
-		gridTop := layout.Notice.Bottom() + 14
-		gridBottom := layout.Panel.Bottom() - 94
 		gap := float32(10)
+		slotAreaBottom := footerY - 26 - gap - infoH - gap
+		slotH := minf(174, maxf(96, slotAreaBottom-pageTop))
 		cellW := (layout.Panel.W - 2*pad - 2*gap) / 3
-		cellH := (gridBottom - gridTop - 2*gap) / 3
-		cellH = minf(154, maxf(76, cellH))
-		for i := 0; i < count && i < 9; i++ {
+		for i := 0; i < 3; i++ {
 			layout.Slots = append(layout.Slots, Rect{
-				X: layout.Panel.X + pad + float32(i%3)*(cellW+gap),
-				Y: gridTop + float32(i/3)*(cellH+gap), W: cellW, H: cellH,
+				X: layout.Panel.X + pad + float32(i)*(cellW+gap),
+				Y: pageTop,
+				W: cellW,
+				H: slotH,
 			})
 		}
-		layout.Create = Rect{X: layout.Panel.X + pad, Y: layout.Panel.Bottom() - 72, W: (layout.Panel.W - 2*pad - 2*gap) / 3, H: 52}
+		infoY := pageTop + slotH + gap
+		layout.CharacterInfo = Rect{X: layout.Panel.X + pad, Y: infoY, W: layout.Panel.W - 2*pad, H: maxf(0, footerY-26-gap-infoY)}
+		layout.PageLabel = Rect{X: layout.Panel.X + pad, Y: footerY - 26, W: layout.Panel.W - 2*pad, H: 22}
+
+		sideW := minf(154, maxf(96, layout.Panel.W*0.18))
+		actionW := minf(300, maxf(180, layout.Panel.W*0.34))
+		layout.PagePrev = Rect{X: layout.Panel.X + pad, Y: footerY, W: sideW, H: footerH}
+		layout.PageNext = Rect{X: layout.Panel.Right() - pad - sideW, Y: footerY, W: sideW, H: footerH}
+		layout.Create = Rect{X: layout.Panel.X + (layout.Panel.W-actionW)/2, Y: footerY, W: actionW, H: footerH}
 
 	case OnlineLoginCreate:
 		formW := minf(620, layout.Panel.W-2*pad)
