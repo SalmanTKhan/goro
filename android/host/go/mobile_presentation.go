@@ -1366,41 +1366,6 @@ func (p *mobilePresentation) drawOnlineStatus(frame *render.Frame) {
 		drawMobileButton(frame, layout.Cancel, "CANCEL", colors, scale*0.74, true)
 		return
 
-	case mobileui.OnlineLoginCreate:
-		if layout.Username.Contains(x, y) {
-			if strings.TrimSpace(p.onlineCharacterName) == "" {
-				p.onlineCharacterName = model.CreateName
-			}
-			p.onlineInputMode = androidTextInputLoginCharacterName
-			p.syncTextInputState()
-			return
-		}
-		if layout.Submit.Contains(x, y) {
-			name := strings.TrimSpace(p.onlineCharacterName)
-			if name == "" {
-				name = strings.TrimSpace(model.CreateName)
-			}
-			if len([]byte(name)) < 4 {
-				return
-			}
-			p.onlineInputMode = androidTextInputNone
-			p.syncTextInputState()
-			p.emitMobileCommand(input.PlayerCommand{Kind: input.CommandOnlineCreateCharacter, Slot: uint16(model.CreateSlot), Text: name})
-			return
-		}
-		if layout.Cancel.Contains(x, y) {
-			p.onlineInputMode = androidTextInputNone
-			p.onlineCharacterName = ""
-			p.syncTextInputState()
-			p.emitMobileCommand(input.PlayerCommand{Kind: input.CommandOnlineCancelCharacterCreate})
-			return
-		}
-		if p.onlineInputMode != androidTextInputNone {
-			p.onlineInputMode = androidTextInputNone
-			p.syncTextInputState()
-		}
-		return
-
 	case mobileui.OnlineLoginCharacters:
 		for i, rect := range layout.Slots {
 			if i >= len(model.Characters) {
@@ -1506,6 +1471,41 @@ func (p *mobilePresentation) handleOnlineTouch(x, y float32) {
 		}
 		// A text field is only active while the player is explicitly editing it.
 		// Tapping the background must not behave like another username tap.
+		if p.onlineInputMode != androidTextInputNone {
+			p.onlineInputMode = androidTextInputNone
+			p.syncTextInputState()
+		}
+		return
+
+	case mobileui.OnlineLoginCreate:
+		if layout.Username.Contains(x, y) {
+			if strings.TrimSpace(p.onlineCharacterName) == "" {
+				p.onlineCharacterName = model.CreateName
+			}
+			p.onlineInputMode = androidTextInputLoginCharacterName
+			p.syncTextInputState()
+			return
+		}
+		if layout.Submit.Contains(x, y) {
+			name := strings.TrimSpace(p.onlineCharacterName)
+			if name == "" {
+				name = strings.TrimSpace(model.CreateName)
+			}
+			if len([]byte(name)) < 4 {
+				return
+			}
+			p.onlineInputMode = androidTextInputNone
+			p.syncTextInputState()
+			p.emitMobileCommand(input.PlayerCommand{Kind: input.CommandOnlineCreateCharacter, Slot: uint16(model.CreateSlot), Text: name})
+			return
+		}
+		if layout.Cancel.Contains(x, y) {
+			p.onlineInputMode = androidTextInputNone
+			p.onlineCharacterName = ""
+			p.syncTextInputState()
+			p.emitMobileCommand(input.PlayerCommand{Kind: input.CommandOnlineCancelCharacterCreate})
+			return
+		}
 		if p.onlineInputMode != androidTextInputNone {
 			p.onlineInputMode = androidTextInputNone
 			p.syncTextInputState()
