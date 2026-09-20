@@ -667,6 +667,13 @@ func (g *Game) DrawMobileSkillIcon(screen *render.Frame, skill mobileui.MobileSk
 	g.modes.DrawMobileSkillIcon(screen, skill.SkillID, x, y, size)
 }
 
+func (g *Game) DrawMobileStatusIcon(screen *render.Frame, status mobileui.StatusEffectModel, x, y, size int) {
+	if g == nil || g.modes == nil {
+		return
+	}
+	g.modes.DrawMobileStatusIcon(screen, status.ID, x, y, size)
+}
+
 // DrawMobileNPCCutin reuses the desktop packet/resource state but bypasses the
 // desktop NoUI gate used by the native mobile presentation.
 func (g *Game) DrawMobileNPCCutin(screen *render.Frame) {
