@@ -1424,16 +1424,21 @@ func (p *mobilePresentation) drawOnlineStatus(frame *render.Frame) {
 				pad := float32(14)
 				innerX := layout.CharacterInfo.X + pad
 				innerW := layout.CharacterInfo.W - 2*pad
-				rowH := maxf32(18, (layout.CharacterInfo.H-16)/4)
-				leftW := innerW * 0.54
-				rightX := innerX + leftW + 12
-				rightW := innerW - leftW - 12
-				drawMobileTextFit(frame, fmt.Sprintf("%s   %s", trimText(selected.Name, 18), trimText(selected.JobName, 14)), innerX, layout.CharacterInfo.Y+8, leftW, colors.text, scale*0.66)
-				drawMobileTextFit(frame, fmt.Sprintf("Lv %d / Job %d   EXP %d", selected.Level, selected.JobLevel, selected.Exp), innerX, layout.CharacterInfo.Y+8+rowH, leftW, colors.muted, scale*0.54)
-				drawMobileTextFit(frame, fmt.Sprintf("HP %d/%d   SP %d/%d", selected.HP, selected.MaxHP, selected.SP, selected.MaxSP), innerX, layout.CharacterInfo.Y+8+2*rowH, leftW, colors.muted, scale*0.54)
-				drawMobileTextFit(frame, fmt.Sprintf("Zeny %d", selected.Zeny), innerX, layout.CharacterInfo.Y+8+3*rowH, leftW, colors.muted, scale*0.54)
-				drawMobileTextFit(frame, fmt.Sprintf("STR %d   AGI %d   VIT %d", selected.Str, selected.Agi, selected.Vit), rightX, layout.CharacterInfo.Y+8+rowH, rightW, colors.text, scale*0.54)
-				drawMobileTextFit(frame, fmt.Sprintf("INT %d   DEX %d   LUK %d", selected.Int, selected.Dex, selected.Luk), rightX, layout.CharacterInfo.Y+8+2*rowH, rightW, colors.text, scale*0.54)
+				rowH := minf32(32, maxf32(20, (layout.CharacterInfo.H-16)/7))
+				y := layout.CharacterInfo.Y + 8
+				drawMobileTextFit(frame, trimText(selected.Name, 20), innerX, y, innerW, colors.text, scale*0.68)
+				y += rowH
+				drawMobileTextFit(frame, trimText(selected.JobName, 20), innerX, y, innerW, colors.muted, scale*0.56)
+				y += rowH
+				drawMobileTextFit(frame, fmt.Sprintf("Base %d   Job %d   EXP %d", selected.Level, selected.JobLevel, selected.Exp), innerX, y, innerW, colors.muted, scale*0.54)
+				y += rowH
+				drawMobileTextFit(frame, fmt.Sprintf("HP %d/%d   SP %d/%d", selected.HP, selected.MaxHP, selected.SP, selected.MaxSP), innerX, y, innerW, colors.muted, scale*0.54)
+				y += rowH
+				drawMobileTextFit(frame, fmt.Sprintf("STR %d   AGI %d   VIT %d", selected.Str, selected.Agi, selected.Vit), innerX, y, innerW, colors.text, scale*0.54)
+				y += rowH
+				drawMobileTextFit(frame, fmt.Sprintf("INT %d   DEX %d   LUK %d", selected.Int, selected.Dex, selected.Luk), innerX, y, innerW, colors.text, scale*0.54)
+				y += rowH
+				drawMobileTextFit(frame, fmt.Sprintf("Zeny %d", selected.Zeny), innerX, y, innerW, colors.accent, scale*0.54)
 			} else {
 				drawMobileTextCentered(frame, fmt.Sprintf("Slot %d is empty", model.SelectedSlot+1), layout.CharacterInfo, colors.muted, scale*0.62)
 			}
