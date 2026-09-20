@@ -183,6 +183,15 @@ func (m *Manager) MobileDialogModel() mobileui.MobileDialogModel {
 	return mobileui.MobileDialogModel{}
 }
 
+func (m *Manager) DrawMobileNPCCutin(screen *render.Frame) {
+	if m == nil || screen == nil {
+		return
+	}
+	if mode, ok := m.mode.(*WorldMode); ok {
+		mode.ui.npcCutin.DrawMobile(screen)
+	}
+}
+
 func (m *Manager) PickMobileTarget(ctx client.Context, position input.WorldPosition) (input.PickedTarget, bool) {
 	if mode, ok := m.mode.(interface {
 		PickMobileTarget(client.Context, input.WorldPosition) (input.PickedTarget, bool)
