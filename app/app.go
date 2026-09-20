@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"image"
+	"image/color"
 	"sort"
 	"strings"
 	"time"
@@ -54,6 +55,8 @@ type Game struct {
 	recordingActive        bool
 	pendingRecordingStop   bool
 	mobileTarget           mobileui.TargetHUDModel
+	mobileMinimapName      string
+	mobileMinimapTexture   *render.Image
 	mobileSettingsChanged  func(input.MobileSettings)
 	controllerActions      input.ActionState
 	controllerActionsValid bool
@@ -512,6 +515,65 @@ func (g *Game) DrawMobileInventoryItemIcon(screen *render.Frame, item mobileui.I
 		return
 	}
 	g.modes.DrawMobileInventoryItemIcon(screen, item.ItemID, item.Identified, x, y, size)
+}
+
+// DrawMobileMinimap draws the same RO minimap artwork and world-coordinate
+// convention as the desktop minimap. It returns false when the retail map
+// texture is unavailable so Android can fall back to its terrain raster.
+func (g *Game) DrawMobileMinimap(frame *render.Frame, rect mobileui.Rect) bool {
+	if g == nil || frame == nil || g.resource == nil || g.world == nil || rect.W <= 0 || rect.H <= 0 {
+		return false
+	}
+	mapName := strings.TrimSpace(g.world.MapName)
+	if mapName == "" {
+		return false
+	}
+	if g.mobileMinimapName != mapName {
+		g.mobileMinimapName = mapName
+		g.mobileMinimapTexture = nil
+		if img, err := gameui.LoadMinimapImage(g.resource, mapName); err == nil && img != nil {
+			g.mobileMinimapTexture = render.NewImageFromImage(img)
+		}
+	}
+	if g.mobileMinimapTexture == nil {
+		return false
+	}
+	bounds := g.mobileMinimapTexture.Bounds()
+	if bounds.Dx() <= 0 || bounds.Dy() <= 0 {
+		return false
+	}
+	sw, sh := float64(bounds.Dx()), float64(bounds.Dy())
+	dw, dh := float64(rect.W), float64(rect.H)
+	if sw/sh > dw/dh {
+		dh = dw * sh / sw
+	} else {
+		dw = dh * sw / sh
+	}
+	dx := float64(rect.X) + (float64(rect.W)-dw)/2
+	dy := float64(rect.Y) + (float64(rect.H)-dh)/2
+	var opts render.DrawImageOptions
+	opts.Filter = render.FilterLinear
+	opts.GeoM.Scale(dw/sw, dh/sh)
+	opts.GeoM.Translate(dx, dy)
+	frame.DrawImage(g.mobileMinimapTexture, &opts)
+
+	mapW, mapH := 0, 0
+	if g.world.GAT != nil && g.world.GAT.Width > 0 && g.world.GAT.Height > 0 {
+		mapW, mapH = g.world.GAT.Width, g.world.GAT.Height
+	} else if g.world.GND != nil && g.world.GND.Width > 0 && g.world.GND.Height > 0 {
+		mapW, mapH = g.world.GND.Width, g.world.GND.Height
+	}
+	if mapW <= 0 || mapH <= 0 {
+		return true
+	}
+	mx := dx + float64(g.world.Player.X)*dw/float64(mapW)
+	my := dy + dh - float64(g.world.Player.Y)*dh/float64(mapH)
+	marker := color.RGBA{R: 255, G: 232, B: 96, A: 255}
+	render.DrawRect(frame, mx-4, my-4, 9, 9, color.RGBA{A: 190})
+	render.DrawRect(frame, mx-3, my-3, 7, 7, marker)
+	render.DrawLine(frame, mx, my-9, mx, my+9, marker)
+	render.DrawLine(frame, mx-9, my, mx+9, marker)
+	return true
 }
 
 func (g *Game) DrawMobileSkillIcon(screen *render.Frame, skill mobileui.MobileSkillModel, x, y, size int) {
