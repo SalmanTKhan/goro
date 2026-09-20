@@ -356,7 +356,7 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 	// moment-to-moment gameplay actions, and emotes need to be reachable without
 	// covering the world with a full screen. Skill targeting temporarily owns
 	// this strip, so hide the utilities while its Cancel banner is active.
-	if navigation.Targeting.Mode == input.SkillTargetIdle {
+	if navigation.Targeting.Mode == input.SkillTargetIdle && !navigation.MenuOpen {
 		utilityH := maxf(tokens.MinTouchTarget, 52)
 		utilityW := float32(88)
 		if portrait {
