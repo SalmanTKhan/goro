@@ -31,6 +31,9 @@ func (c *Controller) Tap(x, y float32) bool {
 		return false
 	case ControlMenu:
 		c.Navigation.MenuOpen = !c.Navigation.MenuOpen
+		if c.Navigation.MenuOpen {
+			c.Navigation.EmoteOpen = false
+		}
 		c.relayout()
 		return true
 	case ControlMenuAction:
@@ -78,6 +81,30 @@ func (c *Controller) Tap(x, y float32) bool {
 		default:
 			c.emit(input.PlayerCommand{Kind: input.CommandUseSkill, SkillID: skill.SkillID, Level: skill.Level})
 		}
+		c.relayout()
+		return true
+	case ControlSit:
+		c.emit(input.PlayerCommand{Kind: input.CommandToggleSit})
+		return true
+	case ControlLoot:
+		if len(c.Model.Loot) > 0 {
+			c.emit(input.PlayerCommand{Kind: input.CommandLootFocused})
+		}
+		return true
+	case ControlEmoteToggle:
+		c.Navigation.EmoteOpen = !c.Navigation.EmoteOpen
+		if c.Navigation.EmoteOpen {
+			c.Navigation.MenuOpen = false
+		}
+		c.relayout()
+		return true
+	case ControlEmote:
+		if hit.EmoteIndex < 0 || hit.EmoteIndex >= len(c.Model.Emotes) {
+			return true
+		}
+		emote := c.Model.Emotes[hit.EmoteIndex]
+		c.emit(input.PlayerCommand{Kind: input.CommandEmotion, EmotionID: emote.ID})
+		c.Navigation.EmoteOpen = false
 		c.relayout()
 		return true
 	case ControlPrimaryAction, ControlTarget:
