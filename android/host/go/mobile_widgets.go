@@ -74,8 +74,9 @@ func (m *mobileWidgets) InvalidateSize() {
 
 // sprites is the art a screen wants composited over its raster.
 type sprites struct {
-	items  []uimobile.IconPlacement
-	skills []uimobile.SkillIconPlacement
+	items    []uimobile.IconPlacement
+	skills   []uimobile.SkillIconPlacement
+	statuses []uimobile.StatusIconPlacement
 	// preview is the character sprite's frame on the profile screen. It draws
 	// through a different call than item art, so it is reported separately.
 	preview      mobileui.Rect
@@ -166,7 +167,7 @@ func (p *mobilePresentation) tree(k uimobile.Kit) (widget.Widget, sprites) {
 	case p.inventory == nil || p.inventory.State.Screen == mobileui.ScreenWorldHUD:
 		skills, loot := uimobile.HUDIconRects(p.hudModel, p.hud)
 		return k.HUDTree(p.hudModel, p.hud, p.navigation),
-			sprites{items: loot, skills: skills}
+			sprites{items: loot, skills: skills, statuses: uimobile.HUDStatusIconRects(p.hudModel, p.hud)}
 	}
 	return nil, sprites{}
 }
@@ -306,6 +307,13 @@ func (m *mobileWidgets) drawWidgets(p *mobilePresentation, frame *render.Frame) 
 			continue
 		}
 		p.game.DrawMobileSkillIcon(frame, placement.Skill, int(placement.Rect.X), int(placement.Rect.Y), side)
+	}
+	for _, placement := range art.statuses {
+		side := int(min32(placement.Rect.W, placement.Rect.H))
+		if side < 6 {
+			continue
+		}
+		p.game.DrawMobileStatusIcon(frame, placement.Status, int(placement.Rect.X), int(placement.Rect.Y), side)
 	}
 	return true
 }
