@@ -407,13 +407,6 @@ func ParseRememberWarpPointAck(packet Packet) (RememberWarpPointAck, bool, error
 	return RememberWarpPointAck{Result: packet.Data[2]}, true, nil
 }
 
-func (c *Client) SendSkillLevelUp(skillID uint16) error {
-	if c == nil || skillID == 0 {
-		return fmt.Errorf("invalid skill level-up request")
-	}
-	return c.Send(BuildSkillLevelUpPacket(skillID))
-}
-
 func BuildSkillLevelUpPacket(skillID uint16) []byte {
 	packet := make([]byte, 4)
 	binary.LittleEndian.PutUint16(packet[0:2], 0x0112)
