@@ -467,9 +467,9 @@ func (h *host) renderLoop() {
 	var peakRSS int64
 	var runtimeMetricsPath string
 	var surfaceVSync = true
-	// Pause rendering for every session type while Android is backgrounded.
-	// Online sessions keep networking/game authority alive, but must not keep
-	// acquiring/presenting against a Surface that Android may have invalidated.
+	// Pause the frame/update loop for every session type while Android is
+	// backgrounded. The session object and connection remain intact, while no
+	// frame can acquire/present against a Surface Android may have invalidated.
 	var appPaused bool
 	var pendingOverlays []assetOverlayRequest
 	var pendingRelease *struct {
