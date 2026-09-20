@@ -111,3 +111,16 @@ func TestMenuLayoutFitsSafeArea(t *testing.T) {
 		t.Fatalf("got %d menu actions", len(layout.MenuActions))
 	}
 }
+
+
+func TestHUDDoesNotExposeBlankStatusControls(t *testing.T) {
+	model := Fixture("normal")
+	model.Statuses = []StatusEffectModel{{ID: 1}, {ID: 2}}
+	layout := LayoutHUD(Viewport{Width: 1280, Height: 720}, DefaultTokens(), model, Navigation{})
+	if layout.StatusArea.W != 0 || layout.StatusArea.H != 0 {
+		t.Fatalf("unresolved statuses created visible HUD controls: %+v", layout.StatusArea)
+	}
+	if hit := layout.HitTest(layout.PlayerPanel.Right()+16, layout.PlayerPanel.Y+16); hit.Control == ControlStatus {
+		t.Fatalf("unresolved status region remained a Character-screen hit target: %+v", hit)
+	}
+}
