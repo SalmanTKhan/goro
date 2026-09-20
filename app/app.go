@@ -353,7 +353,16 @@ func (g *Game) ApplyPlayerCommand(command input.PlayerCommand) bool {
 		g.mobileTarget = target
 		return true
 	}
-	return g.modes.ApplyPlayerCommand(g.modeContext(), command)
+	accepted := g.modes.ApplyPlayerCommand(g.modeContext(), command)
+	if accepted && command.ActorID != 0 {
+		switch command.Kind {
+		case input.CommandSelectActor, input.CommandAttackActor, input.CommandInteractActor, input.CommandOpenActorContext:
+			if target, ok := g.modes.InspectMobileTarget(g.modeContext(), command.ActorID); ok {
+				g.mobileTarget = target
+			}
+		}
+	}
+	return accepted
 }
 
 func (g *Game) MobileControls() input.MobileControls {
