@@ -783,6 +783,14 @@ func (p *mobilePresentation) Refresh() {
 	if p.profileController != nil {
 		p.profileController.SetModel(snapshot.Profile)
 		p.profileController.Resize(p.viewport)
+		if p.game.Online() && p.profileController.Open {
+			// Profile is the offline character-authority editor. Never carry an
+			// accidentally opened profile surface into an online session.
+			p.profileController.Close()
+			if p.navigation.Screen == mobileui.ScreenProfile {
+				p.navigation.Open(mobileui.ScreenWorldHUD)
+			}
+		}
 	}
 	if p.dialogController != nil {
 		p.dialogController.Resize(p.viewport)
