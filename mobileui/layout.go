@@ -183,10 +183,9 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 	if !model.Minimap.Visible {
 		l.Minimap = Rect{}
 	}
-	// Status projection currently carries IDs/durations but no resolved icon
-	// artwork for live online effects. Do not expose empty slot-shaped controls
-	// (or a hidden Character-screen hit target) until there is something the HUD
-	// can actually render.
+	// Statuses without resolved retail artwork stay out of the HUD. The game
+	// projection fills IconKey only for effects the target client can actually
+	// present, so this area never degenerates into anonymous empty squares.
 	hasStatusArtwork := false
 	for _, status := range model.Statuses {
 		if status.IconKey != "" {
