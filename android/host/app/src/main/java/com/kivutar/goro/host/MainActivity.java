@@ -40,6 +40,7 @@ import org.json.JSONObject;
 public final class MainActivity extends Activity {
     private static final int TEXT_INPUT_LOGIN_USERNAME = 4;
     private static final int TEXT_INPUT_LOGIN_PASSWORD = 5;
+    private static final int TEXT_INPUT_LOGIN_CHARACTER_NAME = 6;
 
     static {
         System.loadLibrary("goro_android");
@@ -173,7 +174,7 @@ public final class MainActivity extends Activity {
             int inputType = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES;
             if (mode == TEXT_INPUT_LOGIN_PASSWORD) {
                 inputType = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD;
-            } else if (mode == TEXT_INPUT_LOGIN_USERNAME) {
+            } else if (mode == TEXT_INPUT_LOGIN_USERNAME || mode == TEXT_INPUT_LOGIN_CHARACTER_NAME) {
                 inputType = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD;
             }
             chatInput.setInputType(inputType);
