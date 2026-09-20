@@ -5,6 +5,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/kivutar/goro/db"
 	"github.com/kivutar/goro/input"
 	"github.com/kivutar/goro/session"
 )
@@ -55,6 +56,20 @@ type SkillSlotModel struct {
 	CooldownTotal     time.Duration
 	Usable            bool
 	TargetMode        input.SkillTargetMode
+}
+
+type ShortcutKind uint8
+
+const (
+	ShortcutNone ShortcutKind = iota
+	ShortcutSkill
+	ShortcutItem
+)
+
+type ShortcutSlotModel struct {
+	Kind  ShortcutKind
+	Skill SkillSlotModel
+	Item  InventoryItemModel
 }
 
 type StatusEffectModel struct {
@@ -126,36 +141,82 @@ type MinimapRaster struct {
 }
 
 type MobileHUDModel struct {
-	Player   PlayerHUDModel
-	Target   TargetHUDModel
-	Skills   []SkillSlotModel
-	Statuses []StatusEffectModel
-	Emotes   []EmoteModel
-	Loot     []LootItemModel
-	Minimap  MinimapModel
+	Player    PlayerHUDModel
+	Target    TargetHUDModel
+	Skills    []SkillSlotModel
+	Shortcuts []ShortcutSlotModel
+	Statuses  []StatusEffectModel
+	Emotes    []EmoteModel
+	Loot      []LootItemModel
+	Minimap   MinimapModel
 }
 
 // HUDSource is the small, read-only projection boundary between authoritative
 // game state and the mobile presentation model.
 type HUDSource struct {
-	Player   PlayerHUDModel
-	Target   TargetHUDModel
-	Skills   []SkillSlotModel
-	Statuses []StatusEffectModel
-	Emotes   []EmoteModel
-	Loot     []LootItemModel
-	Minimap  MinimapModel
+	Player    PlayerHUDModel
+	Target    TargetHUDModel
+	Skills    []SkillSlotModel
+	Shortcuts []ShortcutSlotModel
+	Statuses  []StatusEffectModel
+	Emotes    []EmoteModel
+	Loot      []LootItemModel
+	Minimap   MinimapModel
 }
 
 func Project(source HUDSource) MobileHUDModel {
 	return MobileHUDModel{
 		Player: source.Player, Target: source.Target,
-		Skills:   append([]SkillSlotModel(nil), source.Skills...),
-		Statuses: append([]StatusEffectModel(nil), source.Statuses...),
+		Skills:    append([]SkillSlotModel(nil), source.Skills...),
+		Shortcuts: append([]ShortcutSlotModel(nil), source.Shortcuts...),
+		Statuses:  append([]StatusEffectModel(nil), source.Statuses...),
 		Emotes:   append([]EmoteModel(nil), source.Emotes...),
 		Loot:     append([]LootItemModel(nil), source.Loot...),
 		Minimap:  projectMinimap(source.Minimap),
 	}
+}
+
+func ShortcutCount(model MobileHUDModel) int {
+	if len(model.Shortcuts) > 0 {
+		return len(model.Shortcuts)
+	}
+	return len(model.Skills)
+}
+
+func ShortcutAt(model MobileHUDModel, index int) (ShortcutSlotModel, bool) {
+	if index < 0 {
+		return ShortcutSlotModel{}, false
+	}
+	if len(model.Shortcuts) > 0 {
+		if index >= len(model.Shortcuts) {
+			return ShortcutSlotModel{}, false
+		}
+		return model.Shortcuts[index], true
+	}
+	if index >= len(model.Skills) {
+		return ShortcutSlotModel{}, false
+	}
+	return ShortcutSlotModel{Kind: ShortcutSkill, Skill: model.Skills[index]}, true
+}
+
+func shortcutItemModel(s *session.Session, itemID uint16) InventoryItemModel {
+	out := InventoryItemModel{ItemID: itemID, Identified: true}
+	if s == nil || itemID == 0 {
+		return out
+	}
+	for _, item := range s.Inventory.Items {
+		if item.ItemID != itemID || item.Amount <= 0 {
+			continue
+		}
+		out.Index = item.Index
+		out.ItemID = item.ItemID
+		out.Identified = item.Identified
+		out.Quantity = item.Amount
+		out.Type = item.Type
+		out.Usable = db.ItemTypeIsUsable(item.Type)
+		return out
+	}
+	return out
 }
 
 func projectMinimap(source MinimapModel) MinimapModel {
@@ -211,33 +272,38 @@ func ProjectSession(s *session.Session, target TargetHUDModel) MobileHUDModel {
 		if slot.ID == 0 {
 			continue
 		}
-		var skill session.Skill
-		var ok bool
-		for _, candidate := range s.Skills.List {
-			if candidate.ID == uint16(slot.ID) {
-				skill, ok = candidate, true
-				break
+		switch slot.Type {
+		case session.HotkeyTypeItem:
+			model.Shortcuts = append(model.Shortcuts, ShortcutSlotModel{Kind: ShortcutItem, Item: shortcutItemModel(s, uint16(slot.ID))})
+		case session.HotkeyTypeSkill:
+			var skill session.Skill
+			var ok bool
+			for _, candidate := range s.Skills.List {
+				if candidate.ID == uint16(slot.ID) {
+					skill, ok = candidate, true
+					break
+				}
 			}
+			if !ok {
+				continue
+			}
+			level := int(slot.Level)
+			if level <= 0 {
+				level = skill.Level
+			}
+			projected := skillSlotModel(i, skill, level, s.Vitals.SP)
+			model.Skills = append(model.Skills, projected)
+			model.Shortcuts = append(model.Shortcuts, ShortcutSlotModel{Kind: ShortcutSkill, Skill: projected})
 		}
-		if !ok {
-			continue
-		}
-		level := int(slot.Level)
-		if level <= 0 {
-			level = skill.Level
-		}
-		model.Skills = append(model.Skills, skillSlotModel(i, skill, level, s.Vitals.SP))
 	}
-	// Fallback: when no explicit hotkey layout exists (common offline, or before
-	// the server's ZC_SHORTCUT_KEY_LIST arrives) mirror the learned skills onto
-	// the bar so mobile players can still cast more than nothing. An explicit
-	// layout, even a single slot, always wins.
-	if len(model.Skills) == 0 {
+	if len(model.Shortcuts) == 0 {
 		for i, skill := range s.Skills.List {
 			if skill.ID == 0 {
 				continue
 			}
-			model.Skills = append(model.Skills, skillSlotModel(i, skill, skill.Level, s.Vitals.SP))
+			projected := skillSlotModel(i, skill, skill.Level, s.Vitals.SP)
+			model.Skills = append(model.Skills, projected)
+			model.Shortcuts = append(model.Shortcuts, ShortcutSlotModel{Kind: ShortcutSkill, Skill: projected})
 		}
 	}
 	ids := make([]int, 0, len(s.Statuses.Active))
