@@ -1367,11 +1367,18 @@ func (p *mobilePresentation) drawOnlineStatus(frame *render.Frame) {
 		return
 
 	case mobileui.OnlineLoginCharacters:
+		pageStart := (model.SelectedSlot / 3) * 3
+		pageCount := (len(model.Characters) + 2) / 3
+		if pageCount < 1 {
+			pageCount = 1
+		}
+		page := pageStart / 3
 		for i, rect := range layout.Slots {
-			if i >= len(model.Characters) {
-				break
+			index := pageStart + i
+			if index < 0 || index >= len(model.Characters) {
+				continue
 			}
-			entry := model.Characters[i]
+			entry := model.Characters[index]
 			active := entry.Slot == model.SelectedSlot
 			drawMobileCard(frame, rect, colors, active)
 			if active {
@@ -1379,22 +1386,60 @@ func (p *mobilePresentation) drawOnlineStatus(frame *render.Frame) {
 			}
 			label := fmt.Sprintf("SLOT %d", entry.Slot+1)
 			if entry.Occupied {
-				label = fmt.Sprintf("%s  LV %d", trimText(entry.Name, 14), entry.Level)
-				previewTop := rect.Y + 34
+				label = trimText(entry.Name, 16)
+				previewTop := rect.Y + 30
 				previewBottom := rect.Bottom() - 24
 				if previewBottom > previewTop {
 					p.game.DrawMobileLoginCharacterPreview(frame, entry.Slot,
-						int(rect.X+8), int(previewTop), int(rect.W-16), int(previewBottom-previewTop))
+						int(rect.X+6), int(previewTop), int(rect.W-12), int(previewBottom-previewTop))
 				}
 			}
-			drawMobileTextCentered(frame, label, mobileui.Rect{X: rect.X + 8, Y: rect.Y + 6, W: rect.W - 16, H: 28}, colors.text, scale*0.62)
+			drawMobileTextCentered(frame, label, mobileui.Rect{X: rect.X + 6, Y: rect.Y + 4, W: rect.W - 12, H: 26}, colors.text, scale*0.62)
 			if entry.Occupied {
-				drawMobileTextCentered(frame, entry.JobName, mobileui.Rect{X: rect.X + 8, Y: rect.Bottom()-24, W: rect.W - 16, H: 18}, colors.muted, scale*0.48)
+				footer := fmt.Sprintf("%s   Lv %d", trimText(entry.JobName, 12), entry.Level)
+				drawMobileTextCentered(frame, footer, mobileui.Rect{X: rect.X + 6, Y: rect.Bottom()-23, W: rect.W - 12, H: 18}, colors.muted, scale*0.48)
 			} else {
-				drawMobileTextCentered(frame, "CREATE", mobileui.Rect{X: rect.X + 8, Y: rect.Y + 46, W: rect.W - 16, H: 26}, colors.accent, scale*0.54)
+				drawMobileTextCentered(frame, "EMPTY SLOT", mobileui.Rect{X: rect.X + 6, Y: rect.Y + rect.H*0.48, W: rect.W - 12, H: 24}, colors.accent, scale*0.54)
 			}
 		}
-		drawMobileButton(frame, layout.Create, "CREATE SELECTED", colors, scale*0.62, model.CanCreate)
+
+		var selected mobileui.OnlineCharacterSlot
+		for _, entry := range model.Characters {
+			if entry.Slot == model.SelectedSlot {
+				selected = entry
+				break
+			}
+		}
+		if layout.CharacterInfo.W > 0 && layout.CharacterInfo.H > 0 {
+			drawMobilePanel(frame, layout.CharacterInfo)
+			if selected.Occupied {
+				pad := float32(14)
+				innerX := layout.CharacterInfo.X + pad
+				innerW := layout.CharacterInfo.W - 2*pad
+				rowH := maxf32(18, (layout.CharacterInfo.H-16)/4)
+				leftW := innerW * 0.54
+				rightX := innerX + leftW + 12
+				rightW := innerW - leftW - 12
+				drawMobileTextFit(frame, fmt.Sprintf("%s   %s", trimText(selected.Name, 18), trimText(selected.JobName, 14)), innerX, layout.CharacterInfo.Y+8, leftW, colors.text, scale*0.66)
+				drawMobileTextFit(frame, fmt.Sprintf("Lv %d / Job %d   EXP %d", selected.Level, selected.JobLevel, selected.Exp), innerX, layout.CharacterInfo.Y+8+rowH, leftW, colors.muted, scale*0.54)
+				drawMobileTextFit(frame, fmt.Sprintf("HP %d/%d   SP %d/%d", selected.HP, selected.MaxHP, selected.SP, selected.MaxSP), innerX, layout.CharacterInfo.Y+8+2*rowH, leftW, colors.muted, scale*0.54)
+				drawMobileTextFit(frame, fmt.Sprintf("Zeny %d", selected.Zeny), innerX, layout.CharacterInfo.Y+8+3*rowH, leftW, colors.muted, scale*0.54)
+				drawMobileTextFit(frame, fmt.Sprintf("STR %d   AGI %d   VIT %d", selected.Str, selected.Agi, selected.Vit), rightX, layout.CharacterInfo.Y+8+rowH, rightW, colors.text, scale*0.54)
+				drawMobileTextFit(frame, fmt.Sprintf("INT %d   DEX %d   LUK %d", selected.Int, selected.Dex, selected.Luk), rightX, layout.CharacterInfo.Y+8+2*rowH, rightW, colors.text, scale*0.54)
+			} else {
+				drawMobileTextCentered(frame, fmt.Sprintf("Slot %d is empty", model.SelectedSlot+1), layout.CharacterInfo, colors.muted, scale*0.62)
+			}
+		}
+		drawMobileTextCentered(frame, fmt.Sprintf("PAGE %d / %d", page+1, pageCount), layout.PageLabel, colors.muted, scale*0.54)
+		drawMobileButton(frame, layout.PagePrev, "‹ PREV", colors, scale*0.58, page > 0)
+		drawMobileButton(frame, layout.PageNext, "NEXT ›", colors, scale*0.58, page+1 < pageCount)
+		actionLabel := "CREATE"
+		actionEnabled := model.CanCreate
+		if selected.Occupied {
+			actionLabel = "ENTER WORLD"
+			actionEnabled = true
+		}
+		drawMobileButton(frame, layout.Create, actionLabel, colors, scale*0.62, actionEnabled)
 		return
 
 	default:
@@ -1513,20 +1558,39 @@ func (p *mobilePresentation) handleOnlineTouch(x, y float32) {
 		return
 
 	case mobileui.OnlineLoginCharacters:
+		pageStart := (model.SelectedSlot / 3) * 3
 		for i, rect := range layout.Slots {
-			if !rect.Contains(x, y) || i >= len(model.Characters) {
+			index := pageStart + i
+			if !rect.Contains(x, y) || index < 0 || index >= len(model.Characters) {
 				continue
 			}
-			entry := model.Characters[i]
-			kind := input.CommandOnlineCreateCharacter
-			if entry.Occupied {
-				kind = input.CommandOnlineSelectCharacter
-			}
-			p.emitMobileCommand(input.PlayerCommand{Kind: kind, Slot: uint16(entry.Slot)})
+			entry := model.Characters[index]
+			p.emitMobileCommand(input.PlayerCommand{Kind: input.CommandOnlineFocusCharacter, Slot: uint16(entry.Slot)})
 			return
 		}
-		if layout.Create.Contains(x, y) && model.CanCreate {
-			p.emitMobileCommand(input.PlayerCommand{Kind: input.CommandOnlineCreateCharacter, Slot: uint16(model.SelectedSlot)})
+		if layout.PagePrev.Contains(x, y) && pageStart > 0 {
+			p.emitMobileCommand(input.PlayerCommand{Kind: input.CommandOnlineFocusCharacter, Slot: uint16(pageStart - 3)})
+			return
+		}
+		if layout.PageNext.Contains(x, y) && pageStart+3 < len(model.Characters) {
+			p.emitMobileCommand(input.PlayerCommand{Kind: input.CommandOnlineFocusCharacter, Slot: uint16(pageStart + 3)})
+			return
+		}
+		if layout.Create.Contains(x, y) {
+			selectedOccupied := false
+			for _, entry := range model.Characters {
+				if entry.Slot == model.SelectedSlot {
+					selectedOccupied = entry.Occupied
+					break
+				}
+			}
+			kind := input.CommandOnlineCreateCharacter
+			if selectedOccupied {
+				kind = input.CommandOnlineSelectCharacter
+			} else if !model.CanCreate {
+				return
+			}
+			p.emitMobileCommand(input.PlayerCommand{Kind: kind, Slot: uint16(model.SelectedSlot)})
 		}
 		return
 	}
