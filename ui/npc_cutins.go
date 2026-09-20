@@ -54,6 +54,24 @@ func (c *NPCCutinOverlay) Draw(screen *render.Frame) {
 	if c == nil || screen == nil || npcCutinIsMovable(c.position) {
 		return
 	}
+	c.drawTexture(screen)
+}
+
+// DrawMobile renders the authoritative script cut-in beneath the mobile dialog.
+// Mobile owns its own window/chrome, so even the desktop "window" variants are
+// presented as the illustration itself instead of publishing a second desktop
+// widget tree over the touch UI.
+func (c *NPCCutinOverlay) DrawMobile(screen *render.Frame) {
+	if c == nil || screen == nil {
+		return
+	}
+	c.drawTexture(screen)
+}
+
+func (c *NPCCutinOverlay) drawTexture(screen *render.Frame) {
+	if c == nil || screen == nil || !c.Visible() {
+		return
+	}
 	bounds, ok := npcCutinBounds(screen.Bounds(), c.position, c.texture)
 	if !ok {
 		return
