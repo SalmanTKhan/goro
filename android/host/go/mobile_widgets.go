@@ -306,6 +306,11 @@ func (m *mobileWidgets) drawWidgets(p *mobilePresentation, frame *render.Frame) 
 			continue
 		}
 		p.game.DrawMobileInventoryItemIcon(frame, placement.Item, int(placement.Rect.X), int(placement.Rect.Y), side)
+		if placement.ShowQuantity && placement.Item.Quantity > 1 {
+			drawMobileTextFit(frame, fmt.Sprintf("x%d", placement.Item.Quantity),
+				placement.Rect.X, placement.Rect.Bottom()-18, placement.Rect.W,
+				mobileColors().title, p.mobileTextScale()*0.58)
+		}
 	}
 	if art.previewValid {
 		p.game.DrawMobileProfilePreview(frame, art.previewOf,
