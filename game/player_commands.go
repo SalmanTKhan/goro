@@ -427,14 +427,3 @@ func mutateOfflineDrop(ctx client.Context, index uint16, quantity int) bool {
 }
 
 
-func mobileSessionSkill(s *session.Session, skillID uint16) (session.Skill, bool) {
-	if s == nil || skillID == 0 {
-		return session.Skill{}, false
-	}
-	for _, skill := range s.Skills.List {
-		if skill.ID == skillID {
-			return skill, true
-		}
-	}
-	return session.Skill{}, false
-}
