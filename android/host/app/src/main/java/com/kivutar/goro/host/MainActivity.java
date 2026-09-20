@@ -616,29 +616,35 @@ public final class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
-        nativeResume();
 
         final int generationAtPause = pausedSurfaceGeneration;
         pausedSurfaceGeneration = -1;
-        if (generationAtPause < 0 || surfaceView == null) return;
+        if (generationAtPause < 0 || surfaceView == null) {
+            nativeResume();
+            return;
+        }
 
         // Some devices keep the same Surface across a short background/foreground
         // cycle. WGPU's swapchain can still become stale even though SurfaceView
         // emits no new surfaceCreated callback. Rebind that still-valid native
         // window after the view has resumed. If Android created a replacement
         // Surface in the meantime, surfaceGeneration changed and its callback
-        // already performed the authoritative bind.
+        // already performed the authoritative bind. Only release the Go render
+        // pause after that decision, so no frame can acquire the stale surface.
         surfaceView.post(() -> {
-            if (!surfaceAvailable || surfaceGeneration != generationAtPause) return;
-            android.view.Surface surface = surfaceView.getHolder().getSurface();
-            if (surface == null || !surface.isValid()) return;
-            Log.i("GoroAndroidHost", "resume rebind generation=" + surfaceGeneration
-                    + " size=" + surfaceView.getWidth() + "x" + surfaceView.getHeight());
-            nativeSurfaceCreated(surface);
+            if (surfaceAvailable && surfaceGeneration == generationAtPause) {
+                android.view.Surface surface = surfaceView.getHolder().getSurface();
+                if (surface != null && surface.isValid()) {
+                    Log.i("GoroAndroidHost", "resume rebind generation=" + surfaceGeneration
+                            + " size=" + surfaceView.getWidth() + "x" + surfaceView.getHeight());
+                    nativeSurfaceCreated(surface);
+                }
+            }
             int width = surfaceView.getWidth();
             int height = surfaceView.getHeight();
             if (width > 0 && height > 0) nativeSurfaceChanged(width, height);
             surfaceView.requestApplyInsets();
+            nativeResume();
         });
     }
 
