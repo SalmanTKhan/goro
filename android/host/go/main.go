@@ -969,78 +969,11 @@ func (h *host) renderLoop() {
 			offlineGame.Resize(width, height)
 		}
 		if mobile == nil && desktop == nil {
-			if mobileSettings.Display.Presentation == input.MobilePresentationDesktop {
-				desktop = newDesktopPresentation(offlineGame, width, height)
-				desktop.SetSafeInsets(safeLeft, safeTop, safeRight, safeBottom)
-				mobileInput = input.NewMobileInputAdapterWithControls(mobileSettings.Controls, gameWorldPicker{game: offlineGame}, desktop, mobileCommandSink{game: offlineGame})
-				offlineGame.SetMobileSettingsChanged(func(settings input.MobileSettings) {
-					mobileSettings = settings
-					_, _ = config.SaveMobileSettings(settings)
-				})
-			} else {
-				mobile = newMobilePresentation(offlineGame, width, height)
-				mobile.SetSafeInsets(safeLeft, safeTop, safeRight, safeBottom)
-				mobile.SetSettings(mobileSettings)
-				mobileInput = input.NewMobileInputAdapterWithControls(mobileSettings.Controls, mobileWorldPicker{presentation: mobile}, mobile, mobileCommandSink{game: offlineGame, presentation: mobile})
-				mobile.SetModeChanged(func(online bool) bool {
-					if offlineGame == nil || (online == offlineGame.Online()) {
-						return true
-					}
-					if offlineGame.Offline() != nil {
-						savePath := filepath.Join(currentResourceRoot(), "offline-save.json")
-						if saveErr := offlineGame.SaveOfflineState(savePath); saveErr != nil {
-							androidLog(fmt.Sprintf("stage=mobile-mode save-error=%v", saveErr))
-						}
-					} else if offlineGame.Online() {
-						offlineGame.Disconnect()
-					}
-					cfg := mobileConfig
-					if online {
-						cfg.MobileSession.Mode = config.SessionModeOnline
-						// Switching from offline into online mode is explicit user intent.
-						// The mobile login surface now owns server/account/service
-						// selection, so do not force desktop-style autologin here.
-						cfg.Login.AutoLogin = false
-					} else {
-						cfg.MobileSession.Mode = config.SessionModeOffline
-					}
-					var next *app.Game
-					var modeErr error
-					if online {
-						next, modeErr = app.New(cfg)
-					} else {
-						next, modeErr = app.NewOfflineAtMap(cfg, startMap)
-					}
-					if modeErr != nil {
-						androidLog(fmt.Sprintf("stage=mobile-mode target=%s error=%v", cfg.MobileSession.Mode, modeErr))
-						return false
-					}
-					if next.Offline() != nil {
-						savePath := filepath.Join(currentResourceRoot(), "offline-save.json")
-						if loadErr := next.LoadOfflineState(savePath); loadErr != nil && !os.IsNotExist(loadErr) {
-							androidLog(fmt.Sprintf("stage=mobile-mode load-error=%v", loadErr))
-						}
-					}
-					mobileConfig = cfg
-					offlineGame = next
-					mobile.SetGame(next)
-					androidLog(fmt.Sprintf("stage=mobile-mode active=%s server=%s:%d", cfg.MobileSession.Mode, cfg.MobileSession.Server.Host, cfg.MobileSession.Server.ZonePort))
-					return true
-				})
-				mobile.SetSettingsChanged(func(settings input.MobileSettings) bool {
-					mobileSettings = settings
-					if mobileInput != nil {
-						mobileInput.SetControls(settings.Controls)
-					}
-					path, saveErr := config.SaveMobileSettings(settings)
-					if saveErr != nil {
-						androidLog(fmt.Sprintf("stage=mobile-settings save-error=%v", saveErr))
-						return true
-					}
-					androidLog(fmt.Sprintf("stage=mobile-settings applied path=%s movement=%s camera=%.2f zoom=%.2f invert_y=%t long_press_ms=%d names=%t bgm=%t bgm_volume=%.2f sfx_volume=%.2f minimap=%t", path, settings.Controls.MovementMode.String(), settings.Controls.CameraSensitivity, settings.Controls.ZoomSensitivity, settings.Controls.InvertCameraY, settings.Controls.LongPressMS, settings.Controls.ShowTargetNames, settings.Audio.BGMEnabled, settings.Audio.BGMVolume, settings.Audio.SFXVolume, settings.Display.ShowMinimap))
-					return true
-				})
-			}
+			bindGameSettings(offlineGame)
+			// Resolve live runtime fields in case the loaded configuration came
+			// through a desktop-compatible settings path.
+			mobileSettings = offlineGame.MobileSettings()
+			activatePresentation(mobileSettings.Display.Presentation)
 		} else {
 			if mobile != nil {
 				mobile.Resize(width, height)
