@@ -1221,8 +1221,21 @@ func (p *mobilePresentation) Release(id input.TouchID, x, y int) {
 			p.hud = p.layoutHUD()
 			return
 		}
-		if target, ok := p.game.PickMobileTarget(input.WorldPosition{X: float64(rawX), Y: float64(rawY)}); ok {
-			if command, ok := p.navigation.Targeting.Select(target); ok {
+		screenPoint := input.WorldPosition{X: float64(rawX), Y: float64(rawY)}
+		var (
+			target input.PickedTarget
+			ok     bool
+		)
+		if p.navigation.Targeting.Mode == input.SkillTargetGround {
+			// Ground skills own the terrain under the finger. Normal world
+			// picking prioritizes actors/items, which would otherwise make an
+			// occupied cell impossible to select.
+			target, ok = p.game.PickMobileGroundTarget(screenPoint)
+		} else {
+			target, ok = p.game.PickMobileTarget(screenPoint)
+		}
+		if ok {
+			if command, selected := p.navigation.Targeting.Select(target); selected {
 				mobileCommandSink{game: p.game, presentation: p}.Emit(command)
 			}
 		}
