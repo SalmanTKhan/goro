@@ -387,6 +387,10 @@ func (p *mobilePresentation) handleSettingsItem(item mobileui.SurfaceItem) bool 
 		settings.Audio.SFXVolume = nextMobileVolume(settings.Audio.SFXVolume)
 	case "show-minimap":
 		settings.Display.ShowMinimap = !settings.Display.ShowMinimap
+	case "vsync":
+		settings.Display.VSync = !settings.Display.VSync
+	case "fps-meter":
+		settings.Display.FPS = !settings.Display.FPS
 	case "ui-scale":
 		settings.UI = settings.UI.NextPreset()
 	case "presentation":
