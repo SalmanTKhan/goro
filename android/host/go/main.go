@@ -912,6 +912,13 @@ func (h *host) renderLoop() {
 			cfg.Render.GraphicsAPI = "vulkan"
 			cfg.Render.NoUI = mobileSettings.Display.Presentation != input.MobilePresentationDesktop
 			surfaceVSync = cfg.Render.VSync
+			if surfaceVSync {
+				ticker.Reset(16 * time.Millisecond)
+			} else {
+				// Immediate presentation should not remain accidentally capped by
+				// the host's 60 Hz wake-up cadence.
+				ticker.Reset(time.Millisecond)
+			}
 			configuredFormat, configureErr := configureSurface(surface, adapter, device, width, height, surfaceVSync)
 			if configureErr != nil {
 				return configureErr
@@ -1190,6 +1197,41 @@ func (h *host) renderLoop() {
 			}
 			cmd.done <- err
 		case <-ticker.C:
+			if offlineGame != nil {
+				// Resolve settings from the Game every tick because desktop
+				// settings mutate runtime FPS/VSync directly while mobile
+				// settings use the shared MobileSettings host.
+				mobileSettings = offlineGame.MobileSettings()
+				mobileConfig.UI = mobileSettings.UI
+				mobileConfig.Mobile = mobileSettings.Controls
+				mobileConfig.MobileDisplay = mobileSettings.Display
+				mobileConfig.Render.VSync = mobileSettings.Display.VSync
+				mobileConfig.Render.FPS = mobileSettings.Display.FPS
+				mobileConfig.Render.NoUI = mobileSettings.Display.Presentation != input.MobilePresentationDesktop
+
+				wantDesktop := mobileSettings.Display.Presentation == input.MobilePresentationDesktop
+				if (wantDesktop && desktop == nil) || (!wantDesktop && mobile == nil) {
+					activatePresentation(mobileSettings.Display.Presentation)
+				}
+
+				requestedVSync := offlineGame.RuntimeVSync()
+				if requestedVSync != surfaceVSync {
+					surfaceVSync = requestedVSync
+					if surfaceVSync {
+						ticker.Reset(16 * time.Millisecond)
+					} else {
+						ticker.Reset(time.Millisecond)
+					}
+					// Surface configuration owns Android's real present mode, so
+					// mark it stale and let the normal configure/retry path apply
+					// FIFO or Immediate without touching the live Game/session.
+					if surface != nil && device != nil && adapter != nil && width > 0 && height > 0 {
+						surfaceConfigured = false
+						nextSurfaceConfigureAttempt = time.Time{}
+					}
+					androidLog(fmt.Sprintf("stage=vsync changed enabled=%t", surfaceVSync))
+				}
+			}
 			if !appPaused && surfaceNeedsGPURebuild && surfaceWindow != 0 && width > 0 && height > 0 {
 				now := time.Now()
 				if nextSurfaceConfigureAttempt.IsZero() || !now.Before(nextSurfaceConfigureAttempt) {
