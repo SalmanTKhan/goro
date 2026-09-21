@@ -85,6 +85,9 @@ func TestSettingsSurfaceExposesLiveAudioDisplayAndGameplayValues(t *testing.T) {
 	settings.Audio.BGMVolume = 0.25
 	settings.Audio.SFXVolume = 0.75
 	settings.Display.ShowMinimap = false
+	settings.Display.VSync = false
+	settings.Display.FPS = true
+	settings.Display.Presentation = input.MobilePresentationDesktop
 	settings.Gameplay.NoShift = true
 	settings.Gameplay.NoCtrl = false
 	settings.Gameplay.LessEffects = true
@@ -95,7 +98,8 @@ func TestSettingsSurfaceExposesLiveAudioDisplayAndGameplayValues(t *testing.T) {
 	}
 	want := map[string]string{
 		"bgm-enabled": "Off", "bgm-volume": "25%", "sfx-volume": "75%",
-		"show-minimap": "Off", "no-shift": "On", "no-ctrl": "Off", "less-effects": "On",
+		"show-minimap": "Off", "vsync": "Off", "fps-meter": "On", "presentation": "Desktop UI",
+		"no-shift": "On", "no-ctrl": "Off", "less-effects": "On",
 	}
 	for id, value := range want {
 		if values[id] != value {
@@ -111,9 +115,18 @@ func TestSettingsSurfaceAppliesItemCallback(t *testing.T) {
 		tapped = item.ID
 		return true
 	}
-	rowIndex := 1 // The first row is the non-interactive CONTROLS heading.
+	rowIndex := -1
+	for i, id := range controller.Layout.RowIDs {
+		if id == "presentation" {
+			rowIndex = i
+			break
+		}
+	}
+	if rowIndex < 0 {
+		t.Fatal("presentation setting was not laid out")
+	}
 	row := controller.Layout.Rows[rowIndex]
-	if !controller.Tap(row.X+2, row.Y+2) || tapped != "movement" {
+	if !controller.Tap(row.X+2, row.Y+2) || tapped != "presentation" {
 		t.Fatalf("tap result=%t tapped=%q", tapped != "", tapped)
 	}
 	if controller.State.DetailOpen {
@@ -142,5 +155,23 @@ func TestSettingsSurfaceForSessionExposesOnlineDisconnectOnlyOnline(t *testing.T
 	}
 	if onlineDisconnect.Detail == "" || online.Items[1].Value != "connected to 127.0.0.1:5121" {
 		t.Fatalf("online session projection=%+v", online.Items[:4])
+	}
+}
+
+
+func TestSettingsSurfaceMatchesDesktopDisplayControls(t *testing.T) {
+	model := SettingsSurface()
+	ids := map[string]SurfaceItem{}
+	for _, item := range model.Items {
+		ids[item.ID] = item
+	}
+	for _, id := range []string{"presentation", "ui-scale", "vsync", "fps-meter", "show-minimap"} {
+		item, ok := ids[id]
+		if !ok || !item.Enabled {
+			t.Fatalf("display setting %q missing or disabled: %+v", id, item)
+		}
+	}
+	if ids["presentation"].Detail == "" || ids["vsync"].Detail == "" || ids["fps-meter"].Detail == "" {
+		t.Fatalf("live display settings need explanatory detail: presentation=%+v vsync=%+v fps=%+v", ids["presentation"], ids["vsync"], ids["fps-meter"])
 	}
 }
