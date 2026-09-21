@@ -36,6 +36,8 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Test mobile input and layout contracts
+        run: go test ./input ./mobileui ./ui/mobile
       # Production gate: the arm64-v8a shared library must cross-compile against
       # the NDK. The x86_64 emulator ABI and the Gradle APK assembly depend on
       # untracked local vendor dirs / fixture assets and are not gated here.

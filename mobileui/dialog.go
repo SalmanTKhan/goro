@@ -60,6 +60,7 @@ type DialogLayout struct {
 	Safe, Panel, Header, Message, Notice, Actions, Close Rect
 	Options                                              []Rect
 	MessageBlocks                                        []DialogMessageLayout
+	MessageContentHeight                                 float32
 	Portrait                                             bool
 }
 
@@ -175,23 +176,26 @@ func dialogMessagesForLayout(model MobileDialogModel) []DialogMessage {
 	return []DialogMessage{{Text: model.Message}}
 }
 
-func dialogMessageContentHeight(messages []DialogMessage, maxChars int, lineAdvance float32) float32 {
+func dialogMessageContentHeight(messages []DialogMessage, maxChars int, lineAdvance float32, initialSpeaker string) float32 {
 	height := float32(0)
-	previousSpeaker := ""
+	previousSpeaker := strings.TrimSpace(initialSpeaker)
 	for i, message := range messages {
-		if speaker := strings.TrimSpace(message.Speaker); speaker != "" && speaker != previousSpeaker {
-			height += 28
+		speaker := strings.TrimSpace(message.Speaker)
+		if speaker != "" && speaker != previousSpeaker {
+			height += 24
 			if height > 0 {
-				height += 4
+				height += 3
 			}
 		}
 		if i > 0 {
-			height += 8
+			height += 3
 		}
 		height += float32(dialogLineCount(message.Text, maxChars)) * lineAdvance
-		previousSpeaker = strings.TrimSpace(message.Speaker)
+		if speaker != "" {
+			previousSpeaker = speaker
+		}
 	}
-	return maxf(72, height)
+	return maxf(64, height)
 }
 
 func LayoutDialog(viewport Viewport, model MobileDialogModel) DialogLayout {
@@ -201,114 +205,162 @@ func LayoutDialog(viewport Viewport, model MobileDialogModel) DialogLayout {
 		return layout
 	}
 	layout.Portrait = viewport.IsPortrait()
-	panelW := minf(1100, maxf(0, safe.W-48))
+	panelW := minf(680, maxf(0, safe.W*0.62))
 	if layout.Portrait {
-		panelW = maxf(0, safe.W-32)
+		panelW = maxf(0, safe.W-20)
 	}
 	pad := float32(20)
 	if layout.Portrait {
 		pad = 16
 	}
 	messageW := maxf(0, panelW-2*pad)
+
 	actionCount := len(model.Options)
-	buttonH := float32(56)
-	actionGap := float32(12)
+	buttonH := float32(52)
+	if actionCount > 1 {
+		buttonH = 64
+	}
+	actionGap := float32(10)
+	actionColumns := dialogActionColumns(messageW, actionCount, actionGap, layout.Portrait)
 	actionH := float32(0)
 	if actionCount > 0 {
-		if layout.Portrait {
-			actionH = float32(actionCount)*buttonH + float32(actionCount-1)*actionGap
-		} else {
-			columns := maxInt(1, int((messageW+actionGap)/(136+actionGap)))
-			columns = minInt(columns, actionCount)
-			rows := (actionCount + columns - 1) / columns
-			actionH = float32(rows)*buttonH + float32(rows-1)*actionGap
-		}
+		rows := (actionCount + actionColumns - 1) / actionColumns
+		actionH = float32(rows)*buttonH + float32(rows-1)*actionGap
 	}
+
 	noticeH := float32(0)
 	if strings.TrimSpace(model.Notice) != "" {
 		noticeH = 28
 	}
-	messageScale := dialogTextScale(viewport) * 1.08
-	lineAdvance := maxf(24, float32(27)*dialogTextScale(viewport))
-	messageMaxChars := maxInt(28, int(messageW/(11*messageScale)))
+
+	messageScale := dialogTextScale(viewport)
+	lineAdvance := maxf(36, float32(38)*messageScale)
+	messageMaxChars := maxInt(18, int(messageW/(15*messageScale)))
 	messages := dialogMessagesForLayout(model)
-	messageH := dialogMessageContentHeight(messages, messageMaxChars, lineAdvance)
-	contentH := float32(16+56+12) + messageH
+	messageH := dialogMessageContentHeight(messages, messageMaxChars, lineAdvance, strings.TrimSpace(model.Title))
+	layout.MessageContentHeight = messageH
+
+	const (
+		panelTopPad    = float32(12)
+		headerH        = float32(46)
+		headerBodyGap  = float32(8)
+		sectionGap     = float32(10)
+		panelBottomPad = float32(12)
+	)
+	contentH := panelTopPad + headerH + headerBodyGap + messageH
 	if noticeH > 0 {
 		contentH += 8 + noticeH
 	}
 	if actionH > 0 {
-		contentH += 12 + actionH
+		contentH += sectionGap + actionH
 	}
-	contentH += 16
-	minimumH := float32(240)
+	contentH += panelBottomPad
+
+	minimumH := float32(148)
 	if layout.Portrait {
-		minimumH = 300
+		minimumH = 170
 	}
-	panelH := minf(maxf(0, safe.H-32), maxf(minimumH, contentH))
-	layout.Panel = Rect{X: safe.X + (safe.W-panelW)/2, Y: safe.Y + (safe.H-panelH)/2, W: panelW, H: panelH}
-	layout.Header = Rect{X: layout.Panel.X + pad, Y: layout.Panel.Y + 16, W: layout.Panel.W - 2*pad, H: 56}
-	actionBottom := layout.Panel.Bottom() - 16
+	maxH := maxf(0, safe.H-24)
+	if layout.Portrait {
+		maxH = minf(maxH, safe.H*0.52)
+	} else {
+		maxH = minf(maxH, safe.H*0.72)
+	}
+	panelH := minf(maxH, maxf(minimumH, contentH))
+	panelY := safe.Bottom() - panelH - 16
+	if layout.Portrait {
+		panelY = safe.Bottom() - panelH - 12
+	}
+
+	layout.Panel = Rect{X: safe.X + (safe.W-panelW)/2, Y: panelY, W: panelW, H: panelH}
+	layout.Header = Rect{X: layout.Panel.X + pad, Y: layout.Panel.Y + panelTopPad, W: layout.Panel.W - 2*pad, H: headerH}
+	actionBottom := layout.Panel.Bottom() - panelBottomPad
 	if actionH > 0 {
 		layout.Actions = Rect{X: layout.Panel.X + pad, Y: actionBottom - actionH, W: layout.Panel.W - 2*pad, H: actionH}
 	}
 	contentBottom := actionBottom
 	if actionH > 0 {
-		contentBottom = layout.Actions.Y - 12
+		contentBottom = layout.Actions.Y - sectionGap
 	}
 	if noticeH > 0 {
 		layout.Notice = Rect{X: layout.Panel.X + pad, Y: contentBottom - noticeH, W: layout.Panel.W - 2*pad, H: noticeH}
 		contentBottom = layout.Notice.Y - 8
 	}
-	layout.Message = Rect{X: layout.Panel.X + pad, Y: layout.Header.Bottom() + 12, W: layout.Panel.W - 2*pad, H: maxf(0, contentBottom-(layout.Header.Bottom()+12))}
+	messageTop := layout.Header.Bottom() + headerBodyGap
+	layout.Message = Rect{X: layout.Panel.X + pad, Y: messageTop, W: layout.Panel.W - 2*pad, H: maxf(0, contentBottom-messageTop)}
+
 	if len(model.Messages) > 0 {
 		cursorY := layout.Message.Y
-		previousSpeaker := ""
+		messageBottom := layout.Message.Bottom()
+		previousSpeaker := strings.TrimSpace(model.Title)
 		for i, message := range messages {
 			speaker := strings.TrimSpace(message.Speaker)
+			block := DialogMessageLayout{Speaker: speaker, Text: message.Text}
 			if speaker != "" && speaker != previousSpeaker {
-				speakerRect := Rect{X: layout.Message.X, Y: cursorY, W: layout.Message.W, H: 28}
-				layout.MessageBlocks = append(layout.MessageBlocks, DialogMessageLayout{Speaker: speaker, Text: message.Text, SpeakerRect: speakerRect})
-				cursorY = speakerRect.Bottom() + 4
-			} else {
-				if i > 0 {
-					cursorY += 8
+				speakerH := minf(24, maxf(0, messageBottom-cursorY))
+				if speakerH > 0 {
+					block.SpeakerRect = Rect{X: layout.Message.X, Y: cursorY, W: layout.Message.W, H: speakerH}
+					cursorY = block.SpeakerRect.Bottom() + 4
 				}
-				layout.MessageBlocks = append(layout.MessageBlocks, DialogMessageLayout{Speaker: speaker, Text: message.Text})
+			} else if i > 0 {
+				cursorY += 3
 			}
-			block := &layout.MessageBlocks[len(layout.MessageBlocks)-1]
-			block.TextRect = Rect{X: layout.Message.X, Y: cursorY, W: layout.Message.W, H: maxf(24, float32(dialogLineCount(message.Text, messageMaxChars))*lineAdvance)}
-			cursorY = block.TextRect.Bottom()
+
+			textH := maxf(24, float32(dialogLineCount(message.Text, messageMaxChars))*lineAdvance)
+			textH = minf(textH, maxf(0, messageBottom-cursorY))
+			if textH > 0 {
+				block.TextRect = Rect{X: layout.Message.X, Y: cursorY, W: layout.Message.W, H: textH}
+				cursorY = block.TextRect.Bottom()
+			}
+			layout.MessageBlocks = append(layout.MessageBlocks, block)
 			previousSpeaker = speaker
 		}
 	}
+
 	if actionH > 0 {
-		if layout.Portrait {
-			buttonW := maxf(0, layout.Actions.W)
-			for i, option := range model.Options {
-				y := layout.Actions.Y + float32(i)*(buttonH+actionGap)
-				layout.Options = append(layout.Options, Rect{X: layout.Actions.X, Y: y, W: buttonW, H: buttonH})
-				if option.Action == DialogClose || option.Action == DialogNPCClose {
-					layout.Close = layout.Options[len(layout.Options)-1]
-				}
+		columns := actionColumns
+		buttonW := (layout.Actions.W - float32(columns-1)*actionGap) / float32(columns)
+		if !layout.Portrait {
+			buttonW = minf(300, maxf(136, buttonW))
+		}
+		if actionCount == 1 {
+			if layout.Portrait {
+				buttonW = layout.Actions.W
+			} else {
+				buttonW = minf(320, layout.Actions.W)
 			}
-		} else {
-			columns := maxInt(1, int((layout.Actions.W+actionGap)/(136+actionGap)))
-			columns = minInt(columns, actionCount)
-			buttonW := minf(190, maxf(136, (layout.Actions.W-float32(columns-1)*actionGap)/float32(columns)))
-			for i, option := range model.Options {
-				row, column := i/columns, i%columns
-				rowStart := layout.Actions.X + (layout.Actions.W-(float32(columns)*buttonW+float32(columns-1)*actionGap))/2
-				x := rowStart + float32(column)*(buttonW+actionGap)
-				y := layout.Actions.Y + float32(row)*(buttonH+actionGap)
-				layout.Options = append(layout.Options, Rect{X: x, Y: y, W: buttonW, H: buttonH})
-				if option.Action == DialogClose || option.Action == DialogNPCClose {
-					layout.Close = layout.Options[len(layout.Options)-1]
-				}
+		}
+		for i, option := range model.Options {
+			row, column := i/columns, i%columns
+			rowStartIndex := row * columns
+			columnsInRow := minInt(columns, actionCount-rowStartIndex)
+			rowW := float32(columnsInRow)*buttonW + float32(columnsInRow-1)*actionGap
+			rowStart := layout.Actions.X + (layout.Actions.W-rowW)/2
+			x := rowStart + float32(column)*(buttonW+actionGap)
+			y := layout.Actions.Y + float32(row)*(buttonH+actionGap)
+			layout.Options = append(layout.Options, Rect{X: x, Y: y, W: buttonW, H: buttonH})
+			if option.Action == DialogClose || option.Action == DialogNPCClose {
+				layout.Close = layout.Options[len(layout.Options)-1]
 			}
 		}
 	}
 	return layout
+}
+
+func dialogActionColumns(width float32, actionCount int, gap float32, portrait bool) int {
+	if actionCount <= 1 {
+		return 1
+	}
+	minButtonW := float32(220)
+	if portrait {
+		// Even a 390px-class phone has ~338 logical px of dialog action
+		// width after padding. Two ~164px touch targets remain comfortably
+		// usable and avoid starving the message viewport with a tall menu.
+		minButtonW = 156
+	}
+	columns := maxInt(1, int((width+gap)/(minButtonW+gap)))
+	columns = minInt(columns, actionCount)
+	return minInt(columns, 2)
 }
 
 func dialogLineCount(message string, maxChars int) int {
@@ -352,10 +404,13 @@ func dialogTextScale(viewport Viewport) float32 {
 		shortEdge = safe.W
 	}
 	if shortEdge <= 0 {
-		return 2.50
+		return 1
 	}
-	scale := shortEdge / 320
-	return minf(2.75, maxf(2.50, scale))
+	// Text widgets use the mobile theme's real font size already. This value is
+	// only a layout estimate; the previous 2.5x minimum produced enormous blank
+	// vertical gaps and full-screen dialog sheets.
+	scale := shortEdge / 720
+	return minf(1.35, maxf(0.95, scale))
 }
 
 func normalizeDialogText(value string) string {
@@ -363,10 +418,11 @@ func normalizeDialogText(value string) string {
 }
 
 type DialogController struct {
-	Model    MobileDialogModel
-	Layout   DialogLayout
-	Viewport Viewport
-	Sink     input.CommandSink
+	Model        MobileDialogModel
+	Layout       DialogLayout
+	Viewport     Viewport
+	Sink         input.CommandSink
+	ScrollOffset float32
 }
 
 func NewDialogController(model MobileDialogModel, viewport Viewport, sink input.CommandSink) *DialogController {
@@ -378,6 +434,9 @@ func NewDialogController(model MobileDialogModel, viewport Viewport, sink input.
 func (c *DialogController) SetModel(model MobileDialogModel) {
 	if c == nil {
 		return
+	}
+	if !sameDialogContent(c.Model, model) {
+		c.ScrollOffset = 0
 	}
 	c.Model = model
 	c.relayout()
@@ -421,43 +480,91 @@ func (c *DialogController) Tap(x, y float32) bool {
 		if i >= len(c.Layout.Options) || !c.Layout.Options[i].Contains(x, y) {
 			continue
 		}
-		if !option.Enabled {
-			return true
-		}
-		switch option.Action {
-		case DialogOpenShop:
-			if c.Sink != nil {
-				c.Sink.Emit(input.PlayerCommand{Kind: input.CommandOpenShop, NPCID: c.Model.NPCID})
-			}
-			c.Close()
-		case DialogNext:
-			if c.Sink != nil {
-				c.Sink.Emit(input.PlayerCommand{Kind: input.CommandNPCNext, NPCID: c.Model.NPCID})
-			}
-		case DialogMenuChoice:
-			if c.Sink != nil {
-				c.Sink.Emit(input.PlayerCommand{Kind: input.CommandNPCMenuChoice, NPCID: c.Model.NPCID, Choice: uint8(option.Value)})
-			}
-		case DialogOpenStorage:
-			if c.Sink != nil {
-				c.Sink.Emit(input.PlayerCommand{Kind: input.CommandOpenStorage, NPCID: c.Model.NPCID})
-			}
-			c.Close()
-		case DialogNPCClose:
-			if c.Sink != nil {
-				c.Sink.Emit(input.PlayerCommand{Kind: input.CommandNPCClose, NPCID: c.Model.NPCID})
-			}
-			c.Close()
-		default:
-			c.Close()
-		}
+		c.activate(option)
+		return true
+	}
+	// Next/Close dialogs have one obvious action. Treat the complete action
+	// strip as its touch target so small raster/layout differences cannot make
+	// the visibly large mobile button inert.
+	if len(c.Model.Options) == 1 && c.Layout.Actions.Contains(x, y) {
+		c.activate(c.Model.Options[0])
 		return true
 	}
 	return c.Layout.Safe.Contains(x, y)
 }
 
+func (c *DialogController) activate(option DialogOption) {
+	if c == nil || !option.Enabled {
+		return
+	}
+	switch option.Action {
+	case DialogOpenShop:
+		if c.Sink != nil {
+			c.Sink.Emit(input.PlayerCommand{Kind: input.CommandOpenShop, NPCID: c.Model.NPCID})
+		}
+		c.Close()
+	case DialogNext:
+		if c.Sink != nil {
+			c.Sink.Emit(input.PlayerCommand{Kind: input.CommandNPCNext, NPCID: c.Model.NPCID})
+		}
+	case DialogMenuChoice:
+		if c.Sink != nil {
+			c.Sink.Emit(input.PlayerCommand{Kind: input.CommandNPCMenuChoice, NPCID: c.Model.NPCID, Choice: uint8(option.Value)})
+		}
+	case DialogOpenStorage:
+		if c.Sink != nil {
+			c.Sink.Emit(input.PlayerCommand{Kind: input.CommandOpenStorage, NPCID: c.Model.NPCID})
+		}
+		c.Close()
+	case DialogNPCClose:
+		if c.Sink != nil {
+			c.Sink.Emit(input.PlayerCommand{Kind: input.CommandNPCClose, NPCID: c.Model.NPCID})
+		}
+		c.Close()
+	default:
+		c.Close()
+	}
+}
+
 func (c *DialogController) Back() bool {
 	return c.Close()
+}
+
+func (c *DialogController) ScrollBy(delta float32) bool {
+	if c == nil || !c.Model.Open || c.Layout.Message.H <= 0 {
+		return false
+	}
+	maxOffset := maxf(0, c.Layout.MessageContentHeight-c.Layout.Message.H)
+	next := c.ScrollOffset + delta
+	if next < 0 {
+		next = 0
+	}
+	if next > maxOffset {
+		next = maxOffset
+	}
+	if next == c.ScrollOffset {
+		return false
+	}
+	c.ScrollOffset = next
+	return true
+}
+
+func sameDialogContent(a, b MobileDialogModel) bool {
+	if a.Open != b.Open || a.NPCID != b.NPCID || a.Title != b.Title || a.Message != b.Message || a.Notice != b.Notice ||
+		len(a.Messages) != len(b.Messages) || len(a.Options) != len(b.Options) {
+		return false
+	}
+	for i := range a.Messages {
+		if a.Messages[i] != b.Messages[i] {
+			return false
+		}
+	}
+	for i := range a.Options {
+		if a.Options[i] != b.Options[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *DialogController) relayout() {
@@ -465,4 +572,8 @@ func (c *DialogController) relayout() {
 		return
 	}
 	c.Layout = LayoutDialog(c.Viewport, c.Model)
+	maxOffset := maxf(0, c.Layout.MessageContentHeight-c.Layout.Message.H)
+	if c.ScrollOffset > maxOffset {
+		c.ScrollOffset = maxOffset
+	}
 }

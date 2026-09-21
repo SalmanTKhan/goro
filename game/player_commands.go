@@ -8,6 +8,7 @@ import (
 	"github.com/kivutar/goro/db"
 	"github.com/kivutar/goro/input"
 	"github.com/kivutar/goro/network"
+	"github.com/kivutar/goro/session"
 )
 
 // ApplyPlayerCommand is the narrow gameplay consumer for the platform-neutral
@@ -109,6 +110,11 @@ func (m *WorldMode) ApplyPlayerCommand(ctx client.Context, command input.PlayerC
 		return true
 	case input.CommandToggleSit:
 		return m.toggleControllerSit(ctx)
+	case input.CommandEmotion:
+		if ctx.Network == nil {
+			return false
+		}
+		return ctx.Network.SendEmotion(command.EmotionID) == nil
 	case input.CommandCancelAction:
 		m.cancelControllerAction(ctx)
 		if ctx.Offline != nil {
@@ -266,15 +272,61 @@ func (m *WorldMode) ApplyPlayerCommand(ctx client.Context, command input.PlayerC
 	case input.CommandNPCNext, input.CommandNPCMenuChoice, input.CommandNPCClose:
 		return m.ui.npcDialog.ApplyMobileCommand(ctx, command)
 	case input.CommandCloseShop:
-		if ctx.Network == nil || command.NPCID == 0 {
+		return m.mobileShopClose(ctx, command.NPCID)
+	case input.CommandShopCartAdd:
+		if command.Quantity <= 0 {
 			return false
 		}
-		return ctx.Network.SendNPCClose(command.NPCID) == nil
+		if ctx.Offline != nil {
+			// Offline shops retain their immediate transaction path; the staged
+			// cart is an online shared-ShopWindow feature.
+			return false
+		}
+		return m.mobileShopStage(ctx, command.ItemIndex, uint16(command.Quantity))
+	case input.CommandShopCartRemove:
+		if ctx.Offline != nil {
+			return false
+		}
+		return m.mobileShopRemoveCart(command.ItemIndex)
+	case input.CommandShopCartConfirm:
+		if ctx.Offline != nil {
+			return false
+		}
+		return m.mobileShopSubmit(ctx)
 	case input.CommandCloseStorage:
 		if ctx.Network == nil || ctx.Session == nil || !ctx.Session.Storage.Open {
 			return false
 		}
 		return ctx.Network.SendCloseStorage() == nil
+	case input.CommandUpgradeSkill:
+		if ctx.Session == nil || ctx.Network == nil || command.SkillID == 0 || ctx.Session.Skills.Points <= 0 {
+			return false
+		}
+		skill, ok := mobileSessionSkill(ctx.Session, command.SkillID)
+		if !ok || !skill.Upgradable || (skill.MaxLevel > 0 && skill.Level >= skill.MaxLevel) {
+			return false
+		}
+		return ctx.Network.SendSkillLevelUp(command.SkillID) == nil
+	case input.CommandAssignSkillHotkey:
+		if ctx.Session == nil || command.SkillID == 0 {
+			return false
+		}
+		skill, ok := mobileSessionSkill(ctx.Session, command.SkillID)
+		if !ok || skill.Level <= 0 || skill.Type == 0 {
+			return false
+		}
+		return assignMobileHotkey(ctx, network.HotkeySlot{
+			Type: network.HotkeyTypeSkill, ID: uint32(skill.ID), Level: uint16(skill.Level),
+		})
+	case input.CommandAssignItemHotkey:
+		if ctx.Session == nil {
+			return false
+		}
+		item, ok := mobileHotkeyInventoryItem(ctx.Session, command.ItemIndex, uint16(command.ItemID))
+		if !ok || !db.ItemTypeIsUsable(item.Type) {
+			return false
+		}
+		return assignMobileHotkey(ctx, network.HotkeySlot{Type: network.HotkeyTypeItem, ID: uint32(item.ItemID)})
 	case input.CommandUseSkill, input.CommandUseSkillOnActor, input.CommandUseSkillAtPosition,
 		input.CommandOpenShop, input.CommandBuyItem, input.CommandSellItem,
 		input.CommandOpenStorage, input.CommandDepositItem, input.CommandWithdrawItem:
@@ -306,6 +358,65 @@ func (m *WorldMode) ApplyPlayerCommand(ctx client.Context, command input.PlayerC
 	default:
 		return false
 	}
+}
+
+func assignMobileHotkey(ctx client.Context, hotkey network.HotkeySlot) bool {
+	if ctx.Session == nil || hotkey.ID == 0 {
+		return false
+	}
+	slot := -1
+	for i, current := range ctx.Session.Hotkeys.Slots {
+		if current.ID == hotkey.ID && current.Type == hotkey.Type {
+			slot = i
+			break
+		}
+		if slot < 0 && current.ID == 0 {
+			slot = i
+		}
+	}
+	if slot < 0 && len(ctx.Session.Hotkeys.Slots) < network.HotkeyListSlots2008 {
+		slot = len(ctx.Session.Hotkeys.Slots)
+	}
+	if slot < 0 {
+		return false
+	}
+	if ctx.Network != nil {
+		if err := ctx.Network.SendHotkey(uint16(slot), hotkey); err != nil {
+			return false
+		}
+	}
+	if len(ctx.Session.Hotkeys.Slots) <= slot {
+		next := make([]session.HotkeySlot, slot+1)
+		copy(next, ctx.Session.Hotkeys.Slots)
+		ctx.Session.Hotkeys.Slots = next
+	}
+	ctx.Session.Hotkeys.Slots[slot] = session.HotkeySlot{Type: hotkey.Type, ID: hotkey.ID, Level: hotkey.Level}
+	ctx.Session.Hotkeys.Loaded = true
+	ctx.Session.Hotkeys.Version++
+	return true
+}
+
+func mobileHotkeyInventoryItem(s *session.Session, index, itemID uint16) (session.InventoryItem, bool) {
+	if s == nil {
+		return session.InventoryItem{}, false
+	}
+	for _, item := range s.Inventory.Items {
+		if item.Amount <= 0 {
+			continue
+		}
+		if index != 0 && item.Index == index && (itemID == 0 || item.ItemID == itemID) {
+			return item, true
+		}
+	}
+	if itemID == 0 {
+		return session.InventoryItem{}, false
+	}
+	for _, item := range s.Inventory.Items {
+		if item.Amount > 0 && item.ItemID == itemID {
+			return item, true
+		}
+	}
+	return session.InventoryItem{}, false
 }
 
 func (m *WorldMode) useItemCommand(ctx client.Context, command input.PlayerCommand) bool {
@@ -376,3 +487,5 @@ func mutateOfflineDrop(ctx client.Context, index uint16, quantity int) bool {
 	}
 	return false
 }
+
+

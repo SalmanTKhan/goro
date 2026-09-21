@@ -152,7 +152,7 @@ func (m *LoginMode) showCharacterCreateWindow(ctx client.Context) {
 }
 
 func (m *LoginMode) updateCharacterCreateWindow(ctx client.Context) {
-	if ctx.Config.Headless {
+	if ctx.Config.Headless || ctx.Config.Render.NoUI {
 		return
 	}
 	opts := gameui.CharacterCreateWindowOptions{

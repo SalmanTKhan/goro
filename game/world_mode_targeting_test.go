@@ -1606,3 +1606,56 @@ func TestBodyMotionHonorsRobrowserActionMetadata(t *testing.T) {
 		t.Fatalf("play=false motion = %d, want fixed frame offset 1", got)
 	}
 }
+
+
+func TestPickMobileGroundTargetIgnoresActorOccupyingCell(t *testing.T) {
+	world := worldstate.New()
+	world.GAT = flatWalkableGAT(64, 64)
+	world.Player = worldstate.Actor{ID: 200, X: 10, Y: 20}
+	world.UpsertActor(worldstate.Actor{
+		ID:            400,
+		X:             12,
+		Y:             20,
+		ObjectType:    actorObjectTypeMob,
+		HasObjectType: true,
+	})
+
+	ctx := client.Context{
+		Session: &session.Session{AccountID: 100, CharID: 200},
+		World:   world,
+		Input:   input.NewState(),
+		ScreenW: 800,
+		ScreenH: 600,
+	}
+	mode := &WorldMode{}
+	projection := mode.sceneProjection(ctx, ctx.ScreenW, ctx.ScreenH, time.Now())
+	point := projection.Project(cellCenter(12), cellCenter(20), 0)
+
+	target, ok := mode.PickMobileGroundTarget(ctx, input.WorldPosition{
+		X: float64(point.x),
+		Y: float64(point.y),
+	})
+	if !ok {
+		t.Fatal("ground picker rejected terrain under actor")
+	}
+	if target.Kind != input.TargetGround {
+		t.Fatalf("ground picker kind=%v, want TargetGround", target.Kind)
+	}
+	if target.Position.X != 12 || target.Position.Y != 20 {
+		t.Fatalf("ground picker position=%+v, want cell 12,20", target.Position)
+	}
+
+	var targeting input.SkillTargetState
+	targeting.BeginGround(db.SkillMGFirewall, 3)
+	command, selected := targeting.Select(target)
+	if !selected {
+		t.Fatal("ground targeting did not accept occupied terrain cell")
+	}
+	if command.Kind != input.CommandUseSkillAtPosition ||
+		command.SkillID != db.SkillMGFirewall ||
+		command.Level != 3 ||
+		command.Position.X != 12 ||
+		command.Position.Y != 20 {
+		t.Fatalf("ground skill command=%+v", command)
+	}
+}

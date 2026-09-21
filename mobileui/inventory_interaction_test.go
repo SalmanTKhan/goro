@@ -126,3 +126,33 @@ func TestEquipmentSelectionOpensPaperDollDetail(t *testing.T) {
 		t.Fatalf("equipment slot did not open its detail sheet: state=%+v layout=%+v", c.State, c.Layout)
 	}
 }
+
+
+func TestInventoryUsableItemCanBeAddedToHotbar(t *testing.T) {
+	model := FixtureInventory("inventory-basic")
+	var commands input.CommandBuffer
+	c := NewInventoryController(model, Viewport{Width: 390, Height: 844, SafeTop: 24, SafeBottom: 24}, &commands)
+	var usable InventoryCellRect
+	found := false
+	for _, cell := range c.Layout.Cells {
+		item, ok := inventoryItemByIndex(model.Items, cell.Index)
+		if ok && item.Usable {
+			usable, found = cell, true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("fixture has no visible usable item")
+	}
+	c.Tap(usable.Rect.X+2, usable.Rect.Y+2)
+	if c.Layout.ShortcutAction.W <= 0 {
+		t.Fatalf("usable item has no Add to Bar action: %+v", c.Layout)
+	}
+	c.Tap(c.Layout.ShortcutAction.X+2, c.Layout.ShortcutAction.Y+2)
+	got := commands.Commands()
+	if len(got) != 1 || got[0].Kind != input.CommandAssignItemHotkey ||
+		got[0].ItemIndex != c.State.Selection.Detail.Item.Index ||
+		got[0].ItemID != uint32(c.State.Selection.Detail.Item.ItemID) {
+		t.Fatalf("hotbar assignment command=%+v", got)
+	}
+}

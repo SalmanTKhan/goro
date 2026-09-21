@@ -84,6 +84,21 @@ const (
 	CommandUseShortcut
 	CommandResetCamera
 	CommandToggleSit
+	// Mobile online-login intents are appended to preserve existing command IDs.
+	CommandOnlineSelectLoginServer
+	CommandOnlineSubmitCredentials
+	CommandOnlineSelectCharacterService
+	CommandUpgradeSkill
+	CommandAssignSkillHotkey
+	CommandOnlineCancelCharacterCreate
+	CommandOnlineFocusCharacter
+	// Mobile world-HUD utility actions are appended to preserve existing IDs.
+	CommandEmotion
+	CommandAssignItemHotkey
+	// Mobile NPC shop cart actions are appended to preserve all existing command IDs.
+	CommandShopCartAdd
+	CommandShopCartRemove
+	CommandShopCartConfirm
 )
 
 // WorldPosition is a presentation-independent world target. Screen-space
@@ -113,9 +128,14 @@ type PlayerCommand struct {
 	Level            int
 	Tab              uint8
 	Choice           uint8
+	EmotionID        uint8
 	Slot             uint16
 	Text             string
 	TargetName       string
+	// Username and Password are used only by the transient online-login command.
+	// They are never persisted by the command layer or included in diagnostics.
+	Username         string
+	Password         string
 	TargetAccountID  uint32
 	TargetCharID     uint32
 	RequestID        uint32

@@ -99,7 +99,8 @@ func LayoutCharacterScrolled(viewport Viewport, model MobileCharacterModel, offs
 type SkillsLayout struct {
 	Safe, Panel, Header, BackButton, CharacterButton Rect
 	Points, ListViewport, Detail                     Rect
-	Rows                                             []Rect
+	Rows, UpgradeButtons                             []Rect
+	HotbarButton                                     Rect
 	Stacked                                          bool
 }
 
@@ -145,7 +146,17 @@ func LayoutSkills(viewport Viewport, model MobileSkillsModel, offset float32) Sk
 			layout.Detail = Rect{X: layout.Panel.X + pad, Y: listY + listH + 12, W: contentW, H: detailH}
 		}
 		for i := range model.Skills {
-			layout.Rows = append(layout.Rows, Rect{X: layout.ListViewport.X + 8, Y: layout.ListViewport.Y + 8 + float32(i)*64 - offset, W: maxf(0, layout.ListViewport.W-16), H: 56})
+			row := Rect{X: layout.ListViewport.X + 8, Y: layout.ListViewport.Y + 8 + float32(i)*64 - offset, W: maxf(0, layout.ListViewport.W-16), H: 56}
+			layout.Rows = append(layout.Rows, row)
+			if model.Skills[i].Upgradable && model.Points > 0 {
+				button := Rect{X: row.Right() - 52, Y: row.Y + 2, W: 48, H: 48}
+				layout.UpgradeButtons = append(layout.UpgradeButtons, button)
+			} else {
+				layout.UpgradeButtons = append(layout.UpgradeButtons, Rect{})
+			}
+		}
+		if layout.Detail.W > 0 && model.Selection.HasSelection {
+			layout.HotbarButton = Rect{X: layout.Detail.Right() - 160, Y: layout.Detail.Bottom() - 56, W: 148, H: 44}
 		}
 		return layout
 	}
@@ -158,7 +169,16 @@ func LayoutSkills(viewport Viewport, model MobileSkillsModel, offset float32) Sk
 	detailX := layout.ListViewport.Right() + 16
 	layout.Detail = Rect{X: detailX, Y: contentY, W: maxf(0, layout.Panel.Right()-20-detailX), H: contentH}
 	for i := range model.Skills {
-		layout.Rows = append(layout.Rows, Rect{X: layout.ListViewport.X + 8, Y: layout.ListViewport.Y + 8 + float32(i)*64 - offset, W: maxf(0, layout.ListViewport.W-16), H: 56})
+		row := Rect{X: layout.ListViewport.X + 8, Y: layout.ListViewport.Y + 8 + float32(i)*64 - offset, W: maxf(0, layout.ListViewport.W-16), H: 56}
+		layout.Rows = append(layout.Rows, row)
+		if model.Skills[i].Upgradable && model.Points > 0 {
+			layout.UpgradeButtons = append(layout.UpgradeButtons, Rect{X: row.Right() - 52, Y: row.Y + 2, W: 48, H: 48})
+		} else {
+			layout.UpgradeButtons = append(layout.UpgradeButtons, Rect{})
+		}
+	}
+	if layout.Detail.W > 0 && model.Selection.HasSelection {
+		layout.HotbarButton = Rect{X: layout.Detail.Right() - 180, Y: layout.Detail.Bottom() - 60, W: 160, H: 48}
 	}
 	return layout
 }

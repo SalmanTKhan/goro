@@ -111,6 +111,9 @@ func (k Kit) placeItemDetail(c *Canvas, layout mobileui.MobileInventoryLayout, s
 	if detail.PrimaryAction != "" {
 		c.Place(k.Button(detail.PrimaryAction, buttonStateFor(detail.PrimaryEnabled)), layout.PrimaryAction)
 	}
+	if layout.ShortcutAction.W > 0 && detail.Item.Usable {
+		c.Place(k.Button("Add to Bar", ButtonNormal), layout.ShortcutAction)
+	}
 	if detail.SecondaryAction != "" {
 		c.Place(k.Button(detail.SecondaryAction, buttonStateFor(detail.SecondaryEnabled)), layout.SecondaryAction)
 	}
@@ -186,8 +189,16 @@ func IconRects(
 		}
 		// The quantity badge occupies the bottom of the cell, so the sprite gets
 		// the space above it rather than being scaled down inside the whole cell.
-		art := cell.Rect
-		art.H = spriteHeightWithinCell(cell.Rect)
+		artHeight := spriteHeightWithinCell(cell.Rect)
+		side := minf32(cell.Rect.W*0.72, artHeight*0.82)
+		if side < 24 {
+			side = minf32(cell.Rect.W, artHeight)
+		}
+		art := mobileui.Rect{
+			X: cell.Rect.X + (cell.Rect.W-side)/2,
+			Y: cell.Rect.Y + (artHeight-side)/2,
+			W: side, H: side,
+		}
 		out = append(out, IconPlacement{Item: item, Rect: art})
 	}
 	return out
@@ -195,8 +206,12 @@ func IconRects(
 
 // IconPlacement pairs an item with the cell its sprite belongs in.
 type IconPlacement struct {
-	Item mobileui.InventoryItemModel
-	Rect mobileui.Rect
+	Item          mobileui.InventoryItemModel
+	Rect          mobileui.Rect
+	ShowQuantity  bool
+	OverlayRect   mobileui.Rect
+	ShortcutBadge string
+	Dimmed        bool
 }
 
 func inventoryItemAt(items []mobileui.InventoryItemModel, index uint16) (mobileui.InventoryItemModel, bool) {
@@ -300,4 +315,12 @@ func groupDigits(value int64) string {
 // a grid cell, so the art above it is drawn at full size.
 func spriteHeightWithinCell(cell mobileui.Rect) float32 {
 	return cell.H * 0.68
+}
+
+
+func minf32(a, b float32) float32 {
+	if a < b {
+		return a
+	}
+	return b
 }

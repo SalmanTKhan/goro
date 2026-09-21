@@ -125,18 +125,28 @@ func TestPortraitShortListsDoNotPaintDeadSpace(t *testing.T) {
 	}
 }
 
-func TestPortraitInventoryUsesDenseSpriteGrid(t *testing.T) {
+func TestPortraitInventoryAdaptsGridToVisibleItemCount(t *testing.T) {
 	model := FixtureInventory("inventory-basic")
 	for _, viewport := range []Viewport{{Width: 390, Height: 844}, {Width: 1080, Height: 2400}} {
-		layout := LayoutInventory(viewport, DefaultInventoryTokens(), model, InventoryInteractionState{Screen: ScreenInventory})
-		if layout.GridColumns < 4 {
-			t.Fatalf("portrait inventory did not use a dense grid at %+v: columns=%d layout=%+v", viewport, layout.GridColumns, layout)
+		all := LayoutInventory(viewport, DefaultInventoryTokens(), model, InventoryInteractionState{Screen: ScreenInventory, Category: InventoryCategoryAll})
+		if all.GridColumns != 3 {
+			t.Fatalf("portrait basic inventory should use three columns at %+v: columns=%d layout=%+v", viewport, all.GridColumns, all)
 		}
-		for i, cell := range layout.Cells {
+
+		etcState := InventoryInteractionState{Screen: ScreenInventory, Category: InventoryCategoryEtc}
+		etc := LayoutInventory(viewport, DefaultInventoryTokens(), model, etcState)
+		if etc.GridColumns != 2 {
+			t.Fatalf("portrait filtered inventory should expand to two columns at %+v: columns=%d layout=%+v", viewport, etc.GridColumns, etc)
+		}
+		if etc.GridCellWidth <= all.GridCellWidth {
+			t.Fatalf("filtered inventory did not enlarge cells at %+v: all=%v filtered=%v", viewport, all.GridCellWidth, etc.GridCellWidth)
+		}
+
+		for i, cell := range all.Cells {
 			if cell.Rect.W < 48 || cell.Rect.H < 48 {
 				t.Fatalf("portrait inventory cell %d is below touch target at %+v: %+v", i, viewport, cell.Rect)
 			}
-			assertInsideRect(t, "portrait sprite cell", i, cell.Rect, layout.GridViewport)
+			assertInsideRect(t, "portrait sprite cell", i, cell.Rect, all.GridViewport)
 		}
 	}
 }

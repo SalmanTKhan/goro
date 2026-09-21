@@ -31,6 +31,9 @@ func (c *Controller) Tap(x, y float32) bool {
 		return false
 	case ControlMenu:
 		c.Navigation.MenuOpen = !c.Navigation.MenuOpen
+		if c.Navigation.MenuOpen {
+			c.Navigation.EmoteOpen = false
+		}
 		c.relayout()
 		return true
 	case ControlMenuAction:
@@ -45,6 +48,14 @@ func (c *Controller) Tap(x, y float32) bool {
 		c.emit(input.PlayerCommand{Kind: input.CommandCancelAction})
 		c.relayout()
 		return true
+	case ControlLevelUp:
+		c.Navigation.Open(ScreenCharacter)
+		c.relayout()
+		return true
+	case ControlSkillUp:
+		c.Navigation.Open(ScreenSkills)
+		c.relayout()
+		return true
 	case ControlSkillPagePrev:
 		if c.Navigation.SkillPage > 0 {
 			c.Navigation.SkillPage--
@@ -56,29 +67,80 @@ func (c *Controller) Tap(x, y float32) bool {
 		if perPage <= 0 {
 			perPage = 4
 		}
-		if len(c.Model.Skills) > 0 && c.Navigation.SkillPage < (len(c.Model.Skills)-1)/perPage {
+		if ShortcutCount(c.Model) > 0 && c.Navigation.SkillPage < (ShortcutCount(c.Model)-1)/perPage {
 			c.Navigation.SkillPage++
 			c.relayout()
 		}
 		return true
 	case ControlSkill:
-		skillIndex := hit.SkillIndex + c.Layout.SkillStart
-		if skillIndex >= len(c.Model.Skills) {
+		shortcutIndex := hit.SkillIndex + c.Layout.SkillStart
+		shortcut, ok := ShortcutAt(c.Model, shortcutIndex)
+		if !ok {
 			return true
 		}
-		skill := c.Model.Skills[skillIndex]
-		if !skill.Usable || skill.SkillID == 0 || skill.CooldownRemaining > 0 {
-			return true
-		}
-		switch skill.TargetMode {
-		case input.SkillTargetActor:
-			c.Navigation.Targeting.BeginActor(skill.SkillID, skill.Level)
-		case input.SkillTargetGround:
-			c.Navigation.Targeting.BeginGround(skill.SkillID, skill.Level)
-		default:
-			c.emit(input.PlayerCommand{Kind: input.CommandUseSkill, SkillID: skill.SkillID, Level: skill.Level})
+		c.Navigation.EmoteOpen = false
+		switch shortcut.Kind {
+		case ShortcutItem:
+			item := shortcut.Item
+			if item.Usable && item.Index != 0 && item.Quantity > 0 {
+				c.emit(input.PlayerCommand{Kind: input.CommandUseItem, ItemIndex: item.Index, ItemID: uint32(item.ItemID)})
+			}
+		case ShortcutSkill:
+			skill := shortcut.Skill
+			if !skill.Usable || skill.SkillID == 0 || skill.CooldownRemaining > 0 {
+				return true
+			}
+			switch skill.TargetMode {
+			case input.SkillTargetActor:
+				c.Navigation.Targeting.BeginActor(skill.SkillID, skill.Level)
+			case input.SkillTargetGround:
+				c.Navigation.Targeting.BeginGround(skill.SkillID, skill.Level)
+			default:
+				c.emit(input.PlayerCommand{Kind: input.CommandUseSkill, SkillID: skill.SkillID, Level: skill.Level})
+			}
 		}
 		c.relayout()
+		return true
+	case ControlSit:
+		c.emit(input.PlayerCommand{Kind: input.CommandToggleSit})
+		return true
+	case ControlLoot:
+		if len(c.Model.Loot) > 0 {
+			c.emit(input.PlayerCommand{Kind: input.CommandLootFocused})
+		}
+		return true
+	case ControlEmoteToggle:
+		if len(c.Model.Emotes) == 0 {
+			return true
+		}
+		c.Navigation.EmoteOpen = !c.Navigation.EmoteOpen
+		if c.Navigation.EmoteOpen {
+			c.Navigation.MenuOpen = false
+		}
+		c.relayout()
+		return true
+	case ControlEmote:
+		if hit.EmoteIndex < 0 || hit.EmoteIndex >= len(c.Model.Emotes) {
+			return true
+		}
+		emote := c.Model.Emotes[hit.EmoteIndex]
+		c.emit(input.PlayerCommand{Kind: input.CommandEmotion, EmotionID: emote.ID})
+		c.Navigation.EmoteOpen = false
+		c.relayout()
+		return true
+	case ControlPrimaryAction, ControlTarget:
+		target := c.Model.Target
+		if !target.Visible || target.ID == 0 {
+			return true
+		}
+		switch target.Relation {
+		case TargetHostile:
+			c.emit(input.PlayerCommand{Kind: input.CommandAttackActor, ActorID: target.ID})
+		case TargetNPC:
+			c.emit(input.PlayerCommand{Kind: input.CommandInteractActor, ActorID: target.ID})
+		default:
+			c.emit(input.PlayerCommand{Kind: input.CommandSelectActor, ActorID: target.ID})
+		}
 		return true
 	case ControlLootItem:
 		if hit.LootIndex < 0 || hit.LootIndex >= len(c.Model.Loot) {

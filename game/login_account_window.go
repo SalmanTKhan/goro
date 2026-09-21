@@ -48,7 +48,7 @@ func (m *LoginMode) updateAccountWindow(ctx client.Context) {
 }
 
 func (m *LoginMode) updateLoginWindow(ctx client.Context) {
-	if ctx.Config.Headless {
+	if ctx.Config.Headless || ctx.Config.Render.NoUI {
 		return
 	}
 	if m.loginWindow == nil {

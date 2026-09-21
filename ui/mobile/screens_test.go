@@ -275,3 +275,21 @@ func TestSkillDetailReportsWhyASkillIsUnusable(t *testing.T) {
 	}
 	t.Error("the disabled reason was not shown in the skill detail")
 }
+
+
+func TestHUDUnknownTargetHPDoesNotRenderZeroOverZero(t *testing.T) {
+	k := testKit()
+	vp := mobileui.Viewport{Width: 840, Height: 2289, SafeTop: 48, SafeBottom: 96}
+	model := mobileui.Fixture("monster")
+	model.Target.HP = 0
+	model.Target.MaxHP = 0
+	layout := mobileui.LayoutHUD(vp, mobileui.DefaultTokens(), model, mobileui.Navigation{})
+	drawn := drawnLines(layoutAndDraw(t, k.HUDTree(model, layout, mobileui.Navigation{})))
+
+	if containsLine(drawn, "0/0") {
+		t.Fatalf("unknown target health rendered as a real zero gauge: %v", drawn)
+	}
+	if !containsLine(drawn, "HP --") {
+		t.Fatalf("unknown target health placeholder missing: %v", drawn)
+	}
+}

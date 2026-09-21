@@ -73,6 +73,23 @@ func TestWorldShadersUseProjectedFogDepth(t *testing.T) {
 	}
 }
 
+
+func TestBeginFrameResetsTransientScreenTransform(t *testing.T) {
+	screen := NewFrame(320, 240)
+	screen.SetScreenTransform(0.5, 0.75, 12, 18)
+
+	screen.BeginFrame()
+	screen.DrawImage(WhiteImage(), nil)
+
+	if len(screen.commands) != 1 {
+		t.Fatalf("commands = %d, want 1", len(screen.commands))
+	}
+	cmd := screen.commands[0]
+	if cmd.ScreenScaleX != 1 || cmd.ScreenScaleY != 1 || cmd.ScreenOffsetX != 0 || cmd.ScreenOffsetY != 0 {
+		t.Fatalf("screen transform after BeginFrame = scale %.2f,%.2f offset %.2f,%.2f; want identity", cmd.ScreenScaleX, cmd.ScreenScaleY, cmd.ScreenOffsetX, cmd.ScreenOffsetY)
+	}
+}
+
 func TestWorldMeshSubmissionDoesNotCreateDynamicWorldCommand(t *testing.T) {
 	screen := NewFrame(320, 240)
 	texture := WhiteImage()

@@ -90,15 +90,20 @@ type gpuRenderer struct {
 type TextureUploadMetrics struct {
 	Duration          time.Duration
 	Count             int
+	Creates           int
+	Updates           int
 	UploadedBytes     int64
 	EstimatedGPUBytes int64
+	ResidentTextures  int
 }
 
 func (r *gpuRenderer) TextureUploadMetrics() TextureUploadMetrics {
 	if r == nil {
 		return TextureUploadMetrics{}
 	}
-	return r.uploadMetrics
+	metrics := r.uploadMetrics
+	metrics.ResidentTextures = len(r.textures)
+	return metrics
 }
 
 type gpuImageTexture struct {
@@ -803,11 +808,16 @@ func (r *gpuRenderer) ensureTexture(img *Image, opts DrawTrianglesOptions) (*gpu
 	}
 	w, h := img.Bounds().Dx(), img.Bounds().Dy()
 	started := time.Now()
-	recordUpload := func(bytes int) {
+	recordUpload := func(bytes int, created bool) {
 		r.uploadMetrics.Duration += time.Since(started)
 		r.uploadMetrics.Count++
 		r.uploadMetrics.UploadedBytes += int64(bytes)
-		r.uploadMetrics.EstimatedGPUBytes += int64(w) * int64(h) * 4
+		if created {
+			r.uploadMetrics.Creates++
+			r.uploadMetrics.EstimatedGPUBytes += int64(w) * int64(h) * 4
+		} else {
+			r.uploadMetrics.Updates++
+		}
 	}
 	existing := r.textures[img]
 	if existing != nil && existing.version == img.version && existing.width == w && existing.height == h {
@@ -819,9 +829,13 @@ func (r *gpuRenderer) ensureTexture(img *Image, opts DrawTrianglesOptions) (*gpu
 			if err := r.queue.WriteTexture(&wgpu.ImageCopyTexture{Texture: existing.tex}, pixels, &wgpu.ImageDataLayout{BytesPerRow: bytesPerRow, RowsPerImage: uint32(h)}, &wgpu.Extent3D{Width: uint32(w), Height: uint32(h), DepthOrArrayLayers: 1}); err != nil {
 				return nil, fmt.Errorf("update render texture: %w", err)
 			}
-			recordUpload(len(pixels))
+			recordUpload(len(pixels), false)
 			existing.version = img.version
 			return existing, nil
+		}
+		r.uploadMetrics.EstimatedGPUBytes -= int64(existing.width) * int64(existing.height) * 4
+		if r.uploadMetrics.EstimatedGPUBytes < 0 {
+			r.uploadMetrics.EstimatedGPUBytes = 0
 		}
 		r.releaseTexture(existing.tex)
 		delete(r.textures, img)
@@ -835,7 +849,7 @@ func (r *gpuRenderer) ensureTexture(img *Image, opts DrawTrianglesOptions) (*gpu
 		tex.Release()
 		return nil, fmt.Errorf("upload render texture: %w", err)
 	}
-	recordUpload(len(pixels))
+	recordUpload(len(pixels), true)
 	view, err := r.dev.CreateTextureView(tex, nil)
 	if err != nil {
 		tex.Release()

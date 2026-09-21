@@ -165,6 +165,23 @@ func TestNPCDialogMobileModelProjectsServerActions(t *testing.T) {
 	}
 }
 
+func TestNPCDialogMobileModelServerActionReplacesWaitingState(t *testing.T) {
+	dialog := NPCDialog{}
+	dialog.Apply(network.NPCDialog{Kind: network.NPCDialogSay, NPCID: 77, Message: "Hello"})
+	waiting := dialog.MobileModel(Context{})
+	if waiting.Notice != "Waiting for the server." || len(waiting.Options) != 0 {
+		t.Fatalf("initial say projection = %+v, want waiting state", waiting)
+	}
+
+	// ZC_WAIT_DIALOG is the server's permission to advance. This transition
+	// must be visible to mobile even when the message text itself is unchanged.
+	dialog.Apply(network.NPCDialog{Kind: network.NPCDialogNext, NPCID: 77})
+	next := dialog.MobileModel(Context{})
+	if next.Notice != "" || len(next.Options) != 1 || next.Options[0].Action != mobileui.DialogNext {
+		t.Fatalf("server Next projection = %+v, want active Next action", next)
+	}
+}
+
 func TestNPCDialogMobileModelProjectsBracketedSpeakers(t *testing.T) {
 	dialog := NPCDialog{}
 	dialog.Apply(network.NPCDialog{Kind: network.NPCDialogSay, NPCID: 77, Message: "[PrivateMvpRoom] Please select a private MVP room."})

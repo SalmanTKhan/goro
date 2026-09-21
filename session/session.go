@@ -443,6 +443,11 @@ type Companion struct {
 	Skills       Skills
 }
 
+const (
+	HotkeyTypeItem  uint8 = 0
+	HotkeyTypeSkill uint8 = 1
+)
+
 type HotkeySlot struct {
 	Type  uint8
 	ID    uint32

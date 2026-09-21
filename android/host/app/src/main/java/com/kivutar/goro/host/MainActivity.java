@@ -38,6 +38,10 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 public final class MainActivity extends Activity {
+    private static final int TEXT_INPUT_LOGIN_USERNAME = 4;
+    private static final int TEXT_INPUT_LOGIN_PASSWORD = 5;
+    private static final int TEXT_INPUT_LOGIN_CHARACTER_NAME = 6;
+
     static {
         System.loadLibrary("goro_android");
         System.loadLibrary("goro_jni");
@@ -49,6 +53,13 @@ public final class MainActivity extends Activity {
     private boolean chatInputActive;
     private int chatInputMode;
     private boolean syncingChatInput;
+    // SurfaceView can remain logically available across an app switch without
+    // Android delivering a fresh surfaceCreated callback. Track callback
+    // generations so resume can explicitly rebind only when no new surface
+    // was created while the activity was paused.
+    private boolean surfaceAvailable;
+    private int surfaceGeneration;
+    private int pausedSurfaceGeneration = -1;
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
     private final Runnable chatInputPoll = new Runnable() {
         @Override public void run() {
@@ -84,6 +95,17 @@ public final class MainActivity extends Activity {
         }
         getWindow().setFlags(1024, 1024);
         surfaceView = new HostSurfaceView();
+        surfaceView.addOnLayoutChangeListener((view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
+            int width = right - left;
+            int height = bottom - top;
+            if (width > 0 && height > 0 && (width != oldRight - oldLeft || height != oldBottom - oldTop)) {
+                // SurfaceHolder callbacks are not guaranteed to arrive in the
+                // same order on every device/fold posture. Report the measured
+                // layout too so the Go presentation always relayouts after a
+                // rotation or window-size change.
+                nativeSurfaceChanged(width, height);
+            }
+        });
         surfaceView.setOnApplyWindowInsetsListener((view, insets) -> {
             android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.systemBars());
             nativeSurfaceInsetsChanged(bars.left, bars.top, bars.right, bars.bottom);
@@ -111,8 +133,10 @@ public final class MainActivity extends Activity {
                 if (!syncingChatInput) nativeTextInputChanged(value.toString());
             }
         });
-        FrameLayout.LayoutParams chatInputLayout = new FrameLayout.LayoutParams(720, 64, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
-        chatInputLayout.bottomMargin = 24;
+        // This EditText is only an IME bridge. The actual field is rendered by
+        // the Go mobile UI, so keep the native view out of the interactive
+        // surface instead of laying an invisible 720px-wide control over it.
+        FrameLayout.LayoutParams chatInputLayout = new FrameLayout.LayoutParams(1, 1, Gravity.TOP | Gravity.START);
         rootView.addView(chatInput, chatInputLayout);
         setContentView(rootView);
         uiHandler.post(chatInputPoll);
@@ -154,13 +178,24 @@ public final class MainActivity extends Activity {
         chatInputMode = mode;
         chatInputActive = active;
         if (active) {
+            int inputType = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES;
+            if (mode == TEXT_INPUT_LOGIN_PASSWORD) {
+                inputType = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD;
+            } else if (mode == TEXT_INPUT_LOGIN_USERNAME || mode == TEXT_INPUT_LOGIN_CHARACTER_NAME) {
+                inputType = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD;
+            }
+            chatInput.setInputType(inputType);
+            chatInput.setImeOptions(EditorInfo.IME_ACTION_DONE);
             syncingChatInput = true;
             chatInput.setText("");
             syncingChatInput = false;
             chatInput.setVisibility(EditText.VISIBLE);
             chatInput.requestFocus();
             InputMethodManager inputMethod = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
-            if (inputMethod != null) inputMethod.showSoftInput(chatInput, InputMethodManager.SHOW_IMPLICIT);
+            if (inputMethod != null) {
+                inputMethod.restartInput(chatInput);
+                inputMethod.showSoftInput(chatInput, InputMethodManager.SHOW_IMPLICIT);
+            }
         } else {
             InputMethodManager inputMethod = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
             if (inputMethod != null) inputMethod.hideSoftInputFromWindow(chatInput.getWindowToken(), 0);
@@ -170,19 +205,6 @@ public final class MainActivity extends Activity {
             syncingChatInput = false;
             chatInput.setVisibility(EditText.GONE);
         }
-    }
-
-    // Dismissing the Android IME does not change the Go-side text-input mode.
-    // The next tap is therefore the explicit request to show it again.
-    private void reopenNativeKeyboard() {
-        if (chatInput == null || !chatInputActive) return;
-        chatInput.setVisibility(EditText.VISIBLE);
-        chatInput.requestFocus();
-        chatInput.postDelayed(() -> {
-            if (!chatInputActive || isFinishing()) return;
-            InputMethodManager inputMethod = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
-            if (inputMethod != null) inputMethod.showSoftInput(chatInput, InputMethodManager.SHOW_IMPLICIT);
-        }, 50);
     }
 
     private File installMobileAssetsFromFile(File sourceRoot) throws Exception {
@@ -570,7 +592,12 @@ public final class MainActivity extends Activity {
     @Override public void onConfigurationChanged(Configuration configuration) {
         super.onConfigurationChanged(configuration);
         if (surfaceView != null) {
-            surfaceView.post(() -> surfaceView.requestApplyInsets());
+            surfaceView.post(() -> {
+                surfaceView.requestApplyInsets();
+                int width = surfaceView.getWidth();
+                int height = surfaceView.getHeight();
+                if (width > 0 && height > 0) nativeSurfaceChanged(width, height);
+            });
         }
     }
 
@@ -582,13 +609,43 @@ public final class MainActivity extends Activity {
     }
 
     @Override protected void onPause() {
+        pausedSurfaceGeneration = surfaceGeneration;
         nativePause();
         super.onPause();
     }
 
     @Override protected void onResume() {
         super.onResume();
-        nativeResume();
+
+        final int generationAtPause = pausedSurfaceGeneration;
+        pausedSurfaceGeneration = -1;
+        if (generationAtPause < 0 || surfaceView == null) {
+            nativeResume();
+            return;
+        }
+
+        // Some devices keep the same Surface across a short background/foreground
+        // cycle. WGPU's swapchain can still become stale even though SurfaceView
+        // emits no new surfaceCreated callback. Rebind that still-valid native
+        // window after the view has resumed. If Android created a replacement
+        // Surface in the meantime, surfaceGeneration changed and its callback
+        // already performed the authoritative bind. Only release the Go render
+        // pause after that decision, so no frame can acquire the stale surface.
+        surfaceView.post(() -> {
+            if (surfaceAvailable && surfaceGeneration == generationAtPause) {
+                android.view.Surface surface = surfaceView.getHolder().getSurface();
+                if (surface != null && surface.isValid()) {
+                    Log.i("GoroAndroidHost", "resume rebind generation=" + surfaceGeneration
+                            + " size=" + surfaceView.getWidth() + "x" + surfaceView.getHeight());
+                    nativeSurfaceCreated(surface);
+                }
+            }
+            int width = surfaceView.getWidth();
+            int height = surfaceView.getHeight();
+            if (width > 0 && height > 0) nativeSurfaceChanged(width, height);
+            surfaceView.requestApplyInsets();
+            nativeResume();
+        });
     }
 
     private native void nativeSurfaceCreated(android.view.Surface surface);
@@ -609,9 +666,18 @@ public final class MainActivity extends Activity {
     private final class HostSurfaceView extends SurfaceView implements SurfaceHolder.Callback {
         HostSurfaceView() { super(MainActivity.this); getHolder().addCallback(this); setFocusable(true); }
 
-        @Override public void surfaceCreated(SurfaceHolder holder) { nativeSurfaceCreated(holder.getSurface()); }
-        @Override public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) { nativeSurfaceChanged(width, height); }
-        @Override public void surfaceDestroyed(SurfaceHolder holder) { nativeSurfaceDestroyed(); }
+        @Override public void surfaceCreated(SurfaceHolder holder) {
+            surfaceAvailable = true;
+            surfaceGeneration++;
+            nativeSurfaceCreated(holder.getSurface());
+        }
+        @Override public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
+            nativeSurfaceChanged(width, height);
+        }
+        @Override public void surfaceDestroyed(SurfaceHolder holder) {
+            surfaceAvailable = false;
+            nativeSurfaceDestroyed();
+        }
 
         @Override public boolean onTouchEvent(MotionEvent event) {
             final int action = event.getActionMasked();
@@ -630,7 +696,8 @@ public final class MainActivity extends Activity {
             final int index = event.getActionIndex();
             final boolean pressed = action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_POINTER_DOWN;
             final boolean released = action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_POINTER_UP;
-            if (pressed && nativeTextInputMode() != 0) reopenNativeKeyboard();
+            // Field activation is owned by the Go hit-test. Reopening the IME
+            // here made every tap behave like a tap on the last text field.
             if (pressed || released) {
                 nativeTouch(action, event.getPointerId(index), event.getX(index), event.getY(index), pressed);
             }

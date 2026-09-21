@@ -100,14 +100,13 @@ const (
 )
 
 // SurfaceRowHeight reports how tall a row must be to show its content. Rows
-// carrying help text need room for it: a fixed height truncated the longer
-// settings descriptions mid-sentence.
+// carrying help text need room for it; the selected detail sheet can expand on
+// the same explanation, but the list itself must never silently drop help text.
 func SurfaceRowHeight(item SurfaceItem) float32 {
 	if item.Detail == "" {
 		return surfaceRowLabel
 	}
 	if item.Kind == SurfaceItemSection {
-		// Section blurbs are a single short sentence.
 		return surfaceRowLabel + surfaceDetailLine
 	}
 	return surfaceRowLabel + surfaceDetailLines*surfaceDetailLine
@@ -277,13 +276,33 @@ func SettingsSurfaceForControls(controls input.MobileControls) SurfaceModel {
 
 func SettingsSurfaceForSettings(settings input.MobileSettings) SurfaceModel {
 	settings = settings.Normalized()
-	controls := settings.Controls
-	controls = controls.Normalized()
+	controls := settings.Controls.Normalized()
 	return SurfaceModel{
 		Title:  "SETTINGS",
-		Notice: "Tap a row to change it. Changes apply now and save automatically.",
+		Notice: "Tap a setting to change it. Display, sound, gameplay, and controls save automatically.",
 		Items: []SurfaceItem{
-			{ID: "section-controls", Label: "CONTROLS", Value: "", Detail: "Touch and camera behavior.", Enabled: false, Kind: SurfaceItemSection},
+			// Match the desktop settings order and naming first, then expose
+			// touch-only controls below the shared sections.
+			{ID: "section-display", Label: "DISPLAY", Detail: "Presentation and HUD options.", Enabled: false, Kind: SurfaceItemSection},
+			{ID: "presentation", Label: "UI presentation", Value: presentationLabel(settings.Display.Presentation), Detail: "Switch immediately between the touch-first Mobile UI and the shared Desktop UI.", Enabled: true},
+			{ID: "ui-scale", Label: "UI scale", Value: settings.UI.Label(), Detail: "Cycles Small, Default, and Large and applies immediately.", Enabled: true},
+			{ID: "vsync", Label: "VSync", Value: onOff(settings.Display.VSync), Detail: "Synchronize frame presentation to the display refresh rate. Applies immediately.", Enabled: true},
+			{ID: "fps-meter", Label: "FPS meter", Value: onOff(settings.Display.FPS), Detail: "Show measured frames per second and frame time over the game.", Enabled: true},
+			{ID: "show-minimap", Label: "Show minimap", Value: onOff(settings.Display.ShowMinimap), Enabled: true},
+
+			{ID: "section-audio", Label: "SOUND", Detail: "Shared sound preferences.", Enabled: false, Kind: SurfaceItemSection},
+			{ID: "bgm-enabled", Label: "Background music", Value: onOff(settings.Audio.BGMEnabled), Enabled: true},
+			{ID: "bgm-volume", Label: "BGM volume", Value: fmt.Sprintf("%d%%", int(settings.Audio.BGMVolume*100+0.5)), Enabled: true},
+			{ID: "sfx-volume", Label: "SFX volume", Value: fmt.Sprintf("%d%%", int(settings.Audio.SFXVolume*100+0.5)), Enabled: true},
+
+			{ID: "section-gameplay", Label: "GAMEPLAY", Detail: "Shared client gameplay behavior.", Enabled: false, Kind: SurfaceItemSection},
+			{ID: "no-shift", Label: "No Shift targeting", Value: onOff(settings.Gameplay.NoShift), Enabled: true},
+			{ID: "no-ctrl", Label: "No Ctrl attacking", Value: onOff(settings.Gameplay.NoCtrl), Enabled: true},
+			{ID: "less-effects", Label: "Less effects", Value: onOff(settings.Gameplay.LessEffects), Enabled: true},
+			{ID: "snap-targets", Label: "Snap to targets", Value: onOff(settings.Gameplay.SnapTargets), Enabled: true},
+			{ID: "snap-items", Label: "Snap to items", Value: onOff(settings.Gameplay.SnapItems), Enabled: true},
+
+			{ID: "section-controls", Label: "CONTROLS", Detail: "Touch and camera behavior.", Enabled: false, Kind: SurfaceItemSection},
 			{ID: "movement", Label: "Movement", Value: controls.MovementMode.String(), Detail: "Hold to move follows walkable ground while your finger is down. Tap to move acts when the touch is released.", Enabled: true},
 			{ID: "camera-rotation", Label: "Camera rotation", Value: "2-finger drag", Detail: "Drag with two fingers to rotate the camera. One-finger world input never rotates the camera.", Enabled: false},
 			{ID: "camera-sensitivity", Label: "Camera sensitivity", Value: fmt.Sprintf("%.2fx", controls.CameraSensitivity), Enabled: true},
@@ -292,30 +311,16 @@ func SettingsSurfaceForSettings(settings input.MobileSettings) SurfaceModel {
 			{ID: "long-press", Label: "Inspect hold duration", Value: fmt.Sprintf("%d ms", controls.LongPressMS), Enabled: true},
 			{ID: "show-target-names", Label: "Show target names", Value: onOff(controls.ShowTargetNames), Enabled: true},
 			{ID: "reset-controls", Label: "Reset controls", Value: "Defaults", Detail: "Restore hold-to-move, two-finger camera rotation, standard sensitivity, and touch inspection defaults.", Enabled: true},
-			{ID: "section-audio", Label: "AUDIO", Value: "", Detail: "Sound preferences.", Enabled: false, Kind: SurfaceItemSection},
-			{ID: "bgm-enabled", Label: "Background music", Value: onOff(settings.Audio.BGMEnabled), Enabled: true},
-			{ID: "bgm-volume", Label: "BGM volume", Value: fmt.Sprintf("%d%%", int(settings.Audio.BGMVolume*100+0.5)), Enabled: true},
-			{ID: "sfx-volume", Label: "SFX volume", Value: fmt.Sprintf("%d%%", int(settings.Audio.SFXVolume*100+0.5)), Enabled: true},
-			{ID: "section-display", Label: "DISPLAY", Value: "", Detail: "Mobile HUD visibility.", Enabled: false, Kind: SurfaceItemSection},
-			{ID: "ui-scale", Label: "UI scale", Value: settings.UI.Label(), Detail: "Cycles Small, Default, and Large. Applies immediately.", Enabled: true},
-			{ID: "show-minimap", Label: "Show minimap", Value: onOff(settings.Display.ShowMinimap), Enabled: true},
-			{ID: "presentation", Label: "UI presentation", Value: presentationLabel(settings.Display.Presentation), Detail: "Changes apply after restarting the client.", Enabled: true},
-			{ID: "section-gameplay", Label: "GAMEPLAY", Value: "", Detail: "Shared client gameplay behavior.", Enabled: false, Kind: SurfaceItemSection},
-			{ID: "no-shift", Label: "No Shift targeting", Value: onOff(settings.Gameplay.NoShift), Enabled: true},
-			{ID: "no-ctrl", Label: "No Ctrl attacking", Value: onOff(settings.Gameplay.NoCtrl), Enabled: true},
-			{ID: "less-effects", Label: "Less effects", Value: onOff(settings.Gameplay.LessEffects), Enabled: true},
-			{ID: "snap-targets", Label: "Snap to targets", Value: onOff(settings.Gameplay.SnapTargets), Enabled: true},
-			{ID: "snap-items", Label: "Snap to items", Value: onOff(settings.Gameplay.SnapItems), Enabled: true},
-			{ID: "reset-all", Label: "Reset all mobile settings", Value: "Defaults", Detail: "Restore controls, audio, display, and gameplay settings to their validated defaults.", Enabled: true},
+			{ID: "reset-all", Label: "Reset all mobile settings", Value: "Defaults", Detail: "Restore controls, sound, display, and gameplay settings to their validated defaults.", Enabled: true},
 		},
 	}
 }
 
 func presentationLabel(mode input.MobilePresentationMode) string {
 	if mode == input.MobilePresentationDesktop {
-		return "Desktop optimized"
+		return "Desktop UI"
 	}
-	return "Mobile replacement"
+	return "Mobile UI"
 }
 
 // SettingsSurfaceForSession adds the connection controls that are only

@@ -35,6 +35,7 @@ type frameSubmittedMode interface {
 type Manager struct {
 	ctx  client.Context
 	mode Mode
+	loginPreviewTextures map[uint32]*render.Image
 }
 
 func NewManager(ctx client.Context, mode Mode) *Manager {
@@ -182,11 +183,32 @@ func (m *Manager) MobileDialogModel() mobileui.MobileDialogModel {
 	return mobileui.MobileDialogModel{}
 }
 
+func (m *Manager) DrawMobileNPCCutin(screen *render.Frame, dialogTop ...int) {
+	if m == nil || screen == nil {
+		return
+	}
+	if mode, ok := m.mode.(*WorldMode); ok {
+		mode.ui.npcCutin.DrawMobile(screen, dialogTop...)
+	}
+}
+
 func (m *Manager) PickMobileTarget(ctx client.Context, position input.WorldPosition) (input.PickedTarget, bool) {
 	if mode, ok := m.mode.(interface {
 		PickMobileTarget(client.Context, input.WorldPosition) (input.PickedTarget, bool)
 	}); ok {
 		return mode.PickMobileTarget(ctx, position)
+	}
+	return input.PickedTarget{}, false
+}
+
+// PickMobileGroundTarget is the terrain-only counterpart used while a
+// ground-target skill owns mobile input. Keep this forwarding method beside
+// PickMobileTarget so app.Game does not depend on the concrete WorldMode.
+func (m *Manager) PickMobileGroundTarget(ctx client.Context, position input.WorldPosition) (input.PickedTarget, bool) {
+	if mode, ok := m.mode.(interface {
+		PickMobileGroundTarget(client.Context, input.WorldPosition) (input.PickedTarget, bool)
+	}); ok {
+		return mode.PickMobileGroundTarget(ctx, position)
 	}
 	return input.PickedTarget{}, false
 }
@@ -246,6 +268,15 @@ func (m *Manager) DrawMobileSkillIcon(screen *render.Frame, skillID uint16, x, y
 	}
 }
 
+func (m *Manager) DrawMobileStatusIcon(screen *render.Frame, statusID uint16, x, y, size int) {
+	if m == nil {
+		return
+	}
+	if mode, ok := m.mode.(*WorldMode); ok {
+		mode.DrawMobileStatusIcon(screen, m.ctx.Resources, statusID, x, y, size)
+	}
+}
+
 func (m *Manager) DrawEquipmentPreview(screen *render.Frame, x, y, width, height int) {
 	if m == nil {
 		return
@@ -262,6 +293,51 @@ func (m *Manager) DrawMobileEquipmentPreview(screen *render.Frame, x, y, width, 
 	if mode, ok := m.mode.(*WorldMode); ok {
 		mode.DrawMobileEquipmentPreview(screen, m.ctx, x, y, width, height)
 	}
+}
+
+func (m *Manager) DrawMobileLoginCharacterPreview(screen *render.Frame, slot int, x, y, width, height int) {
+	if m == nil || screen == nil || width <= 0 || height <= 0 {
+		return
+	}
+	mode, ok := m.mode.(*LoginMode)
+	if !ok || m.ctx.Session == nil {
+		return
+	}
+	character, ok := characterBySlot(m.ctx.Session.Characters, slot)
+	if !ok {
+		return
+	}
+	key := loginCharacterPreviewKey(character)
+	if m.loginPreviewTextures == nil {
+		m.loginPreviewTextures = make(map[uint32]*render.Image)
+	}
+	texture := m.loginPreviewTextures[key]
+	if texture == nil {
+		img := mode.characterPreviewImage(m.ctx, character)
+		if img == nil {
+			return
+		}
+		texture = render.NewImageFromImage(img)
+		m.loginPreviewTextures[key] = texture
+	}
+	bounds := texture.Bounds()
+	if bounds.Dx() <= 0 || bounds.Dy() <= 0 {
+		return
+	}
+	scaleX := float64(width) / float64(bounds.Dx())
+	scaleY := float64(height) / float64(bounds.Dy())
+	scale := scaleX
+	if scaleY < scale {
+		scale = scaleY
+	}
+	// Preserve pixel-art proportions and center the paper doll in the slot.
+	drawW := float64(bounds.Dx()) * scale
+	drawH := float64(bounds.Dy()) * scale
+	var opts render.DrawImageOptions
+	opts.Filter = render.FilterNearest
+	opts.GeoM.Scale(scale, scale)
+	opts.GeoM.Translate(float64(x)+(float64(width)-drawW)/2, float64(y)+(float64(height)-drawH)/2)
+	screen.DrawImage(texture, &opts)
 }
 
 func (m *Manager) DrawMobileProfilePreview(screen *render.Frame, character session.Character, sex byte, x, y, width, height int) {

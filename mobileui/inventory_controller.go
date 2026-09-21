@@ -103,6 +103,13 @@ func (c *MobileInventoryController) tapInventory(x, y float32) bool {
 		c.emit(input.PlayerCommand{Kind: input.CommandDepositItem, ItemIndex: c.State.Selection.SelectedIndex, Quantity: c.State.Selection.Detail.Item.Quantity})
 		return true
 	}
+	if c.State.Selection.HasSelection && c.Layout.ShortcutAction.Contains(x, y) {
+		item := c.State.Selection.Detail.Item
+		if item.Usable && item.ItemID != 0 {
+			c.emit(input.PlayerCommand{Kind: input.CommandAssignItemHotkey, ItemIndex: item.Index, ItemID: uint32(item.ItemID)})
+		}
+		return true
+	}
 	if c.State.Selection.HasSelection && c.Layout.PrimaryAction.Contains(x, y) {
 		return c.primaryAction()
 	}

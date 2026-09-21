@@ -45,7 +45,7 @@ func (m *LoginMode) updateCharacterSelectInput(ctx client.Context) {
 }
 
 func (m *LoginMode) updateCharacterSelectWindow(ctx client.Context) {
-	if ctx.Config.Headless {
+	if ctx.Config.Headless || ctx.Config.Render.NoUI {
 		return
 	}
 	opts := gameui.CharacterSelectWindowOptions{
@@ -303,33 +303,39 @@ func (m *LoginMode) drawCharacterPreview(screen characterPreviewTarget, ctx clie
 	screen.DrawImage(billboard.image, &opts)
 }
 
-func (m *LoginMode) characterPreviewImage(ctx client.Context, character session.Character) image.Image {
-	if character.ID == 0 {
-		return nil
+func loginCharacterPreviewKey(character session.Character) uint32 {
+	if character.ID != 0 {
+		return character.ID
 	}
+	// Some servers populate slot/name/job before the character ID is available.
+	// Preview rendering does not require the network ID, so give those entries a
+	// stable cache key instead of suppressing their paper doll entirely.
+	return 0xF0000000 | uint32(uint8(character.Slot))
+}
+
+func (m *LoginMode) characterPreviewImage(ctx client.Context, character session.Character) image.Image {
+	key := loginCharacterPreviewKey(character)
 	if m.charPreviewImages == nil {
 		m.charPreviewImages = make(map[uint32]image.Image)
 	}
-	if img := m.charPreviewImages[character.ID]; img != nil {
+	if img := m.charPreviewImages[key]; img != nil {
 		return img
 	}
 	img := render.NewImage(139, 144)
 	m.drawCharacterPreview(img, ctx, character, 139/2, 144-15-charSelectPreviewFeetLift)
-	m.charPreviewImages[character.ID] = img.RGBA()
-	return m.charPreviewImages[character.ID]
+	m.charPreviewImages[key] = img.RGBA()
+	return m.charPreviewImages[key]
 }
 
 func (m *LoginMode) characterPreviewView(ctx client.Context, character session.Character) *humanoidSpriteView {
-	if character.ID == 0 {
-		return nil
-	}
-	if _, failed := m.charViewFailed[character.ID]; failed {
+	key := loginCharacterPreviewKey(character)
+	if _, failed := m.charViewFailed[key]; failed {
 		return nil
 	}
 	if m.charViews == nil {
 		m.charViews = make(map[uint32]*humanoidSpriteView)
 	}
-	if view := m.charViews[character.ID]; view != nil {
+	if view := m.charViews[key]; view != nil {
 		return view
 	}
 	character = characterWithVisualJob(character)
@@ -338,11 +344,11 @@ func (m *LoginMode) characterPreviewView(ctx client.Context, character session.C
 		if m.charViewFailed == nil {
 			m.charViewFailed = make(map[uint32]struct{})
 		}
-		m.charViewFailed[character.ID] = struct{}{}
-		glog.Debugf("char select sprite resources char_id=%d name=%s job=%d %s", character.ID, character.Name, character.Job, status)
+		m.charViewFailed[key] = struct{}{}
+		glog.Debugf("char select sprite resources char_id=%d slot=%d name=%s job=%d %s", character.ID, character.Slot, character.Name, character.Job, status)
 		return nil
 	}
-	m.charViews[character.ID] = view
+	m.charViews[key] = view
 	return view
 }
 

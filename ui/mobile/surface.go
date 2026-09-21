@@ -61,13 +61,16 @@ func (k Kit) placeSurfaceRows(
 ) {
 	pad := k.Theme.Metrics.TableCellPadX
 	for i, row := range layout.Rows {
-		if i >= len(model.Items) || row.W <= 0 || row.H <= 0 {
+		if i >= len(layout.RowIDs) || row.W <= 0 || row.H <= 0 {
 			break
 		}
 		if !row.Intersects(layout.ListViewport) {
 			continue
 		}
-		item := model.Items[i]
+		item, ok := surfaceModelItemByID(model, layout.RowIDs[i])
+		if !ok {
+			continue
+		}
 
 		// A section header is a caption, not a control: no card, no value. Its
 		// blurb, when the model supplies one, sits under the heading.
@@ -113,6 +116,19 @@ func (k Kit) placeSurfaceRows(
 			c.Place(k.RightAligned(item.Value, RoleValue), value)
 		}
 	}
+}
+
+
+// surfaceModelItemByID resolves the semantic row identity emitted by
+// mobileui.LayoutSurface. Visible-row indices are not model indices after the
+// surface scrolls.
+func surfaceModelItemByID(model mobileui.SurfaceModel, id string) (mobileui.SurfaceItem, bool) {
+	for _, item := range model.Items {
+		if item.ID == id {
+			return item, true
+		}
+	}
+	return mobileui.SurfaceItem{}, false
 }
 
 // surfaceRowRects splits a row into its label and value columns. A row with no

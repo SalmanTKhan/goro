@@ -112,7 +112,85 @@ type androidRuntimeMetrics struct {
 	TextureUploadCount         int      `json:"texture_upload_count"`
 	TextureUploadedBytes       int64    `json:"texture_uploaded_bytes"`
 	EstimatedTextureGPUBytes   int64    `json:"estimated_texture_gpu_bytes"`
+	TextureCreates             int      `json:"texture_creates"`
+	TextureUpdates             int      `json:"texture_updates"`
+	ResidentTextures           int      `json:"resident_textures"`
+	DesktopUIRasterCount       int      `json:"desktop_ui_raster_count"`
+	DesktopUIRasterDeferred    int      `json:"desktop_ui_raster_deferred"`
+	DesktopUIRasterMS          float64  `json:"desktop_ui_raster_ms"`
+	DesktopUIRasterMarkMS      float64  `json:"desktop_ui_raster_mark_ms"`
+	DesktopUIRasterDrawMS      float64  `json:"desktop_ui_raster_draw_ms"`
+	DesktopUIRasterFlushMS     float64  `json:"desktop_ui_raster_flush_ms"`
+	DesktopUIRasterImageMS     float64  `json:"desktop_ui_raster_image_ms"`
+	DesktopUIFullRasters       int      `json:"desktop_ui_full_rasters"`
+	DesktopUIDirtyRegions      int64    `json:"desktop_ui_dirty_regions"`
+	PhaseUpdateMS              float64  `json:"phase_update_ms"`
+	PhaseUIFrameMS             float64  `json:"phase_ui_frame_ms"`
+	PhaseWorldDrawMS           float64  `json:"phase_world_draw_ms"`
+	PhasePresentationMS        float64  `json:"phase_presentation_ms"`
+	PhaseAcquireMS             float64  `json:"phase_acquire_ms"`
+	PhaseGPUDrawMS             float64  `json:"phase_gpu_draw_ms"`
+	PhasePresentMS             float64  `json:"phase_present_ms"`
+	PhaseMaxMS                 float64  `json:"phase_max_ms"`
+	FrameBufferAllocations     int      `json:"frame_buffer_allocations"`
 	LastFrameAt                string   `json:"last_frame_at"`
+}
+
+
+type androidFramePhases struct {
+	update       time.Duration
+	uiFrame      time.Duration
+	worldDraw    time.Duration
+	presentation time.Duration
+	acquire      time.Duration
+	gpuDraw      time.Duration
+	present      time.Duration
+}
+
+type androidPhaseWindow struct {
+	frames int
+	total  androidFramePhases
+	max    time.Duration
+}
+
+func (w *androidPhaseWindow) Add(p androidFramePhases) {
+	if w == nil {
+		return
+	}
+	w.frames++
+	w.total.update += p.update
+	w.total.uiFrame += p.uiFrame
+	w.total.worldDraw += p.worldDraw
+	w.total.presentation += p.presentation
+	w.total.acquire += p.acquire
+	w.total.gpuDraw += p.gpuDraw
+	w.total.present += p.present
+	frame := p.update + p.uiFrame + p.worldDraw + p.presentation + p.acquire + p.gpuDraw + p.present
+	if frame > w.max {
+		w.max = frame
+	}
+}
+
+func (w *androidPhaseWindow) Average() androidFramePhases {
+	if w == nil || w.frames <= 0 {
+		return androidFramePhases{}
+	}
+	n := time.Duration(w.frames)
+	return androidFramePhases{
+		update:       w.total.update / n,
+		uiFrame:      w.total.uiFrame / n,
+		worldDraw:    w.total.worldDraw / n,
+		presentation: w.total.presentation / n,
+		acquire:      w.total.acquire / n,
+		gpuDraw:      w.total.gpuDraw / n,
+		present:      w.total.present / n,
+	}
+}
+
+func (w *androidPhaseWindow) Reset() {
+	if w != nil {
+		*w = androidPhaseWindow{}
+	}
 }
 
 type mobileAssetManifest struct {
@@ -228,6 +306,27 @@ func writeAndroidRuntimeMetrics(path string, metrics androidRuntimeMetrics) {
 	if err := os.WriteFile(path, append(data, '\n'), 0o600); err != nil {
 		androidLog(fmt.Sprintf("stage=mobile-metrics write-error=%v", err))
 	}
+}
+
+func drawAndroidFPSMeter(frame *render.Frame, text string, x, y float32, centered bool) {
+	if frame == nil || text == "" {
+		return
+	}
+	const scale = 0.82
+	w, h := render.BitmapTextSize(text)
+	if w <= 0 || h <= 0 {
+		return
+	}
+	textW := float32(w) * scale
+	textH := float32(h) * scale
+	padX, padY := float32(7), float32(4)
+	if centered {
+		x -= (textW + 2*padX) / 2
+	}
+	boxW := textW + 2*padX
+	boxH := textH + 2*padY
+	render.DrawRect(frame, float64(x), float64(y), float64(boxW), float64(boxH), mobileColors().mapBackground)
+	drawMobileText(frame, text, x+padX, y+padY, mobileColors().title, scale)
 }
 
 func writeAndroidActiveRelease(release string, overlays []res.AssetOverlay) error {
@@ -370,6 +469,11 @@ func (h *host) renderLoop() {
 	var adapter *wgpu.Adapter
 	var device *wgpu.Device
 	var surface *wgpu.Surface
+	var surfaceFormat gputypes.TextureFormat
+	var surfaceConfigured bool
+	var surfaceWindow uintptr
+	var surfaceNeedsGPURebuild bool
+	var nextSurfaceConfigureAttempt time.Time
 	var state = input.NewState()
 	var goroRenderer *render.GPURenderer
 	var offlineGame *app.Game
@@ -381,10 +485,20 @@ func (h *host) renderLoop() {
 	var safeLeft, safeTop, safeRight, safeBottom int
 	var surfaceStartedAt, mapReadyAt, firstMapFrameAt time.Time
 	var renderedFrames int
+	var frameBuffer *render.Frame
+	var frameBufferAllocations int
 	var cpuFrameTotal time.Duration
+	var phaseWindow androidPhaseWindow
 	var peakRSS int64
 	var runtimeMetricsPath string
 	var surfaceVSync = true
+	var fpsStarted time.Time
+	var fpsFrames int
+	var fpsText string
+	// Pause the frame/update loop for every session type while Android is
+	// backgrounded. The session object and connection remain intact, while no
+	// frame can acquire/present against a Surface Android may have invalidated.
+	var appPaused bool
 	var pendingOverlays []assetOverlayRequest
 	var pendingRelease *struct {
 		name  string
@@ -412,16 +526,311 @@ func (h *host) renderLoop() {
 		return nil
 	}
 	startMap := resourceStartMap(currentResourceRoot())
+
+	// Mobile/desktop presentation is a render-host concern. The Game and its
+	// network/session remain alive while this host swaps only the UI bridge and
+	// touch adapter.
+	var bindGameSettings func(*app.Game)
+	var handleMobileModeChange func(bool) bool
+	var activatePresentation func(input.MobilePresentationMode)
+
+	bindGameSettings = func(game *app.Game) {
+		if game == nil {
+			return
+		}
+		game.SetMobileSettingsChanged(func(settings input.MobileSettings) {
+			settings = settings.Normalized()
+			mobileSettings = settings
+			if mobileInput != nil {
+				mobileInput.SetControls(settings.Controls)
+			}
+			// Keep the host's template config in lockstep so an explicit
+			// online/offline authority switch inherits all current settings.
+			mobileConfig.UI = settings.UI
+			mobileConfig.Mobile = settings.Controls
+			mobileConfig.MobileDisplay = settings.Display
+			mobileConfig.Render.VSync = settings.Display.VSync
+			mobileConfig.Render.FPS = settings.Display.FPS
+			mobileConfig.Render.NoUI = settings.Display.Presentation != input.MobilePresentationDesktop
+			mobileConfig.Audio.BGM = settings.Audio.BGMEnabled
+			mobileConfig.Audio.BGMVolume = settings.Audio.BGMVolume
+			mobileConfig.Audio.SFXVolume = settings.Audio.SFXVolume
+			mobileConfig.Gameplay.NoShift = settings.Gameplay.NoShift
+			mobileConfig.Gameplay.NoCtrl = settings.Gameplay.NoCtrl
+			mobileConfig.Gameplay.LessEffects = settings.Gameplay.LessEffects
+			mobileConfig.Gameplay.SnapTargets = settings.Gameplay.SnapTargets
+			mobileConfig.Gameplay.SnapItems = settings.Gameplay.SnapItems
+
+			path, saveErr := config.SaveMobileSettings(settings)
+			if saveErr != nil {
+				androidLog(fmt.Sprintf("stage=mobile-settings save-error=%v", saveErr))
+				return
+			}
+			androidLog(fmt.Sprintf(
+				"stage=mobile-settings applied path=%s presentation=%s vsync=%t fps=%t movement=%s camera=%.2f zoom=%.2f minimap=%t",
+				path, settings.Display.Presentation, settings.Display.VSync, settings.Display.FPS,
+				settings.Controls.MovementMode.String(), settings.Controls.CameraSensitivity,
+				settings.Controls.ZoomSensitivity, settings.Display.ShowMinimap,
+			))
+		})
+	}
+
+	handleMobileModeChange = func(online bool) bool {
+		if offlineGame == nil || online == offlineGame.Online() {
+			return true
+		}
+		if offlineGame.Offline() != nil {
+			savePath := filepath.Join(currentResourceRoot(), "offline-save.json")
+			if saveErr := offlineGame.SaveOfflineState(savePath); saveErr != nil {
+				androidLog(fmt.Sprintf("stage=mobile-mode save-error=%v", saveErr))
+			}
+		} else if offlineGame.Online() {
+			offlineGame.Disconnect()
+		}
+
+		cfg := mobileConfig
+		if online {
+			cfg.MobileSession.Mode = config.SessionModeOnline
+			cfg.Login.AutoLogin = false
+		} else {
+			cfg.MobileSession.Mode = config.SessionModeOffline
+		}
+		cfg.Render.NoUI = mobileSettings.Display.Presentation != input.MobilePresentationDesktop
+		cfg.Render.VSync = mobileSettings.Display.VSync
+		cfg.Render.FPS = mobileSettings.Display.FPS
+
+		var next *app.Game
+		var modeErr error
+		if online {
+			next, modeErr = app.New(cfg)
+		} else {
+			next, modeErr = app.NewOfflineAtMap(cfg, startMap)
+		}
+		if modeErr != nil {
+			androidLog(fmt.Sprintf("stage=mobile-mode target=%s error=%v", cfg.MobileSession.Mode, modeErr))
+			return false
+		}
+		if next.Offline() != nil {
+			savePath := filepath.Join(currentResourceRoot(), "offline-save.json")
+			if loadErr := next.LoadOfflineState(savePath); loadErr != nil && !os.IsNotExist(loadErr) {
+				androidLog(fmt.Sprintf("stage=mobile-mode load-error=%v", loadErr))
+			}
+		}
+		mobileConfig = cfg
+		offlineGame = next
+		bindGameSettings(next)
+		if mobile != nil {
+			mobile.SetGame(next)
+		}
+		androidLog(fmt.Sprintf("stage=mobile-mode active=%s server=%s:%d", cfg.MobileSession.Mode, cfg.MobileSession.Server.Host, cfg.MobileSession.Server.ZonePort))
+		return true
+	}
+
+	activatePresentation = func(mode input.MobilePresentationMode) {
+		if offlineGame == nil {
+			return
+		}
+		if mode == input.MobilePresentationDesktop {
+			if desktop != nil {
+				return
+			}
+			if mobile != nil {
+				mobile.CancelTouch()
+				mobile = nil
+			}
+			desktop = newDesktopPresentation(offlineGame, width, height)
+			desktop.SetSafeInsets(safeLeft, safeTop, safeRight, safeBottom)
+			mobileInput = input.NewMobileInputAdapterWithControls(
+				mobileSettings.Controls,
+				gameWorldPicker{game: offlineGame},
+				desktop,
+				mobileCommandSink{game: offlineGame},
+			)
+			atomic.StoreUint32(&androidTextInputActive, 0)
+			androidLog("stage=ui-presentation active=desktop")
+			return
+		}
+
+		if mobile != nil {
+			return
+		}
+		if desktop != nil {
+			desktop = nil
+			// Detach the desktop window tree from the game manager. Mobile owns
+			// its own retained surfaces and character-window bridge.
+			offlineGame.SetUIApp(nil)
+		}
+		mobile = newMobilePresentation(offlineGame, width, height)
+		mobile.SetSafeInsets(safeLeft, safeTop, safeRight, safeBottom)
+		mobile.SetSettings(mobileSettings)
+		mobile.SetModeChanged(handleMobileModeChange)
+		mobileInput = input.NewMobileInputAdapterWithControls(
+			mobileSettings.Controls,
+			mobileWorldPicker{presentation: mobile},
+			mobile,
+			mobileCommandSink{game: offlineGame, presentation: mobile},
+		)
+		atomic.StoreUint32(&androidTextInputActive, 0)
+		androidLog("stage=ui-presentation active=mobile")
+	}
+
 	ticker := time.NewTicker(16 * time.Millisecond)
 	defer ticker.Stop()
+
+	rebuildGPUStack := func(window uintptr) error {
+		if window == 0 {
+			return fmt.Errorf("gpu rebuild: native window is nil")
+		}
+		androidLog(fmt.Sprintf("stage=gpu-rebuild begin size=%dx%d", width, height))
+		surfaceConfigured = false
+
+		newInstance, err := wgpu.CreateInstance(&wgpu.InstanceDescriptor{Backends: gputypes.BackendsVulkan})
+		if err != nil {
+			return fmt.Errorf("gpu rebuild instance: %w", err)
+		}
+		var newSurface *wgpu.Surface
+		var newAdapter *wgpu.Adapter
+		var newDevice *wgpu.Device
+		var newRenderer *render.GPURenderer
+		cleanupNew := func() {
+			if newRenderer != nil {
+				newRenderer.Release()
+				newRenderer = nil
+			}
+			if newSurface != nil {
+				newSurface.Release()
+				newSurface = nil
+			}
+			if newDevice != nil {
+				newDevice.Release()
+				newDevice = nil
+			}
+			if newAdapter != nil {
+				newAdapter.Release()
+				newAdapter = nil
+			}
+			if newInstance != nil {
+				newInstance.Release()
+				newInstance = nil
+			}
+		}
+
+		newSurface, err = newInstance.CreateSurfaceUnsafe(wgpu.SurfaceTargetFromAndroidNativeWindow(window))
+		if err != nil {
+			cleanupNew()
+			return fmt.Errorf("gpu rebuild surface: %w", err)
+		}
+		newAdapter, err = newInstance.RequestAdapter(&wgpu.RequestAdapterOptions{
+			CompatibleSurface: newSurface,
+			PowerPreference:   wgpu.PowerPreferenceHighPerformance,
+		})
+		if err != nil {
+			cleanupNew()
+			return fmt.Errorf("gpu rebuild adapter: %w", err)
+		}
+		if newAdapter == nil {
+			cleanupNew()
+			return fmt.Errorf("gpu rebuild adapter: nil adapter")
+		}
+		info := newAdapter.Info()
+		androidLog(fmt.Sprintf("stage=gpu-rebuild adapter name=%q backend=%s", info.Name, info.Backend))
+
+		newDevice, err = newAdapter.RequestDevice(nil)
+		if err != nil {
+			cleanupNew()
+			return fmt.Errorf("gpu rebuild device: %w", err)
+		}
+		newFormat, err := configureSurface(newSurface, newAdapter, newDevice, width, height, surfaceVSync)
+		if err != nil {
+			cleanupNew()
+			return fmt.Errorf("gpu rebuild surface configure: %w", err)
+		}
+		context, err := render.NewRawGPUContext(newDevice, newDevice.Queue(), newFormat)
+		if err != nil {
+			cleanupNew()
+			return fmt.Errorf("gpu rebuild context: %w", err)
+		}
+		newRenderer, err = render.NewGPURenderer(context, config.RenderConfig{Stats: false})
+		if err != nil {
+			cleanupNew()
+			return fmt.Errorf("gpu rebuild renderer: %w", err)
+		}
+
+		// The replacement stack is fully usable before we tear down the old
+		// device. Game/session state and CPU-side render assets remain alive;
+		// the fresh renderer lazily uploads those assets on subsequent frames.
+		if goroRenderer != nil {
+			goroRenderer.Release()
+		}
+		if device != nil {
+			device.Release()
+		}
+		if adapter != nil {
+			adapter.Release()
+		}
+		if instance != nil {
+			instance.Release()
+		}
+		instance = newInstance
+		surface = newSurface
+		adapter = newAdapter
+		device = newDevice
+		goroRenderer = newRenderer
+		surfaceFormat = newFormat
+		surfaceConfigured = true
+		surfaceNeedsGPURebuild = false
+		nextSurfaceConfigureAttempt = time.Time{}
+
+		// Ownership has transferred into the host fields above.
+		newInstance = nil
+		newSurface = nil
+		newAdapter = nil
+		newDevice = nil
+		newRenderer = nil
+
+		frameBuffer = nil
+		if offlineGame != nil {
+			offlineGame.Resize(width, height)
+		}
+		if mobile != nil {
+			mobile.Resize(width, height)
+		}
+		if desktop != nil {
+			desktop.Resize(width, height)
+		}
+		androidLog(fmt.Sprintf("stage=gpu-rebuild ready format=%s size=%dx%d", surfaceFormat, width, height))
+		return nil
+	}
 
 	initDevice := func(window uintptr) error {
 		surfaceStartedAt = time.Now()
 		mapReadyAt = time.Time{}
 		firstMapFrameAt = time.Time{}
 		renderedFrames = 0
+		frameBuffer = nil
+		frameBufferAllocations = 0
 		cpuFrameTotal = 0
+		phaseWindow.Reset()
 		peakRSS = 0
+		fpsStarted = time.Time{}
+		fpsFrames = 0
+		fpsText = ""
+
+		// A replacement Android ANativeWindow is a new presentation target. With
+		// gogpu/wgpu the adapter selected for the previous surface may report no
+		// same-backend capabilities for that replacement forever. Recreate only
+		// the GPU presentation stack while preserving the live game/session.
+		if instance != nil && adapter != nil && device != nil && goroRenderer != nil && offlineGame != nil {
+			androidLog(fmt.Sprintf("stage=surface-rebind rebuild-gpu size=%dx%d", width, height))
+			if rebuildErr := rebuildGPUStack(window); rebuildErr != nil {
+				surfaceNeedsGPURebuild = true
+				nextSurfaceConfigureAttempt = time.Now().Add(100 * time.Millisecond)
+				androidLog(fmt.Sprintf("stage=gpu-rebuild deferred error=%v", rebuildErr))
+				return nil
+			}
+			return nil
+		}
+
 		androidLog("stage=instance begin backend=vulkan")
 		log.Printf("stage=instance backend=vulkan")
 		var err error
@@ -456,11 +865,14 @@ func (h *host) renderLoop() {
 		}
 		log.Printf("stage=device acquired")
 		androidLog("stage=device acquired")
-		if err := configureSurface(surface, adapter, device, width, height, surfaceVSync); err != nil {
+		surfaceFormat, err = configureSurface(surface, adapter, device, width, height, surfaceVSync)
+		if err != nil {
 			return err
 		}
+		surfaceConfigured = true
+		nextSurfaceConfigureAttempt = time.Time{}
 		androidLog("stage=goro-renderer begin")
-		context, err := render.NewRawGPUContext(device, device.Queue(), configuredFormat(surface, adapter))
+		context, err := render.NewRawGPUContext(device, device.Queue(), surfaceFormat)
 		if err != nil {
 			androidLog(fmt.Sprintf("stage=goro-renderer device-bound error=%v", err))
 			return err
@@ -506,7 +918,12 @@ func (h *host) renderLoop() {
 						BGMVolume:  cfg.Audio.BGMVolume,
 						SFXVolume:  cfg.Audio.SFXVolume,
 					},
-					Display: input.MobileDisplaySettings{ShowMinimap: cfg.MobileDisplay.ShowMinimap, Presentation: cfg.MobileDisplay.Presentation},
+					Display: input.MobileDisplaySettings{
+						ShowMinimap: cfg.MobileDisplay.ShowMinimap,
+						VSync: cfg.Render.VSync,
+						FPS: cfg.Render.FPS,
+						Presentation: cfg.MobileDisplay.Presentation,
+					},
 					Gameplay: input.MobileGameplaySettings{
 						NoShift: cfg.Gameplay.NoShift, NoCtrl: cfg.Gameplay.NoCtrl,
 						LessEffects: cfg.Gameplay.LessEffects, SnapTargets: cfg.Gameplay.SnapTargets,
@@ -519,9 +936,22 @@ func (h *host) renderLoop() {
 			cfg.Render.GraphicsAPI = "vulkan"
 			cfg.Render.NoUI = mobileSettings.Display.Presentation != input.MobilePresentationDesktop
 			surfaceVSync = cfg.Render.VSync
-			if err := configureSurface(surface, adapter, device, width, height, surfaceVSync); err != nil {
-				return err
+			if surfaceVSync {
+				ticker.Reset(16 * time.Millisecond)
+			} else {
+				// Immediate presentation should not remain accidentally capped by
+				// the host's 60 Hz wake-up cadence.
+				ticker.Reset(time.Millisecond)
 			}
+			configuredFormat, configureErr := configureSurface(surface, adapter, device, width, height, surfaceVSync)
+			if configureErr != nil {
+				return configureErr
+			}
+			if configuredFormat != surfaceFormat {
+				return fmt.Errorf("surface format changed after renderer creation: %s -> %s", surfaceFormat, configuredFormat)
+			}
+			surfaceConfigured = true
+			nextSurfaceConfigureAttempt = time.Time{}
 			cfg.Render.Stats = false
 			cfg.Mobile = mobileSettings.Controls
 			cfg.MobileDisplay = mobileSettings.Display
@@ -570,78 +1000,11 @@ func (h *host) renderLoop() {
 			offlineGame.Resize(width, height)
 		}
 		if mobile == nil && desktop == nil {
-			if mobileSettings.Display.Presentation == input.MobilePresentationDesktop {
-				desktop = newDesktopPresentation(offlineGame, width, height)
-				desktop.SetSafeInsets(safeLeft, safeTop, safeRight, safeBottom)
-				mobileInput = input.NewMobileInputAdapterWithControls(mobileSettings.Controls, gameWorldPicker{game: offlineGame}, desktop, mobileCommandSink{game: offlineGame})
-				offlineGame.SetMobileSettingsChanged(func(settings input.MobileSettings) {
-					mobileSettings = settings
-					_, _ = config.SaveMobileSettings(settings)
-				})
-			} else {
-				mobile = newMobilePresentation(offlineGame, width, height)
-				mobile.SetSafeInsets(safeLeft, safeTop, safeRight, safeBottom)
-				mobile.SetSettings(mobileSettings)
-				mobileInput = input.NewMobileInputAdapterWithControls(mobileSettings.Controls, mobileWorldPicker{presentation: mobile}, mobile, mobileCommandSink{game: offlineGame, presentation: mobile})
-				mobile.SetModeChanged(func(online bool) bool {
-					if offlineGame == nil || (online == offlineGame.Online()) {
-						return true
-					}
-					if offlineGame.Offline() != nil {
-						savePath := filepath.Join(currentResourceRoot(), "offline-save.json")
-						if saveErr := offlineGame.SaveOfflineState(savePath); saveErr != nil {
-							androidLog(fmt.Sprintf("stage=mobile-mode save-error=%v", saveErr))
-						}
-					} else if offlineGame.Online() {
-						offlineGame.Disconnect()
-					}
-					cfg := mobileConfig
-					if online {
-						cfg.MobileSession.Mode = config.SessionModeOnline
-						// The Online button is an explicit mobile login request. Mobile
-						// has no desktop credential form, so use the configured
-						// credentials immediately after the mode handoff.
-						cfg.Login.AutoLogin = true
-					} else {
-						cfg.MobileSession.Mode = config.SessionModeOffline
-					}
-					var next *app.Game
-					var modeErr error
-					if online {
-						next, modeErr = app.New(cfg)
-					} else {
-						next, modeErr = app.NewOfflineAtMap(cfg, startMap)
-					}
-					if modeErr != nil {
-						androidLog(fmt.Sprintf("stage=mobile-mode target=%s error=%v", cfg.MobileSession.Mode, modeErr))
-						return false
-					}
-					if next.Offline() != nil {
-						savePath := filepath.Join(currentResourceRoot(), "offline-save.json")
-						if loadErr := next.LoadOfflineState(savePath); loadErr != nil && !os.IsNotExist(loadErr) {
-							androidLog(fmt.Sprintf("stage=mobile-mode load-error=%v", loadErr))
-						}
-					}
-					mobileConfig = cfg
-					offlineGame = next
-					mobile.SetGame(next)
-					androidLog(fmt.Sprintf("stage=mobile-mode active=%s server=%s:%d", cfg.MobileSession.Mode, cfg.MobileSession.Server.Host, cfg.MobileSession.Server.ZonePort))
-					return true
-				})
-				mobile.SetSettingsChanged(func(settings input.MobileSettings) bool {
-					mobileSettings = settings
-					if mobileInput != nil {
-						mobileInput.SetControls(settings.Controls)
-					}
-					path, saveErr := config.SaveMobileSettings(settings)
-					if saveErr != nil {
-						androidLog(fmt.Sprintf("stage=mobile-settings save-error=%v", saveErr))
-						return true
-					}
-					androidLog(fmt.Sprintf("stage=mobile-settings applied path=%s movement=%s camera=%.2f zoom=%.2f invert_y=%t long_press_ms=%d names=%t bgm=%t bgm_volume=%.2f sfx_volume=%.2f minimap=%t", path, settings.Controls.MovementMode.String(), settings.Controls.CameraSensitivity, settings.Controls.ZoomSensitivity, settings.Controls.InvertCameraY, settings.Controls.LongPressMS, settings.Controls.ShowTargetNames, settings.Audio.BGMEnabled, settings.Audio.BGMVolume, settings.Audio.SFXVolume, settings.Display.ShowMinimap))
-					return true
-				})
-			}
+			bindGameSettings(offlineGame)
+			// Resolve live runtime fields in case the loaded configuration came
+			// through a desktop-compatible settings path.
+			mobileSettings = offlineGame.MobileSettings()
+			activatePresentation(mobileSettings.Display.Presentation)
 		} else {
 			if mobile != nil {
 				mobile.Resize(width, height)
@@ -668,6 +1031,8 @@ func (h *host) renderLoop() {
 	}
 
 	releaseSurface := func() {
+		surfaceConfigured = false
+		nextSurfaceConfigureAttempt = time.Time{}
 		if surface != nil {
 			surface.Release()
 			surface = nil
@@ -682,21 +1047,44 @@ func (h *host) renderLoop() {
 			switch cmd.kind {
 			case commandSurfaceCreated:
 				width, height = cmd.width, cmd.height
-				logResourceProbe(currentResourceRoot(), startMap)
+				surfaceWindow = cmd.window
+				surfaceNeedsGPURebuild = false
+				// Resource probing is startup diagnostics, not part of binding a
+				// replacement Android surface. Avoid reparsing the map on resume.
+				if offlineGame == nil {
+					logResourceProbe(currentResourceRoot(), startMap)
+				}
 				releaseSurface()
 				err = initDevice(cmd.window)
 			case commandSurfaceChanged:
 				width, height = cmd.width, cmd.height
 				if surface != nil && device != nil && adapter != nil {
-					err = configureSurface(surface, adapter, device, width, height, surfaceVSync)
-					if offlineGame != nil {
-						offlineGame.Resize(width, height)
-					}
-					if mobile != nil {
-						mobile.Resize(width, height)
-					}
-					if desktop != nil {
-						desktop.Resize(width, height)
+					configuredFormat, configureErr := configureSurface(surface, adapter, device, width, height, surfaceVSync)
+					switch {
+					case configureErr == errSurfaceCapabilitiesUnavailable:
+						nextSurfaceConfigureAttempt = time.Now().Add(50 * time.Millisecond)
+						androidLog("stage=surface-configure deferred source=changed reason=capabilities-empty")
+					case configureErr != nil:
+						err = configureErr
+						releaseSurface()
+					case goroRenderer != nil && configuredFormat != surfaceFormat:
+						err = fmt.Errorf("surface format changed during resize: %s -> %s", surfaceFormat, configuredFormat)
+						releaseSurface()
+					default:
+						surfaceFormat = configuredFormat
+						surfaceConfigured = true
+						nextSurfaceConfigureAttempt = time.Time{}
+						frameBuffer = nil
+						if offlineGame != nil {
+							offlineGame.Resize(width, height)
+						}
+						if mobile != nil {
+							mobile.Resize(width, height)
+						}
+						if desktop != nil {
+							desktop.Resize(width, height)
+						}
+						androidLog(fmt.Sprintf("stage=surface-configure ready source=changed size=%dx%d", width, height))
 					}
 				}
 			case commandSurfaceInsetsChanged:
@@ -713,6 +1101,8 @@ func (h *host) renderLoop() {
 					offlineGame.PauseAudio()
 				}
 				releaseSurface()
+				surfaceWindow = 0
+				surfaceNeedsGPURebuild = false
 			case commandTouch:
 				uiConsumed := desktop != nil && desktop.Touch(cmd.action, cmd.x, cmd.y, cmd.pressed)
 				if !uiConsumed && mobile != nil {
@@ -753,19 +1143,39 @@ func (h *host) renderLoop() {
 					mobile.Back()
 				}
 			case commandPause:
+				appPaused = true
+				// Immediate-mode rendering uses a fast host ticker while active;
+				// backgrounded Android sessions should return to a low wake rate.
+				ticker.Reset(16 * time.Millisecond)
+				state = input.NewState()
+				if mobile != nil {
+					mobile.CancelTouch()
+				}
 				if offlineGame != nil && offlineGame.Offline() != nil {
 					offlineGame.Offline().Pause()
+					offlineGame.PauseAudio()
 					if err := offlineGame.SaveOfflineState(filepath.Join(currentResourceRoot(), "offline-save.json")); err != nil {
 						androidLog(fmt.Sprintf("stage=offline-save pause-error=%v", err))
 					} else {
 						androidLog("stage=offline-save reason=pause")
 					}
 				}
+				androidLog("stage=lifecycle paused")
 			case commandResume:
+				if surfaceVSync {
+					ticker.Reset(16 * time.Millisecond)
+				} else {
+					ticker.Reset(time.Millisecond)
+				}
 				if offlineGame != nil && offlineGame.Offline() != nil {
 					offlineGame.Offline().Resume()
 					offlineGame.ResumeAudio()
 				}
+				appPaused = false
+				if mobile != nil && mobile.widgets != nil {
+					mobile.widgets.InvalidateSize()
+				}
+				androidLog("stage=lifecycle resumed")
 			case commandMountAssetOverlay:
 				if pendingRelease != nil {
 					if len(pendingReleaseOverlays) >= pendingRelease.count {
@@ -796,6 +1206,12 @@ func (h *host) renderLoop() {
 					}
 				}
 				releaseSurface()
+				surfaceWindow = 0
+				surfaceNeedsGPURebuild = false
+				if goroRenderer != nil {
+					goroRenderer.Release()
+					goroRenderer = nil
+				}
 				if device != nil {
 					device.Release()
 					device = nil
@@ -813,7 +1229,84 @@ func (h *host) renderLoop() {
 			}
 			cmd.done <- err
 		case <-ticker.C:
-			if surface != nil && device != nil && width > 0 && height > 0 && (offlineGame == nil || offlineGame.Offline() == nil || !offlineGame.Offline().Paused) {
+			if offlineGame != nil {
+				// Resolve settings from the Game every tick because desktop
+				// settings mutate runtime FPS/VSync directly while mobile
+				// settings use the shared MobileSettings host.
+				mobileSettings = offlineGame.MobileSettings()
+				mobileConfig.UI = mobileSettings.UI
+				mobileConfig.Mobile = mobileSettings.Controls
+				mobileConfig.MobileDisplay = mobileSettings.Display
+				mobileConfig.Render.VSync = mobileSettings.Display.VSync
+				mobileConfig.Render.FPS = mobileSettings.Display.FPS
+				mobileConfig.Render.NoUI = mobileSettings.Display.Presentation != input.MobilePresentationDesktop
+
+				wantDesktop := mobileSettings.Display.Presentation == input.MobilePresentationDesktop
+				if (wantDesktop && desktop == nil) || (!wantDesktop && mobile == nil) {
+					activatePresentation(mobileSettings.Display.Presentation)
+				}
+
+				requestedVSync := offlineGame.RuntimeVSync()
+				if requestedVSync != surfaceVSync {
+					surfaceVSync = requestedVSync
+					if surfaceVSync {
+						ticker.Reset(16 * time.Millisecond)
+					} else {
+						ticker.Reset(time.Millisecond)
+					}
+					// Surface configuration owns Android's real present mode, so
+					// mark it stale and let the normal configure/retry path apply
+					// FIFO or Immediate without touching the live Game/session.
+					if surface != nil && device != nil && adapter != nil && width > 0 && height > 0 {
+						surfaceConfigured = false
+						nextSurfaceConfigureAttempt = time.Time{}
+					}
+					androidLog(fmt.Sprintf("stage=vsync changed enabled=%t", surfaceVSync))
+				}
+			}
+			if !appPaused && surfaceNeedsGPURebuild && surfaceWindow != 0 && width > 0 && height > 0 {
+				now := time.Now()
+				if nextSurfaceConfigureAttempt.IsZero() || !now.Before(nextSurfaceConfigureAttempt) {
+					if rebuildErr := rebuildGPUStack(surfaceWindow); rebuildErr != nil {
+						nextSurfaceConfigureAttempt = now.Add(250 * time.Millisecond)
+						androidLog(fmt.Sprintf("stage=gpu-rebuild retry-error=%v", rebuildErr))
+					} else {
+						androidLog("stage=gpu-rebuild recovered")
+					}
+				}
+			}
+			if !appPaused && !surfaceNeedsGPURebuild && surface != nil && !surfaceConfigured && device != nil && adapter != nil && width > 0 && height > 0 {
+				now := time.Now()
+				if nextSurfaceConfigureAttempt.IsZero() || !now.Before(nextSurfaceConfigureAttempt) {
+					configuredFormat, configureErr := configureSurface(surface, adapter, device, width, height, surfaceVSync)
+					switch {
+					case configureErr == errSurfaceCapabilitiesUnavailable:
+						nextSurfaceConfigureAttempt = now.Add(100 * time.Millisecond)
+					case configureErr != nil:
+						androidLog(fmt.Sprintf("stage=surface-configure retry-error=%v", configureErr))
+						releaseSurface()
+					case goroRenderer != nil && configuredFormat != surfaceFormat:
+						androidLog(fmt.Sprintf("stage=surface-configure retry-format-change old=%s new=%s", surfaceFormat, configuredFormat))
+						releaseSurface()
+					default:
+						surfaceFormat = configuredFormat
+						surfaceConfigured = true
+						nextSurfaceConfigureAttempt = time.Time{}
+						frameBuffer = nil
+						if offlineGame != nil {
+							offlineGame.Resize(width, height)
+						}
+						if mobile != nil {
+							mobile.Resize(width, height)
+						}
+						if desktop != nil {
+							desktop.Resize(width, height)
+						}
+						androidLog(fmt.Sprintf("stage=surface-rebind ready source=retry size=%dx%d", width, height))
+					}
+				}
+			}
+			if !appPaused && surfaceConfigured && surface != nil && device != nil && width > 0 && height > 0 && (offlineGame == nil || offlineGame.Offline() == nil || !offlineGame.Offline().Paused) {
 				if mobileInput != nil && len(state.TouchPoints) > 0 {
 					// MotionEvent does not generate a new callback while a finger
 					// is stationary. Feed the recognizer from the render tick so
@@ -831,13 +1324,18 @@ func (h *host) renderLoop() {
 					if desktop != nil {
 						desktop.SyncInput(offlineGame.InputState())
 					}
+					var phases androidFramePhases
+					phaseStarted := time.Now()
 					if mobile == nil || mobile.WorldActive() {
 						if err := offlineGame.Update(); err != nil {
 							androidLog(fmt.Sprintf("stage=offline-update error=%v", err))
 						}
 					}
+					phases.update = time.Since(phaseStarted)
 					if desktop != nil {
+						phaseStarted = time.Now()
 						desktop.Frame()
+						phases.uiFrame = time.Since(phaseStarted)
 						if desktop.TextInputActive() {
 							atomic.StoreUint32(&androidTextInputActive, 1)
 						} else {
@@ -848,27 +1346,76 @@ func (h *host) renderLoop() {
 						androidLog(fmt.Sprintf("stage=online-tick login=%s network=%s playing=%t", offlineGame.LoginStatus(), offlineGame.NetworkStatus(), offlineGame.SessionPlaying()))
 					}
 					offlineGame.Resize(width, height)
-					frame := render.NewFrame(width, height)
-					offlineGame.Draw(frame)
+					if frameBuffer == nil || frameBuffer.Bounds().Dx() != width || frameBuffer.Bounds().Dy() != height {
+						frameBuffer = render.NewFrame(width, height)
+						frameBufferAllocations++
+					} else {
+						frameBuffer.BeginFrame()
+					}
+					phaseStarted = time.Now()
+					offlineGame.Draw(frameBuffer)
+					phases.worldDraw = time.Since(phaseStarted)
+					phaseStarted = time.Now()
 					if mobile != nil && len(state.TouchPoints) == 1 && mobile.WorldTouchAvailable(state.TouchPoints[0]) {
 						touch := state.TouchPoints[0]
 						if target, ok := offlineGame.PickMobileTarget(input.WorldPosition{X: float64(touch.X), Y: float64(touch.Y)}); ok && target.Kind == input.TargetGround {
-							offlineGame.DrawMobileTileCursor(target.Position, frame)
+							offlineGame.DrawMobileTileCursor(target.Position, frameBuffer)
 						}
 					}
 					if mobile != nil {
-						offlineGame.DrawOverlay(frame)
-						offlineGame.DrawUIOverlay(frame)
+						offlineGame.DrawOverlay(frameBuffer)
+						offlineGame.DrawUIOverlay(frameBuffer)
 						mobile.Refresh()
-						mobile.Draw(frame)
+						mobile.Draw(frameBuffer)
 					}
 					if desktop != nil {
-						desktop.Draw(frame)
-						offlineGame.DrawUIOverlay(frame)
-						offlineGame.DrawOverlay(frame)
+						desktop.Draw(frameBuffer)
+						offlineGame.DrawUIOverlay(frameBuffer)
+						offlineGame.DrawOverlay(frameBuffer)
 					}
+
+					if offlineGame.RuntimeFPS() {
+						now := time.Now()
+						if fpsStarted.IsZero() {
+							fpsStarted = now
+							fpsFrames = 0
+							fpsText = "FPS --"
+						}
+						fpsFrames++
+						if elapsed := now.Sub(fpsStarted); elapsed >= time.Second {
+							seconds := elapsed.Seconds()
+							fps := float64(fpsFrames) / seconds
+							frameMS := seconds * 1000 / float64(fpsFrames)
+							fpsText = fmt.Sprintf("FPS %.1f  %.2f ms", fps, frameMS)
+							fpsStarted = now
+							fpsFrames = 0
+						}
+						fpsX, fpsY := float32(safeLeft+8), float32(safeTop+8)
+						centered := false
+						if mobile != nil {
+							// The mobile HUD owns the upper-left player panel and
+							// upper-right minimap. Center the meter instead, moving
+							// it below an active target panel when necessary.
+							fpsX = float32(width) / 2
+							centered = true
+							if mobile.hudModel.Target.Visible && mobile.hud.TargetPanel.H > 0 {
+								uiScale := mobile.settings.UI.Normalized().Scale
+								fpsY = mobile.hud.TargetPanel.Bottom()*uiScale + 6
+							}
+						}
+						drawAndroidFPSMeter(frameBuffer, fpsText, fpsX, fpsY, centered)
+					} else {
+						fpsStarted = time.Time{}
+						fpsFrames = 0
+						fpsText = ""
+					}
+					phases.presentation = time.Since(phaseStarted)
 					offlineGame.FrameSubmitted()
-					renderFrame(surface, device, goroRenderer, frame, width, height, configuredFormat(surface, adapter))
+					renderPhases := renderFrame(surface, device, goroRenderer, frameBuffer, width, height, surfaceFormat)
+					phases.acquire = renderPhases.acquire
+					phases.gpuDraw = renderPhases.gpuDraw
+					phases.present = renderPhases.present
+					phaseWindow.Add(phases)
 					frameDuration := time.Since(frameStarted)
 					renderedFrames++
 					cpuFrameTotal += frameDuration
@@ -892,9 +1439,15 @@ func (h *host) renderLoop() {
 						if !firstMapFrameAt.IsZero() {
 							firstFrameMS = firstMapFrameAt.Sub(surfaceStartedAt).Seconds() * 1000
 						}
-						metrics := androidRuntimeMetrics{Format: "goro-mobile-runtime-metrics", Version: 1, Map: startMap, MapLoadMS: mapReadyAt.Sub(surfaceStartedAt).Seconds() * 1000, TimeToFirstMapFrameMS: firstFrameMS, SteadyFPS: fps, AverageCPUFrameMS: cpuFrameTotal.Seconds() * 1000 / float64(renderedFrames), PeakProcessRSSBytes: peakRSS, SteadyProcessRSSBytes: rss, TerrainBuildMS: worldMetrics.TerrainBuildDuration.Seconds() * 1000, TerrainChunkBuilds: worldMetrics.TerrainChunkBuilds, TerrainTextureFallbacks: worldMetrics.TerrainTextureFallbacks, RSMTextureFallbacks: worldMetrics.RSMTextureFallbacks, RSMEmptyTextureFallbacks: worldMetrics.RSMEmptyTextureFallbacks, RSMTextureFallbackExamples: worldMetrics.RSMTextureFallbackExamples, TextureDecodeMS: worldMetrics.TextureDecodeDuration.Seconds() * 1000, TextureDecodeCount: worldMetrics.TextureDecodeCount, TextureEncodedBytes: worldMetrics.TextureEncodedBytes, TextureDecodedRGBABytes: worldMetrics.TextureDecodedRGBABytes, TextureUploadMS: uploadMetrics.Duration.Seconds() * 1000, TextureUploadCount: uploadMetrics.Count, TextureUploadedBytes: uploadMetrics.UploadedBytes, EstimatedTextureGPUBytes: uploadMetrics.EstimatedGPUBytes, LastFrameAt: time.Now().UTC().Format(time.RFC3339Nano)}
+						desktopMetrics := desktopUIRasterMetrics{}
+						if desktop != nil {
+							desktopMetrics = desktop.RasterMetrics()
+						}
+						phaseAvg := phaseWindow.Average()
+						metrics := androidRuntimeMetrics{Format: "goro-mobile-runtime-metrics", Version: 3, Map: startMap, MapLoadMS: mapReadyAt.Sub(surfaceStartedAt).Seconds() * 1000, TimeToFirstMapFrameMS: firstFrameMS, SteadyFPS: fps, AverageCPUFrameMS: cpuFrameTotal.Seconds() * 1000 / float64(renderedFrames), PeakProcessRSSBytes: peakRSS, SteadyProcessRSSBytes: rss, TerrainBuildMS: worldMetrics.TerrainBuildDuration.Seconds() * 1000, TerrainChunkBuilds: worldMetrics.TerrainChunkBuilds, TerrainTextureFallbacks: worldMetrics.TerrainTextureFallbacks, RSMTextureFallbacks: worldMetrics.RSMTextureFallbacks, RSMEmptyTextureFallbacks: worldMetrics.RSMEmptyTextureFallbacks, RSMTextureFallbackExamples: worldMetrics.RSMTextureFallbackExamples, TextureDecodeMS: worldMetrics.TextureDecodeDuration.Seconds() * 1000, TextureDecodeCount: worldMetrics.TextureDecodeCount, TextureEncodedBytes: worldMetrics.TextureEncodedBytes, TextureDecodedRGBABytes: worldMetrics.TextureDecodedRGBABytes, TextureUploadMS: uploadMetrics.Duration.Seconds() * 1000, TextureUploadCount: uploadMetrics.Count, TextureUploadedBytes: uploadMetrics.UploadedBytes, EstimatedTextureGPUBytes: uploadMetrics.EstimatedGPUBytes, TextureCreates: uploadMetrics.Creates, TextureUpdates: uploadMetrics.Updates, ResidentTextures: uploadMetrics.ResidentTextures, DesktopUIRasterCount: desktopMetrics.Count, DesktopUIRasterDeferred: desktopMetrics.Deferred, DesktopUIRasterMS: desktopMetrics.Duration.Seconds() * 1000, DesktopUIRasterMarkMS: desktopMetrics.MarkDuration.Seconds() * 1000, DesktopUIRasterDrawMS: desktopMetrics.DrawDuration.Seconds() * 1000, DesktopUIRasterFlushMS: desktopMetrics.FlushDuration.Seconds() * 1000, DesktopUIRasterImageMS: desktopMetrics.ImageDuration.Seconds() * 1000, DesktopUIFullRasters: desktopMetrics.FullCount, DesktopUIDirtyRegions: desktopMetrics.DirtyRegions, PhaseUpdateMS: phaseAvg.update.Seconds() * 1000, PhaseUIFrameMS: phaseAvg.uiFrame.Seconds() * 1000, PhaseWorldDrawMS: phaseAvg.worldDraw.Seconds() * 1000, PhasePresentationMS: phaseAvg.presentation.Seconds() * 1000, PhaseAcquireMS: phaseAvg.acquire.Seconds() * 1000, PhaseGPUDrawMS: phaseAvg.gpuDraw.Seconds() * 1000, PhasePresentMS: phaseAvg.present.Seconds() * 1000, PhaseMaxMS: phaseWindow.max.Seconds() * 1000, FrameBufferAllocations: frameBufferAllocations, LastFrameAt: time.Now().UTC().Format(time.RFC3339Nano)}
 						writeAndroidRuntimeMetrics(runtimeMetricsPath, metrics)
-						androidLog(fmt.Sprintf("stage=mobile-metrics frames=%d fps=%.2f cpu-frame-ms=%.2f rss=%d terrain-ms=%.2f terrain-fallbacks=%d rsm-fallbacks=%d rsm-empty-fallbacks=%d rsm-examples=%q texture-decode-ms=%.2f texture-upload-ms=%.2f texture-gpu-bytes=%d", renderedFrames, fps, metrics.AverageCPUFrameMS, rss, metrics.TerrainBuildMS, metrics.TerrainTextureFallbacks, metrics.RSMTextureFallbacks, metrics.RSMEmptyTextureFallbacks, metrics.RSMTextureFallbackExamples, metrics.TextureDecodeMS, metrics.TextureUploadMS, metrics.EstimatedTextureGPUBytes))
+						androidLog(fmt.Sprintf("stage=mobile-metrics frames=%d fps=%.2f cpu-frame-ms=%.2f rss=%d frame-buffer-allocations=%d terrain-ms=%.2f terrain-fallbacks=%d rsm-fallbacks=%d rsm-empty-fallbacks=%d rsm-examples=%q texture-decode-ms=%.2f texture-upload-ms=%.2f texture-gpu-bytes=%d texture-creates=%d texture-updates=%d resident-textures=%d desktop-ui-rasters=%d desktop-ui-deferred=%d desktop-ui-raster-ms=%.2f desktop-ui-raster-mark-ms=%.2f desktop-ui-raster-draw-ms=%.2f desktop-ui-raster-flush-ms=%.2f desktop-ui-raster-image-ms=%.2f desktop-ui-full-rasters=%d desktop-ui-dirty-regions=%d phase-update-ms=%.2f phase-ui-frame-ms=%.2f phase-world-draw-ms=%.2f phase-presentation-ms=%.2f phase-acquire-ms=%.2f phase-gpu-draw-ms=%.2f phase-present-ms=%.2f phase-max-ms=%.2f", renderedFrames, fps, metrics.AverageCPUFrameMS, rss, metrics.FrameBufferAllocations, metrics.TerrainBuildMS, metrics.TerrainTextureFallbacks, metrics.RSMTextureFallbacks, metrics.RSMEmptyTextureFallbacks, metrics.RSMTextureFallbackExamples, metrics.TextureDecodeMS, metrics.TextureUploadMS, metrics.EstimatedTextureGPUBytes, metrics.TextureCreates, metrics.TextureUpdates, metrics.ResidentTextures, metrics.DesktopUIRasterCount, metrics.DesktopUIRasterDeferred, metrics.DesktopUIRasterMS, metrics.DesktopUIRasterMarkMS, metrics.DesktopUIRasterDrawMS, metrics.DesktopUIRasterFlushMS, metrics.DesktopUIRasterImageMS, metrics.DesktopUIFullRasters, metrics.DesktopUIDirtyRegions, metrics.PhaseUpdateMS, metrics.PhaseUIFrameMS, metrics.PhaseWorldDrawMS, metrics.PhasePresentationMS, metrics.PhaseAcquireMS, metrics.PhaseGPUDrawMS, metrics.PhasePresentMS, metrics.PhaseMaxMS))
+						phaseWindow.Reset()
 					}
 				}
 			}
@@ -902,28 +1455,22 @@ func (h *host) renderLoop() {
 	}
 }
 
-func configuredFormat(surface *wgpu.Surface, adapter *wgpu.Adapter) gputypes.TextureFormat {
-	if caps := adapter.GetSurfaceCapabilities(surface); caps != nil && len(caps.Formats) > 0 {
-		return caps.Formats[0]
-	}
-	return gputypes.TextureFormatRGBA8Unorm
-}
+var errSurfaceCapabilitiesUnavailable = fmt.Errorf("surface capabilities unavailable")
 
-func configureSurface(surface *wgpu.Surface, adapter *wgpu.Adapter, device *wgpu.Device, width, height int, vsync bool) error {
+func configureSurface(surface *wgpu.Surface, adapter *wgpu.Adapter, device *wgpu.Device, width, height int, vsync bool) (gputypes.TextureFormat, error) {
 	caps := adapter.GetSurfaceCapabilities(surface)
-	format := gputypes.TextureFormatBGRA8Unorm
 	alphaMode := gputypes.CompositeAlphaModeAuto
-	if caps != nil {
-		if len(caps.Formats) > 0 {
-			format = caps.Formats[0]
-		}
-		if len(caps.AlphaModes) > 0 {
-			alphaMode = caps.AlphaModes[0]
-			for _, candidate := range caps.AlphaModes {
-				if candidate == gputypes.CompositeAlphaModeOpaque {
-					alphaMode = candidate
-					break
-				}
+	if caps == nil || len(caps.Formats) == 0 {
+		androidLog(fmt.Sprintf("stage=surface-capabilities formats=%v alpha-modes=%v selected-alpha=%s", capsFormats(caps), capsAlphaModes(caps), alphaMode))
+		return 0, errSurfaceCapabilitiesUnavailable
+	}
+	format := caps.Formats[0]
+	if len(caps.AlphaModes) > 0 {
+		alphaMode = caps.AlphaModes[0]
+		for _, candidate := range caps.AlphaModes {
+			if candidate == gputypes.CompositeAlphaModeOpaque {
+				alphaMode = candidate
+				break
 			}
 		}
 	}
@@ -936,11 +1483,11 @@ func configureSurface(surface *wgpu.Surface, adapter *wgpu.Adapter, device *wgpu
 	}
 	if err := surface.Configure(device, &wgpu.SurfaceConfiguration{Format: format, Usage: gputypes.TextureUsageRenderAttachment, Width: uint32(width), Height: uint32(height), PresentMode: presentMode, AlphaMode: alphaMode}); err != nil {
 		androidLog(fmt.Sprintf("stage=surface configure error=%v", err))
-		return fmt.Errorf("configure: %w", err)
+		return 0, fmt.Errorf("configure: %w", err)
 	}
 	log.Printf("stage=surface configured format=%s size=%dx%d present=%s alpha=%s", format, width, height, presentName, alphaMode)
 	androidLog(fmt.Sprintf("stage=surface configured format=%s size=%dx%d present=%s alpha=%s", format, width, height, presentName, alphaMode))
-	return nil
+	return format, nil
 }
 
 func capsFormats(caps *wgpu.SurfaceCapabilities) []gputypes.TextureFormat {
@@ -968,41 +1515,51 @@ func surfaceCapabilities(surface *wgpu.Surface, adapter *wgpu.Adapter) []gputype
 	return caps.Formats
 }
 
-func renderFrame(surface *wgpu.Surface, device *wgpu.Device, renderer *render.GPURenderer, frame *render.Frame, width, height int, format gputypes.TextureFormat) {
+func renderFrame(surface *wgpu.Surface, device *wgpu.Device, renderer *render.GPURenderer, frame *render.Frame, width, height int, format gputypes.TextureFormat) androidFramePhases {
+	var phases androidFramePhases
+	started := time.Now()
 	texture, _, err := surface.GetCurrentTexture()
+	phases.acquire = time.Since(started)
 	if err != nil {
 		log.Printf("stage=acquire error=%v", err)
-		return
+		return phases
 	}
+	started = time.Now()
 	view, err := texture.CreateView(nil)
+	phases.acquire += time.Since(started)
 	if err != nil {
 		surface.DiscardTexture()
 		log.Printf("stage=view error=%v", err)
-		return
+		return phases
 	}
 	if renderer == nil || frame == nil {
 		surface.DiscardTexture()
 		view.Release()
-		return
+		return phases
 	}
+	started = time.Now()
 	_, err = renderer.DrawTarget(render.FrameTarget{View: view, Texture: texture.AsTexture(), Width: width, Height: height, Format: format}, frame)
+	phases.gpuDraw = time.Since(started)
 	if err != nil {
 		view.Release()
 		surface.DiscardTexture()
 		androidLog(fmt.Sprintf("stage=render-pass error=%v", err))
-		return
+		return phases
 	}
+	started = time.Now()
 	err = surface.Present(texture)
+	phases.present = time.Since(started)
 	view.Release()
 	if err != nil {
 		log.Printf("stage=present error=%v", err)
 		androidLog(fmt.Sprintf("stage=present error=%v", err))
-		return
+		return phases
 	}
 	frames := atomic.AddUint64(&presentedFrames, 1)
 	if frames == 1 || frames%60 == 0 {
 		androidLog(fmt.Sprintf("stage=present map-frame=%d", frames))
 	}
+	return phases
 }
 
 func renderClear(surface *wgpu.Surface, device *wgpu.Device) {

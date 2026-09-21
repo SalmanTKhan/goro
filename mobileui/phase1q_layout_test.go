@@ -2,7 +2,7 @@ package mobileui
 
 import "testing"
 
-func TestPhase1QInventoryTilesAreSquareAndPortraitUsesFourColumns(t *testing.T) {
+func TestPhase1QInventoryTilesAreSquareAndPortraitUsesAdaptiveColumns(t *testing.T) {
 	model := FixtureInventory("inventory-basic")
 	for _, viewport := range []Viewport{
 		{Width: 390, Height: 844},
@@ -10,8 +10,8 @@ func TestPhase1QInventoryTilesAreSquareAndPortraitUsesFourColumns(t *testing.T) 
 		{Width: 2400, Height: 1080},
 	} {
 		layout := LayoutInventory(viewport, DefaultInventoryTokens(), model, InventoryInteractionState{Screen: ScreenInventory})
-		if viewport.Width == 1080 && layout.GridColumns != 4 {
-			t.Fatalf("1080 portrait must use four columns: %+v", layout)
+		if viewport.IsPortrait() && layout.GridColumns != 3 {
+			t.Fatalf("basic portrait inventory should use three columns: %+v", layout)
 		}
 		for i, cell := range layout.Cells {
 			ratio := cell.Rect.H / cell.Rect.W

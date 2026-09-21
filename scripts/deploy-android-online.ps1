@@ -3,7 +3,7 @@ param(
     [Parameter(Mandatory = $true)][string]$ClientRoot,
     [int]$ServerIndex = 0,
     [string]$DeviceSerial = '',
-    [ValidateSet('mobileui','desktop')][string]$UiMode = 'desktop',
+    [ValidateSet('mobileui','desktop')][string]$UiMode = 'mobileui',
     [switch]$NoBuild,
     [switch]$NoLaunch
 )

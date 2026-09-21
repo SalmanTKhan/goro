@@ -1,21 +1,44 @@
 package mobileui
 
-// OnlineLoginPhase is the small, renderer-neutral state machine exposed by
-// the mobile online front door. The network/login mode remains authoritative;
-// this model only gives the mobile host a touch-safe projection of it.
+// OnlineLoginPhase is the renderer-neutral state machine exposed by the
+// mobile online front door. Network/login authority remains in game.LoginMode.
 type OnlineLoginPhase uint8
 
 const (
-	OnlineLoginAccount OnlineLoginPhase = iota
+	OnlineLoginServer OnlineLoginPhase = iota
+	OnlineLoginCredentials
+	OnlineLoginCharacterService
+	OnlineLoginConnecting
 	OnlineLoginCharacters
 	OnlineLoginCreate
 )
+
+type OnlineServerOption struct {
+	Index     int
+	Name      string
+	Detail    string
+	UserCount int
+	Selected  bool
+}
 
 type OnlineCharacterSlot struct {
 	Slot     int
 	Name     string
 	JobName  string
 	Level    int
+	JobLevel int
+	Exp      int64
+	Zeny     int64
+	HP       int
+	MaxHP    int
+	SP       int
+	MaxSP    int
+	Str      int
+	Agi      int
+	Vit      int
+	Int      int
+	Dex      int
+	Luk      int
 	Occupied bool
 }
 
@@ -24,8 +47,15 @@ type MobileOnlineLoginModel struct {
 	Status        string
 	Network       string
 	Server        string
+	Servers       []OnlineServerOption
 	Characters    []OnlineCharacterSlot
 	SelectedSlot  int
+	SelectedServer int
+	Username      string
+	PasswordSet   bool
+	CreateName    string
+	CreateSlot    int
+	CanSubmit     bool
 	CanReconnect  bool
 	CanDisconnect bool
 	CanCreate     bool
@@ -35,8 +65,12 @@ type MobileOnlineLoginModel struct {
 
 type OnlineLoginLayout struct {
 	Safe, Panel, Title, Status, Network, Notice Rect
-	Slots                                       []Rect
-	Reconnect, Disconnect, Create, Mode         Rect
+	Options                                      []Rect
+	Username, Password, Submit, Cancel           Rect
+	Slots                                        []Rect
+	CharacterInfo                                Rect
+	PagePrev, PageNext, PageLabel                Rect
+	Reconnect, Disconnect, Create, Mode          Rect
 }
 
 func LayoutOnlineLogin(viewport Viewport, model MobileOnlineLoginModel) OnlineLoginLayout {
@@ -45,40 +79,130 @@ func LayoutOnlineLogin(viewport Viewport, model MobileOnlineLoginModel) OnlineLo
 	if safe.W <= 0 || safe.H <= 0 {
 		return layout
 	}
+
+	portrait := viewport.IsPortrait()
 	panelW := minf(1120, maxf(0, safe.W-32))
+	if !portrait {
+		panelW = minf(920, maxf(0, safe.W*0.72))
+		if model.Phase == OnlineLoginCharacters {
+			// Character cards plus the desktop-style stat summary benefit from
+			// the wide landscape canvas; login forms remain deliberately narrow.
+			panelW = minf(1120, maxf(0, safe.W-48))
+		}
+	}
 	panelH := maxf(0, safe.H-32)
 	layout.Panel = Rect{X: safe.X + (safe.W-panelW)/2, Y: safe.Y + (safe.H-panelH)/2, W: panelW, H: panelH}
 	pad := float32(24)
-	layout.Title = Rect{X: layout.Panel.X + pad, Y: layout.Panel.Y + 28, W: layout.Panel.W - 2*pad, H: 56}
-	layout.Status = Rect{X: layout.Panel.X + pad, Y: layout.Title.Bottom() + 12, W: layout.Panel.W - 2*pad, H: 52}
-	layout.Network = Rect{X: layout.Panel.X + pad, Y: layout.Status.Bottom(), W: layout.Panel.W - 2*pad, H: 34}
-	layout.Notice = Rect{X: layout.Panel.X + pad, Y: layout.Network.Bottom() + 6, W: layout.Panel.W - 2*pad, H: 48}
+	layout.Title = Rect{X: layout.Panel.X + pad, Y: layout.Panel.Y + 20, W: layout.Panel.W - 2*pad, H: 48}
+	layout.Status = Rect{X: layout.Panel.X + pad, Y: layout.Title.Bottom() + 6, W: layout.Panel.W - 2*pad, H: 42}
+	layout.Network = Rect{X: layout.Panel.X + pad, Y: layout.Status.Bottom(), W: layout.Panel.W - 2*pad, H: 28}
+	layout.Notice = Rect{X: layout.Panel.X + pad, Y: layout.Network.Bottom() + 4, W: layout.Panel.W - 2*pad, H: 42}
 
-	if model.Phase == OnlineLoginCharacters {
-		count := len(model.Characters)
-		if count == 0 {
-			count = 9
+	switch model.Phase {
+	case OnlineLoginServer, OnlineLoginCharacterService:
+		top := layout.Notice.Bottom() + 12
+		bottom := layout.Panel.Bottom() - 86
+		rowGap := float32(8)
+		rowH := float32(60)
+		if portrait {
+			rowH = 72
 		}
-		gridTop := layout.Notice.Bottom() + 18
-		gridBottom := layout.Panel.Bottom() - 112
-		gap := float32(12)
-		cellW := (layout.Panel.W - 2*pad - 2*gap) / 3
-		cellH := (gridBottom - gridTop - 2*gap) / 3
-		cellH = minf(170, maxf(88, cellH))
-		for i := 0; i < count && i < 9; i++ {
-			layout.Slots = append(layout.Slots, Rect{
-				X: layout.Panel.X + pad + float32(i%3)*(cellW+gap),
-				Y: gridTop + float32(i/3)*(cellH+gap), W: cellW, H: cellH,
+		count := len(model.Servers)
+		maxRows := int((bottom - top + rowGap) / (rowH + rowGap))
+		if maxRows < 0 {
+			maxRows = 0
+		}
+		if count > maxRows {
+			count = maxRows
+		}
+		for i := 0; i < count; i++ {
+			layout.Options = append(layout.Options, Rect{
+				X: layout.Panel.X + pad,
+				Y: top + float32(i)*(rowH+rowGap),
+				W: layout.Panel.W - 2*pad,
+				H: rowH,
 			})
 		}
-		layout.Create = Rect{X: layout.Panel.X + pad, Y: layout.Panel.Bottom() - 84, W: (layout.Panel.W - 2*pad - 2*gap) / 3, H: 56}
-	} else {
-		buttonY := layout.Panel.Bottom() - 84
+		layout.Mode = Rect{X: layout.Panel.X + pad, Y: layout.Panel.Bottom() - 62, W: layout.Panel.W - 2*pad, H: 44}
+
+	case OnlineLoginCredentials:
+		formW := minf(620, layout.Panel.W-2*pad)
+		formX := layout.Panel.X + (layout.Panel.W-formW)/2
+		top := layout.Notice.Bottom() + 22
+		fieldH := float32(60)
+		gap := float32(12)
+		layout.Username = Rect{X: formX, Y: top, W: formW, H: fieldH}
+		layout.Password = Rect{X: formX, Y: layout.Username.Bottom() + gap, W: formW, H: fieldH}
+		layout.Submit = Rect{X: formX, Y: layout.Password.Bottom() + 18, W: formW, H: 60}
+		layout.Mode = Rect{X: formX, Y: layout.Submit.Bottom() + 10, W: formW, H: 44}
+
+	case OnlineLoginCharacters:
+		// Match the desktop selector's three-slots-per-page contract. Landscape
+		// uses the wide phone canvas for large paper dolls with the selected
+		// character's stats in a right-side rail; portrait stacks the summary
+		// below the same three-card row.
+		pageTop := layout.Notice.Bottom() + 10
+		footerH := float32(56)
+		footerY := layout.Panel.Bottom() - footerH - 16
+		gap := float32(10)
+		contentBottom := footerY - 28 - gap
+		innerX := layout.Panel.X + pad
+		innerW := layout.Panel.W - 2*pad
+
+		if !portrait {
+			infoW := minf(360, maxf(280, innerW*0.34))
+			slotAreaW := maxf(0, innerW-infoW-gap)
+			cellW := maxf(0, (slotAreaW-2*gap)/3)
+			slotH := maxf(96, contentBottom-pageTop)
+			for i := 0; i < 3; i++ {
+				layout.Slots = append(layout.Slots, Rect{
+					X: innerX + float32(i)*(cellW+gap),
+					Y: pageTop,
+					W: cellW,
+					H: slotH,
+				})
+			}
+			layout.CharacterInfo = Rect{X: innerX + slotAreaW + gap, Y: pageTop, W: infoW, H: slotH}
+		} else {
+			availableH := maxf(0, contentBottom-pageTop)
+			infoH := minf(190, maxf(130, availableH*0.30))
+			slotH := minf(320, maxf(140, availableH-infoH-gap))
+			usedH := slotH + gap + infoH
+			contentY := pageTop + maxf(0, (availableH-usedH)/2)
+			cellW := (innerW - 2*gap) / 3
+			for i := 0; i < 3; i++ {
+				layout.Slots = append(layout.Slots, Rect{
+					X: innerX + float32(i)*(cellW+gap),
+					Y: contentY,
+					W: cellW,
+					H: slotH,
+				})
+			}
+			layout.CharacterInfo = Rect{X: innerX, Y: contentY + slotH + gap, W: innerW, H: infoH}
+		}
+		layout.PageLabel = Rect{X: innerX, Y: footerY - 26, W: innerW, H: 22}
+
+		sideW := minf(154, maxf(96, layout.Panel.W*0.18))
+		actionW := minf(300, maxf(180, layout.Panel.W*0.34))
+		layout.PagePrev = Rect{X: innerX, Y: footerY, W: sideW, H: footerH}
+		layout.PageNext = Rect{X: layout.Panel.Right() - pad - sideW, Y: footerY, W: sideW, H: footerH}
+		layout.Create = Rect{X: layout.Panel.X + (layout.Panel.W-actionW)/2, Y: footerY, W: actionW, H: footerH}
+
+	case OnlineLoginCreate:
+		formW := minf(620, layout.Panel.W-2*pad)
+		formX := layout.Panel.X + (layout.Panel.W-formW)/2
+		top := layout.Notice.Bottom() + 28
+		layout.Username = Rect{X: formX, Y: top, W: formW, H: 60}
+		buttonGap := float32(12)
+		buttonW := (formW-buttonGap)/2
+		layout.Submit = Rect{X: formX, Y: layout.Username.Bottom() + 18, W: buttonW, H: 60}
+		layout.Cancel = Rect{X: layout.Submit.Right() + buttonGap, Y: layout.Submit.Y, W: buttonW, H: 60}
+	case OnlineLoginConnecting:
+		buttonY := layout.Panel.Bottom() - 74
 		buttonGap := float32(12)
 		buttonW := (layout.Panel.W - 2*pad - buttonGap) / 2
-		layout.Reconnect = Rect{X: layout.Panel.X + pad, Y: buttonY, W: buttonW, H: 56}
-		layout.Disconnect = Rect{X: layout.Reconnect.Right() + buttonGap, Y: buttonY, W: buttonW, H: 56}
-		layout.Mode = Rect{X: layout.Panel.X + pad, Y: layout.Panel.Bottom() - 60, W: layout.Panel.W - 2*pad, H: 48}
+		layout.Reconnect = Rect{X: layout.Panel.X + pad, Y: buttonY, W: buttonW, H: 52}
+		layout.Disconnect = Rect{X: layout.Reconnect.Right() + buttonGap, Y: buttonY, W: buttonW, H: 52}
 	}
 	return layout
 }

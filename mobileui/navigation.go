@@ -48,6 +48,7 @@ func (s Screen) String() string {
 type Navigation struct {
 	Screen    Screen
 	MenuOpen  bool
+	EmoteOpen bool
 	Targeting input.SkillTargetState
 	SkillPage int
 	Stack     []NavigationEntry
@@ -72,7 +73,7 @@ func (n *Navigation) Open(screen Screen) {
 	if n == nil {
 		return
 	}
-	n.Screen, n.MenuOpen = screen, false
+	n.Screen, n.MenuOpen, n.EmoteOpen = screen, false, false
 	n.Stack = []NavigationEntry{{Screen: screen, Layer: NavigationFullScreen}}
 }
 
@@ -86,7 +87,7 @@ func (n *Navigation) OpenLayer(screen Screen, layer NavigationLayer, id string) 
 	if len(n.Stack) == 0 || n.Stack[len(n.Stack)-1].Screen != screen || n.Stack[len(n.Stack)-1].Layer != layer || n.Stack[len(n.Stack)-1].ID != id {
 		n.Stack = append(n.Stack, NavigationEntry{Screen: screen, Layer: layer, ID: id})
 	}
-	n.Screen, n.MenuOpen = screen, false
+	n.Screen, n.MenuOpen, n.EmoteOpen = screen, false, false
 }
 
 func (n *Navigation) Top() NavigationEntry {
@@ -106,6 +107,10 @@ func (n *Navigation) Back() bool {
 	}
 	if n.Targeting.Mode != input.SkillTargetIdle {
 		n.Targeting.Cancel()
+		return true
+	}
+	if n.EmoteOpen {
+		n.EmoteOpen = false
 		return true
 	}
 	if n.MenuOpen {

@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"image"
+	"image/color"
 	"sort"
 	"strings"
 	"time"
@@ -54,6 +55,8 @@ type Game struct {
 	recordingActive        bool
 	pendingRecordingStop   bool
 	mobileTarget           mobileui.TargetHUDModel
+	mobileMinimapName      string
+	mobileMinimapTexture   *render.Image
 	mobileSettingsChanged  func(input.MobileSettings)
 	controllerActions      input.ActionState
 	controllerActionsValid bool
@@ -353,7 +356,16 @@ func (g *Game) ApplyPlayerCommand(command input.PlayerCommand) bool {
 		g.mobileTarget = target
 		return true
 	}
-	return g.modes.ApplyPlayerCommand(g.modeContext(), command)
+	accepted := g.modes.ApplyPlayerCommand(g.modeContext(), command)
+	if accepted && command.ActorID != 0 {
+		switch command.Kind {
+		case input.CommandSelectActor, input.CommandAttackActor, input.CommandInteractActor, input.CommandOpenActorContext:
+			if target, ok := g.modes.InspectMobileTarget(g.modeContext(), command.ActorID); ok {
+				g.mobileTarget = target
+			}
+		}
+	}
+	return accepted
 }
 
 func (g *Game) MobileControls() input.MobileControls {
@@ -370,15 +382,64 @@ func (g *Game) PickMobileTarget(position input.WorldPosition) (input.PickedTarge
 	return g.modes.PickMobileTarget(g.modeContext(), position)
 }
 
+// PickMobileGroundTarget resolves terrain independently of actors/items. It is
+// used only while a ground-target skill owns the touch stream.
+func (g *Game) PickMobileGroundTarget(position input.WorldPosition) (input.PickedTarget, bool) {
+	if g == nil || g.modes == nil {
+		return input.PickedTarget{}, false
+	}
+	return g.modes.PickMobileGroundTarget(g.modeContext(), position)
+}
+
 func (g *Game) MobileHUDModel() mobileui.MobileHUDModel {
 	if g == nil || g.session == nil {
 		return mobileui.MobileHUDModel{}
 	}
 	target := inputTargetHUD(g.offline)
 	if g.mobileTarget.Visible {
-		target = g.mobileTarget
+		if refreshed, ok := g.modes.InspectMobileTarget(g.modeContext(), g.mobileTarget.ID); ok &&
+			refreshed.Visible && !(refreshed.Relation == mobileui.TargetHostile && refreshed.MaxHP > 0 && refreshed.HP <= 0) {
+			g.mobileTarget = refreshed
+			target = refreshed
+		} else {
+			// Mobile selection is presentation state. Never let a dead/despawned
+			// actor pin the target frame after world authority removed it.
+			g.mobileTarget = mobileui.TargetHUDModel{}
+		}
 	}
 	model := mobileui.ProjectSession(g.session, target)
+	if g.world != nil {
+		model.Player.Sitting = g.world.Player.Sitting
+	}
+	enrichMobileStatuses(&model, g.session)
+	if g.network != nil {
+		model.Emotes = mobileQuickEmotes()
+	}
+
+	if g.resource != nil {
+		for i := range model.Skills {
+			if name, ok := g.resource.SkillDisplayName(int(model.Skills[i].SkillID)); ok {
+				model.Skills[i].Name = name
+			}
+		}
+		for i := range model.Shortcuts {
+			switch model.Shortcuts[i].Kind {
+			case mobileui.ShortcutSkill:
+				if name, ok := g.resource.SkillDisplayName(int(model.Shortcuts[i].Skill.SkillID)); ok {
+					model.Shortcuts[i].Skill.Name = name
+				}
+			case mobileui.ShortcutItem:
+				item := &model.Shortcuts[i].Item
+				if name, ok := g.resource.ItemDisplayName(int(item.ItemID), item.Identified); ok {
+					item.DisplayName = name
+					item.NameAvailable = true
+				}
+				if icon, ok := g.resource.ItemResourceName(int(item.ItemID), item.Identified); ok {
+					item.IconKey = icon
+				}
+			}
+		}
+	}
 	if g.world != nil && g.world.GND != nil {
 		model.Minimap.Raster = mobileMinimapRaster(g.world.GND)
 	}
@@ -404,11 +465,22 @@ func (g *Game) MobileHUDModel() mobileui.MobileHUDModel {
 				Kind: mobileui.MinimapMarkerWarp, Selected: warp.ID == g.offline.TargetID,
 			})
 		}
+	}
+
+	// World floor items are authoritative in both online and offline sessions.
+	// Project them uniformly so Android gets the same nearby-loot affordances
+	// instead of requiring precise sprite taps online.
+	if g.world != nil {
 		playerX, playerY := g.session.PlayerX, g.session.PlayerY
-		for _, drop := range g.offline.Drops() {
+		if g.world.Player.ID != 0 {
+			playerX, playerY = g.world.Player.X, g.world.Player.Y
+		}
+		for _, drop := range g.world.Items {
 			name := fmt.Sprintf("Item %d", drop.ItemID)
-			if definition, ok := g.offline.Item(drop.ItemID); ok && strings.TrimSpace(definition.Name) != "" {
-				name = definition.Name
+			if g.offline != nil {
+				if definition, ok := g.offline.Item(drop.ItemID); ok && strings.TrimSpace(definition.Name) != "" {
+					name = definition.Name
+				}
 			}
 			if g.resource != nil {
 				if resolved, ok := g.resource.ItemDisplayName(int(drop.ItemID), drop.Identified); ok && strings.TrimSpace(resolved) != "" {
@@ -417,7 +489,7 @@ func (g *Game) MobileHUDModel() mobileui.MobileHUDModel {
 			}
 			distance := mobileLootDistance(playerX, playerY, drop.X, drop.Y)
 			model.Loot = append(model.Loot, mobileui.LootItemModel{
-				DropID: drop.ID, ItemID: drop.ItemID, Identified: drop.Identified, Name: name, Quantity: drop.Amount,
+				DropID: drop.ID, ItemID: drop.ItemID, Identified: drop.Identified, Name: name, Quantity: int(drop.Amount),
 				X: drop.X, Y: drop.Y, Distance: distance, PickupReady: distance <= 1,
 			})
 			model.Minimap.Markers = append(model.Minimap.Markers, mobileui.MinimapMarkerModel{
@@ -432,6 +504,73 @@ func (g *Game) MobileHUDModel() mobileui.MobileHUDModel {
 		})
 	}
 	return model
+}
+
+func enrichMobileStatuses(model *mobileui.MobileHUDModel, s *session.Session) {
+	if model == nil || s == nil {
+		return
+	}
+
+	// The server normally publishes EFST_WEIGHTOVER50/90, but weight itself is
+	// already authoritative session state. Derive the threshold as a fallback
+	// so a missed status packet cannot make the mobile HUD hide a gameplay-
+	// significant restriction the inventory numbers already prove.
+	if s.Inventory.MaxWeight > 0 {
+		filtered := model.Statuses[:0]
+		for _, status := range model.Statuses {
+			if status.ID != db.StatusWeightover50 && status.ID != db.StatusWeightover90 {
+				filtered = append(filtered, status)
+			}
+		}
+		model.Statuses = filtered
+		switch {
+		case s.Inventory.Weight*100 >= s.Inventory.MaxWeight*90:
+			model.Statuses = append(model.Statuses, mobileui.StatusEffectModel{ID: db.StatusWeightover90})
+		case s.Inventory.Weight*100 >= s.Inventory.MaxWeight*50:
+			model.Statuses = append(model.Statuses, mobileui.StatusEffectModel{ID: db.StatusWeightover50})
+		}
+	}
+
+	visible := model.Statuses[:0]
+	for _, status := range model.Statuses {
+		// Match the desktop 2008-client status bar: EFST_SIT itself did not
+		// have a visible status icon in the target client.
+		if status.ID == db.StatusSit {
+			continue
+		}
+		info, ok := db.StatusIconInfoByID(status.ID)
+		if !ok || strings.TrimSpace(info.Icon) == "" {
+			continue
+		}
+		status.IconKey = info.Icon
+		status.Beneficial = info.Category != db.StatusIconDebuff
+		// The target client presents these as icons without a countdown. Keeping
+		// a continuously changing time.Until value in the mobile HUD would make
+		// the retained Android surface rerasterize every frame for no visual
+		// change.
+		status.Remaining = 0
+		for _, line := range info.Lines {
+			label := strings.TrimSpace(line.Text)
+			if label != "" && label != "%s" {
+				status.Name = label
+				break
+			}
+		}
+		visible = append(visible, status)
+	}
+	model.Statuses = visible
+	sort.SliceStable(model.Statuses, func(i, j int) bool { return model.Statuses[i].ID < model.Statuses[j].ID })
+}
+
+func mobileQuickEmotes() []mobileui.EmoteModel {
+	commands := []string{"!", "?", "ho", "lv", "thx", "sry", "gg", "sob", "ok", "no1", "hlp", "go"}
+	emotes := make([]mobileui.EmoteModel, 0, len(commands))
+	for _, command := range commands {
+		if id, ok := db.EmotionCommandID(command); ok {
+			emotes = append(emotes, mobileui.EmoteModel{ID: id, Label: command})
+		}
+	}
+	return emotes
 }
 
 func mobileLootDistance(playerX, playerY, itemX, itemY int) int {
@@ -490,11 +629,105 @@ func (g *Game) DrawMobileInventoryItemIcon(screen *render.Frame, item mobileui.I
 	g.modes.DrawMobileInventoryItemIcon(screen, item.ItemID, item.Identified, x, y, size)
 }
 
+// DrawMobileMinimap draws the same RO minimap artwork and world-coordinate
+// convention as the desktop minimap. It returns false when the retail map
+// texture is unavailable so Android can fall back to its terrain raster.
+func (g *Game) DrawMobileMinimap(frame *render.Frame, rect mobileui.Rect) bool {
+	if g == nil || frame == nil || g.resource == nil || g.world == nil || rect.W <= 0 || rect.H <= 0 {
+		return false
+	}
+	mapName := strings.TrimSpace(g.world.MapName)
+	if mapName == "" {
+		return false
+	}
+	if g.mobileMinimapName != mapName {
+		g.mobileMinimapName = mapName
+		g.mobileMinimapTexture = nil
+		if img, err := gameui.LoadMinimapImage(g.resource, mapName); err == nil && img != nil {
+			g.mobileMinimapTexture = render.NewImageFromImage(img)
+		}
+	}
+	if g.mobileMinimapTexture == nil {
+		return false
+	}
+	bounds := g.mobileMinimapTexture.Bounds()
+	if bounds.Dx() <= 0 || bounds.Dy() <= 0 {
+		return false
+	}
+
+	// Desktop RO minimap presentation always scales the retail bitmap into a
+	// square map canvas, then projects world cells into the centered
+	// world-aspect rectangle inside that square. Use exactly that contract on
+	// mobile so artwork and markers cannot disagree about orientation/aspect.
+	size := float64(rect.W)
+	if float64(rect.H) < size {
+		size = float64(rect.H)
+	}
+	dx := float64(rect.X) + (float64(rect.W)-size)/2
+	dy := float64(rect.Y) + (float64(rect.H)-size)/2
+	var opts render.DrawImageOptions
+	opts.Filter = render.FilterLinear
+	opts.GeoM.Scale(size/float64(bounds.Dx()), size/float64(bounds.Dy()))
+	opts.GeoM.Translate(dx, dy)
+	frame.DrawImage(g.mobileMinimapTexture, &opts)
+
+	mapW, mapH := 0, 0
+	if g.world.GAT != nil && g.world.GAT.Width > 0 && g.world.GAT.Height > 0 {
+		mapW, mapH = g.world.GAT.Width, g.world.GAT.Height
+	} else if g.world.GND != nil && g.world.GND.Width > 0 && g.world.GND.Height > 0 {
+		mapW, mapH = g.world.GND.Width, g.world.GND.Height
+	}
+	if mapW <= 0 || mapH <= 0 {
+		return true
+	}
+
+	maxSide := mapW
+	if mapH > maxSide {
+		maxSide = mapH
+	}
+	projectedW := size * float64(mapW) / float64(maxSide)
+	projectedH := size * float64(mapH) / float64(maxSide)
+	projectedX := dx + (size-projectedW)/2
+	projectedY := dy + (size-projectedH)/2
+	mx := projectedX + float64(g.world.Player.X)*projectedW/float64(mapW)
+	my := projectedY + projectedH - float64(g.world.Player.Y)*projectedH/float64(mapH)
+
+	marker := color.RGBA{R: 255, G: 232, B: 96, A: 255}
+	render.DrawRect(frame, mx-4, my-4, 9, 9, color.RGBA{A: 190})
+	render.DrawRect(frame, mx-3, my-3, 7, 7, marker)
+	render.DrawLine(frame, mx, my-9, mx, my+9, marker)
+	render.DrawLine(frame, mx-9, my, mx+9, my, marker)
+	return true
+}
+
 func (g *Game) DrawMobileSkillIcon(screen *render.Frame, skill mobileui.MobileSkillModel, x, y, size int) {
 	if g == nil || g.modes == nil {
 		return
 	}
 	g.modes.DrawMobileSkillIcon(screen, skill.SkillID, x, y, size)
+}
+
+func (g *Game) DrawMobileStatusIcon(screen *render.Frame, status mobileui.StatusEffectModel, x, y, size int) {
+	if g == nil || g.modes == nil {
+		return
+	}
+	g.modes.DrawMobileStatusIcon(screen, status.ID, x, y, size)
+}
+
+// DrawMobileNPCCutin reuses the desktop packet/resource state but bypasses the
+// desktop NoUI gate used by the native mobile presentation.
+func (g *Game) DrawMobileNPCCutin(screen *render.Frame, dialogTop ...int) {
+	if g == nil || g.modes == nil {
+		return
+	}
+	g.modes.DrawMobileNPCCutin(screen, dialogTop...)
+}
+
+func (g *Game) DrawMobileLoginCharacterPreview(screen *render.Frame, slot int, x, y, width, height int) {
+	if g == nil || g.modes == nil {
+		return
+	}
+	g.modes.DrawMobileLoginCharacterPreview(screen, slot, x, y, width, height)
 }
 
 // DrawMobileProfilePreview renders a draft appearance through the production
@@ -535,7 +768,23 @@ func (g *Game) MobileSkillsModel() mobileui.MobileSkillsModel {
 	if g == nil {
 		return mobileui.MobileSkillsModel{}
 	}
-	return mobileui.ProjectSkills(g.session)
+	model := mobileui.ProjectSkills(g.session)
+	if g.resource == nil {
+		return model
+	}
+	for i := range model.Skills {
+		skill := &model.Skills[i]
+		if name, ok := g.resource.SkillDisplayName(int(skill.SkillID)); ok {
+			skill.Name = name
+		}
+		if description, ok := g.resource.SkillDescription(int(skill.SkillID)); ok {
+			skill.Description = description
+		}
+		if maximum, ok := g.resource.SkillMaxLevel(int(skill.SkillID)); ok && maximum > 0 {
+			skill.MaxLevel = maximum
+		}
+	}
+	return model
 }
 
 func (g *Game) MobileShopModel(npcID uint32) mobileui.MobileShopModel {

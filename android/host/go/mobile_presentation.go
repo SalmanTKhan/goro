@@ -7,6 +7,7 @@ import (
 	"image"
 	"image/color"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"unicode"
@@ -46,7 +47,14 @@ func (s mobileCommandSink) Emit(command input.PlayerCommand) bool {
 		s.presentation.dialogController.Open(mobileui.ProjectDialog(command.ActorID, title, message, shopAvailable))
 	}
 	if accepted && command.Kind == input.CommandOpenShop && s.presentation != nil {
-		s.presentation.economyController.OpenShop(game.MobileShopModel(command.NPCID))
+		model := game.MobileShopModel(command.NPCID)
+		if s.presentation.economyController.Screen == mobileui.EconomyShop {
+			// Tab switches already update presentation state before emitting the
+			// server deal request. Do not reopen the controller and reset it to Buy.
+			s.presentation.economyController.SetShop(model)
+		} else {
+			s.presentation.economyController.OpenShop(model)
+		}
 		s.presentation.dialogController.Close()
 	}
 	if accepted && command.Kind == input.CommandOpenStorage && s.presentation != nil {
@@ -59,6 +67,20 @@ func (s mobileCommandSink) Emit(command input.PlayerCommand) bool {
 	}
 	if accepted && command.Kind == input.CommandDepositItem && s.presentation != nil {
 		s.presentation.economyController.SetStorage(game.MobileStorageModel())
+	}
+	if accepted && s.presentation != nil &&
+		(command.Kind == input.CommandShopCartAdd || command.Kind == input.CommandShopCartRemove || command.Kind == input.CommandShopCartConfirm) {
+		s.presentation.economyController.SetShop(game.MobileShopModel(command.NPCID))
+		if s.presentation.widgets != nil {
+			s.presentation.widgets.Invalidate()
+		}
+	}
+	if accepted && s.presentation != nil &&
+		(command.Kind == input.CommandAssignSkillHotkey || command.Kind == input.CommandAssignItemHotkey) {
+		s.presentation.Refresh()
+		if s.presentation.widgets != nil {
+			s.presentation.widgets.Invalidate()
+		}
 	}
 	return accepted
 }
@@ -101,6 +123,10 @@ type mobilePresentation struct {
 	settingsController *mobileui.SurfaceController
 	settings           input.MobileSettings
 	controls           input.MobileControls
+	onlineInputMode    uint32
+	onlineUsername     string
+	onlinePassword     string
+	onlineCharacterName string
 	settingsChanged    func(input.MobileSettings) bool
 	controlsChanged    func(input.MobileControls) bool
 	chatController     *mobileui.ChatController
@@ -114,6 +140,7 @@ type mobilePresentation struct {
 	minimapImage       *render.Image
 	minimapSignature   string
 	touch              mobileui.TouchSession
+	hudTouchStart      mobileui.Hit
 	commandDumpKey     string
 	lastPlaying        bool
 	playingInitialized bool
@@ -139,6 +166,7 @@ func newMobilePresentation(game *app.Game, width, height int) *mobilePresentatio
 	p.hudController = mobileui.NewController(p.hudModel, p.viewport, mobileCommandSink{game: game, presentation: p})
 	p.inventory = mobileui.NewInventoryController(game.MobileInventoryModel(), p.viewport, mobileCommandSink{game: game, presentation: p})
 	p.characterSkills = mobileui.NewCharacterSkillsController(game.MobileCharacterModel(), game.MobileSkillsModel(), p.viewport)
+	p.characterSkills.Sink = mobileCommandSink{game: game, presentation: p}
 	p.profileController = mobileui.NewProfileController(game.MobileProfileModel(), p.viewport, mobileCommandSink{game: game, presentation: p})
 	p.dialogController = mobileui.NewDialogController(mobileui.MobileDialogModel{}, p.viewport, mobileCommandSink{game: game, presentation: p})
 	p.economyController = mobileui.NewEconomyController(p.viewport, mobileCommandSink{game: game, presentation: p})
@@ -217,6 +245,9 @@ const (
 	// That window is a real desktop text field rather than the mobile on-screen
 	// keyboard, so the platform editor types into it.
 	androidTextInputCharacter
+	androidTextInputLoginUsername
+	androidTextInputLoginPassword
+	androidTextInputLoginCharacterName
 )
 
 // SetTextInput routes the single host-native editor to the currently visible
@@ -236,6 +267,12 @@ func (p *mobilePresentation) SetTextInput(mode uint32, text string) {
 		if p.socialController != nil && p.socialController.TextInputActive() {
 			p.socialController.SetTextInputDraft(text)
 		}
+	case androidTextInputLoginUsername:
+		p.onlineUsername = text
+	case androidTextInputLoginPassword:
+		p.onlinePassword = text
+	case androidTextInputLoginCharacterName:
+		p.onlineCharacterName = text
 	default:
 		p.SetChatDraft(text)
 	}
@@ -247,6 +284,15 @@ func (p *mobilePresentation) syncTextInputState() {
 		// The character screen is an offline surface, so unlike chat and social
 		// this does not depend on being connected.
 		active = androidTextInputCharacter
+	} else if p != nil && p.game != nil && p.game.Online() && !p.game.SessionPlaying() &&
+		(p.onlineInputMode == androidTextInputLoginUsername || p.onlineInputMode == androidTextInputLoginPassword || p.onlineInputMode == androidTextInputLoginCharacterName) {
+		phase := p.game.MobileLoginModel().Phase
+		if (phase == mobileui.OnlineLoginCredentials && (p.onlineInputMode == androidTextInputLoginUsername || p.onlineInputMode == androidTextInputLoginPassword)) ||
+			(phase == mobileui.OnlineLoginCreate && p.onlineInputMode == androidTextInputLoginCharacterName) {
+			active = p.onlineInputMode
+		} else {
+			p.onlineInputMode = androidTextInputNone
+		}
 	} else if p != nil && p.game != nil && p.game.Online() && p.chatController != nil && p.chatController.Model.Open && p.chatController.Model.CanSend {
 		active = androidTextInputChat
 	} else if p != nil && p.game != nil && p.game.Online() && p.socialController != nil && p.socialController.TextInputActive() {
@@ -341,6 +387,10 @@ func (p *mobilePresentation) handleSettingsItem(item mobileui.SurfaceItem) bool 
 		settings.Audio.SFXVolume = nextMobileVolume(settings.Audio.SFXVolume)
 	case "show-minimap":
 		settings.Display.ShowMinimap = !settings.Display.ShowMinimap
+	case "vsync":
+		settings.Display.VSync = !settings.Display.VSync
+	case "fps-meter":
+		settings.Display.FPS = !settings.Display.FPS
 	case "ui-scale":
 		settings.UI = settings.UI.NextPreset()
 	case "presentation":
@@ -431,6 +481,36 @@ func nextMobileVolume(value float64) float64 {
 	return values[0]
 }
 
+func (p *mobilePresentation) layoutHUD() mobileui.HUDLayout {
+	if p == nil {
+		return mobileui.HUDLayout{}
+	}
+	layout := mobileui.LayoutHUD(p.viewport, mobileui.DefaultTokens(), p.hudModel, p.navigation)
+	if p.game == nil || !p.game.Online() || len(layout.MenuActions) == 0 {
+		return layout
+	}
+	// Profile is an offline-authority feature. Removing it from the online
+	// drawer also removes its hit target, so an online player cannot enter the
+	// offline character select/create workflow and become stranded there.
+	actions := make([]mobileui.MenuAction, 0, len(layout.MenuActions))
+	nextY := layout.MenuPanel.Y
+	for _, action := range layout.MenuActions {
+		if action.Screen == mobileui.ScreenProfile {
+			continue
+		}
+		action.Rect.Y = nextY
+		nextY += action.Rect.H
+		actions = append(actions, action)
+	}
+	layout.MenuActions = actions
+	if len(actions) == 0 {
+		layout.MenuPanel = mobileui.Rect{}
+	} else {
+		layout.MenuPanel.H = actions[len(actions)-1].Rect.Bottom() - layout.MenuPanel.Y
+	}
+	return layout
+}
+
 func (p *mobilePresentation) Resize(width, height int) {
 	if p == nil {
 		return
@@ -447,11 +527,11 @@ func (p *mobilePresentation) Resize(width, height int) {
 	snapshot := p.game.MobileSnapshot(0)
 	p.hudModel = snapshot.HUD
 	p.refreshMinimapImage()
-	p.hud = mobileui.LayoutHUD(p.viewport, mobileui.DefaultTokens(), p.hudModel, p.navigation)
+	p.hud = p.layoutHUD()
 	if p.hudController != nil {
 		p.hudController.Model = p.hudModel
 		p.hudController.Navigation = p.navigation
-		p.hudController.Layout = mobileui.LayoutHUD(p.viewport, mobileui.DefaultTokens(), p.hudModel, p.navigation)
+		p.hudController.Layout = p.hud
 	}
 	if p.inventory != nil {
 		p.inventory.Viewport = p.viewport
@@ -504,6 +584,12 @@ func (p *mobilePresentation) Resize(width, height int) {
 			p.navigation.Open(mobileui.ScreenWorldHUD)
 		}
 	}
+	// Orientation/surface changes are a hard retained-layout boundary. Drop
+	// touch capture and the old baked widget image before the next frame.
+	p.touch.Cancel()
+	if p.widgets != nil {
+		p.widgets.InvalidateSize()
+	}
 }
 
 func (p *mobilePresentation) SetSafeInsets(left, top, right, bottom int) {
@@ -532,6 +618,16 @@ func (p *mobilePresentation) logicalPoint(x, y int) (int, int) {
 func (p *mobilePresentation) Back() bool {
 	if p == nil {
 		return false
+	}
+	if p.onlineInputMode == androidTextInputLoginUsername || p.onlineInputMode == androidTextInputLoginPassword || p.onlineInputMode == androidTextInputLoginCharacterName {
+		p.onlineInputMode = androidTextInputNone
+		p.syncTextInputState()
+		return true
+	}
+	if p.game != nil && p.game.Online() && !p.game.SessionPlaying() && p.game.MobileLoginModel().Phase == mobileui.OnlineLoginCreate {
+		p.emitMobileCommand(input.PlayerCommand{Kind: input.CommandOnlineCancelCharacterCreate})
+		p.onlineCharacterName = ""
+		return true
 	}
 	if p.tradeController != nil && p.tradeController.IsOpen() {
 		if p.tradeController.Back() {
@@ -612,13 +708,59 @@ func (p *mobilePresentation) Back() bool {
 	return p.navigation.Back()
 }
 
+// visibleWidgetSnapshotChanged limits retained mobile UI invalidation to the
+// model actually visible on screen. World/network state can update dozens of
+// unrelated snapshot projections every tick; treating the aggregate snapshot
+// as one dirty bit caused full-screen UI rasterization and texture uploads even
+// while a static Settings/Inventory/etc. surface was open.
+func (p *mobilePresentation) visibleWidgetSnapshotChanged(previous, next app.MobileSnapshot) bool {
+	if p == nil {
+		return false
+	}
+	if p.tradeController != nil && p.tradeController.IsOpen() {
+		return !reflect.DeepEqual(previous.Trade, next.Trade)
+	}
+	if p.vendingController != nil && p.vendingController.IsOpen() {
+		return !reflect.DeepEqual(previous.Vending, next.Vending)
+	}
+	if p.chatController != nil && p.chatController.Model.Open {
+		return !reflect.DeepEqual(previous.Chat, next.Chat)
+	}
+	if p.economyController != nil {
+		switch p.economyController.Screen {
+		case mobileui.EconomyShop:
+			return !reflect.DeepEqual(previous.Shop, next.Shop)
+		case mobileui.EconomyStorage:
+			return !reflect.DeepEqual(previous.Storage, next.Storage)
+		}
+	}
+	switch p.navigation.Screen {
+	case mobileui.ScreenCharacter:
+		return !reflect.DeepEqual(previous.Character, next.Character)
+	case mobileui.ScreenSkills:
+		return !reflect.DeepEqual(previous.Skills, next.Skills)
+	case mobileui.ScreenMap:
+		return !reflect.DeepEqual(previous.Map, next.Map)
+	case mobileui.ScreenSocial:
+		return !reflect.DeepEqual(previous.Social, next.Social)
+	case mobileui.ScreenInventory:
+		return !reflect.DeepEqual(previous.Inventory, next.Inventory)
+	case mobileui.ScreenEquipment:
+		return !reflect.DeepEqual(previous.Equipment, next.Equipment)
+	case mobileui.ScreenSettings:
+		return false
+	default:
+		return !reflect.DeepEqual(previous.HUD, next.HUD)
+	}
+}
+
 func (p *mobilePresentation) Refresh() {
 	if p == nil || p.game == nil {
 		atomic.StoreUint32(&androidTextInputActive, 0)
 		return
 	}
 	snapshot := p.game.MobileSnapshot(0)
-	if p.widgetSnapshotSet && !reflect.DeepEqual(p.widgetSnapshot, snapshot) && p.widgets != nil {
+	if p.widgetSnapshotSet && p.visibleWidgetSnapshotChanged(p.widgetSnapshot, snapshot) && p.widgets != nil {
 		p.widgets.Invalidate()
 	}
 	p.widgetSnapshot = snapshot
@@ -653,7 +795,7 @@ func (p *mobilePresentation) Refresh() {
 		p.hudModel.Minimap.MapName = offline.MapName
 	}
 	p.refreshMinimapImage()
-	p.hud = mobileui.LayoutHUD(p.viewport, mobileui.DefaultTokens(), p.hudModel, p.navigation)
+	p.hud = p.layoutHUD()
 	if p.hudController != nil {
 		p.hudController.Model = p.hudModel
 		p.hudController.Navigation = p.navigation
@@ -668,18 +810,35 @@ func (p *mobilePresentation) Refresh() {
 	if p.profileController != nil {
 		p.profileController.SetModel(snapshot.Profile)
 		p.profileController.Resize(p.viewport)
+		if p.game.Online() && p.profileController.Open {
+			// Profile is the offline character-authority editor. Never carry an
+			// accidentally opened profile surface into an online session.
+			p.profileController.Close()
+			if p.navigation.Screen == mobileui.ScreenProfile {
+				p.navigation.Open(mobileui.ScreenWorldHUD)
+			}
+		}
 	}
 	if p.dialogController != nil {
 		p.dialogController.Resize(p.viewport)
-		// NPC dialog packets are consumed by the shared WorldMode. Keep the
-		// Android controller projected from that same authoritative model so a
-		// server-side dialog cannot leave the player looking at an apparently
-		// idle world while the zone connection is waiting for next/menu/close.
+		// NPC dialog state is not part of MobileSnapshot: it is driven directly
+		// by zone packets through the shared desktop NPCDialog. Invalidate the
+		// retained widget raster whenever that authoritative projection changes;
+		// otherwise the hit-test/model can advance to Next/Menu while Android
+		// keeps displaying the previous "Waiting for the server" raster.
+		previousDialog := p.dialogController.Model
 		dialog := p.game.MobileDialogModel()
 		if dialog.Open {
 			p.dialogController.SetModel(dialog)
 		} else if p.game.Online() {
 			p.dialogController.Close()
+		}
+		if !reflect.DeepEqual(previousDialog, p.dialogController.Model) {
+			androidLog(fmt.Sprintf("stage=mobile-dialog open=%t npc=%d options=%d notice=%q",
+				p.dialogController.Model.Open, p.dialogController.Model.NPCID, len(p.dialogController.Model.Options), p.dialogController.Model.Notice))
+			if p.widgets != nil {
+				p.widgets.Invalidate()
+			}
 		}
 	}
 	if p.economyController != nil {
@@ -854,12 +1013,21 @@ func (p *mobilePresentation) BeginTouch(id input.TouchID, x, y int) bool {
 	if owner == mobileui.TouchUnclaimed || !p.ConsumeTouch(point) {
 		return false
 	}
-	return p.touch.Begin(point, owner, owner == mobileui.TouchDialog || (p.economyController != nil && p.economyController.Quantity.Open) || p.navigation.Targeting.Mode != input.SkillTargetIdle)
+	p.hudTouchStart = mobileui.Hit{}
+	if owner == mobileui.TouchHUD {
+		p.hudTouchStart = p.hud.HitTest(float32(point.X), float32(point.Y))
+	}
+	if !p.touch.Begin(point, owner, owner == mobileui.TouchDialog || (p.economyController != nil && p.economyController.Quantity.Open) || p.navigation.Targeting.Mode != input.SkillTargetIdle) {
+		p.hudTouchStart = mobileui.Hit{}
+		return false
+	}
+	return true
 }
 
 func (p *mobilePresentation) CancelTouch() {
 	if p != nil {
 		p.touch.Cancel()
+		p.hudTouchStart = mobileui.Hit{}
 	}
 }
 
@@ -880,6 +1048,10 @@ func (p *mobilePresentation) Move(id input.TouchID, x, y int) {
 			p.vendingController.ScrollBy(-dy)
 		} else if p.chatController != nil && p.chatController.Model.Open {
 			p.chatController.ScrollBy(-dy)
+		} else if p.dialogController != nil && p.dialogController.Model.Open {
+			if p.dialogController.ScrollBy(-dy) && p.widgets != nil {
+				p.widgets.Invalidate()
+			}
 		} else if p.settingsController != nil && p.navigation.Screen == mobileui.ScreenSettings {
 			p.settingsController.ScrollBy(-dy)
 		}
@@ -887,13 +1059,25 @@ func (p *mobilePresentation) Move(id input.TouchID, x, y int) {
 		// Profile editing is a bounded form. The on-screen keyboard and
 		// appearance controls own taps; dragging does not scroll the world.
 	case mobileui.TouchInventory:
+		before := p.inventory.State.Scroll.Offset
 		p.inventory.ScrollBy(-dy)
+		if p.widgets != nil && p.inventory.State.Scroll.Offset != before {
+			p.widgets.Invalidate()
+		}
 	case mobileui.TouchEquipment:
+		before := p.inventory.State.Scroll.Offset
 		p.inventory.ScrollBy(-dy)
+		if p.widgets != nil && p.inventory.State.Scroll.Offset != before {
+			p.widgets.Invalidate()
+		}
 	case mobileui.TouchEconomy:
-		p.economyController.ScrollBy(-dy)
+		if p.economyController.ScrollBy(-dy) && p.widgets != nil {
+			p.widgets.Invalidate()
+		}
 	case mobileui.TouchCharacter, mobileui.TouchSkills:
-		p.characterSkills.ScrollBy(-dy)
+		if p.characterSkills.ScrollBy(-dy) && p.widgets != nil {
+			p.widgets.Invalidate()
+		}
 	case mobileui.TouchMap:
 		p.mapController.ScrollBy(-dy)
 	case mobileui.TouchSocial:
@@ -907,10 +1091,22 @@ func (p *mobilePresentation) Release(id input.TouchID, x, y int) {
 	}
 	rawX, rawY := x, y
 	x, y = p.logicalPoint(x, y)
+	startHUDHit := p.hudTouchStart
+	p.hudTouchStart = mobileui.Hit{}
 	owner, moved := p.touch.End(id)
 	if owner == mobileui.TouchUnclaimed || moved {
 		return
 	}
+	// Controllers mutate selection, tabs, detail sheets, navigation, and other
+	// presentation state synchronously on tap. Their geometry is recomputed
+	// immediately, but the retained widget raster is separate state. Always
+	// invalidate it after a claimed tap so sprite overlays and widget chrome
+	// cannot diverge for a frame (or indefinitely on otherwise-static screens).
+	defer func() {
+		if p.widgets != nil {
+			p.widgets.Invalidate()
+		}
+	}()
 	if owner == mobileui.TouchStartup {
 		action := p.startup.ActionAt(float32(x), float32(y))
 		if action == mobileui.StartupSwitchOnline {
@@ -1022,15 +1218,28 @@ func (p *mobilePresentation) Release(id input.TouchID, x, y int) {
 		if p.hudController != nil && p.hudController.Layout.CombatCancel.Contains(float32(x), float32(y)) {
 			p.hudController.Tap(float32(x), float32(y))
 			p.navigation = p.hudController.Navigation
-			p.hud = mobileui.LayoutHUD(p.viewport, mobileui.DefaultTokens(), p.hudModel, p.navigation)
+			p.hud = p.layoutHUD()
 			return
 		}
-		if target, ok := p.game.PickMobileTarget(input.WorldPosition{X: float64(rawX), Y: float64(rawY)}); ok {
-			if command, ok := p.navigation.Targeting.Select(target); ok {
+		screenPoint := input.WorldPosition{X: float64(rawX), Y: float64(rawY)}
+		var (
+			target input.PickedTarget
+			ok     bool
+		)
+		if p.navigation.Targeting.Mode == input.SkillTargetGround {
+			// Ground skills own the terrain under the finger. Normal world
+			// picking prioritizes actors/items, which would otherwise make an
+			// occupied cell impossible to select.
+			target, ok = p.game.PickMobileGroundTarget(screenPoint)
+		} else {
+			target, ok = p.game.PickMobileTarget(screenPoint)
+		}
+		if ok {
+			if command, selected := p.navigation.Targeting.Select(target); selected {
 				mobileCommandSink{game: p.game, presentation: p}.Emit(command)
 			}
 		}
-		p.hud = mobileui.LayoutHUD(p.viewport, mobileui.DefaultTokens(), p.hudModel, p.navigation)
+		p.hud = p.layoutHUD()
 		return
 	}
 	if p.inventory != nil && p.inventory.State.Screen != mobileui.ScreenWorldHUD {
@@ -1041,14 +1250,30 @@ func (p *mobilePresentation) Release(id input.TouchID, x, y int) {
 		return
 	}
 	hit := p.hud.HitTest(float32(x), float32(y))
+	if owner == mobileui.TouchHUD {
+		// Bind a tap to the control that owned finger-down. Small finger drift
+		// may remain inside touch slop; re-hit-testing only at finger-up allowed
+		// adjacent actions such as Loot -> Sit to fire accidentally.
+		if startHUDHit.Control == mobileui.ControlNone || hit != startHUDHit {
+			return
+		}
+		hit = startHUDHit
+	}
 	switch hit.Control {
 	case mobileui.ControlMenu:
 		p.navigation.MenuOpen = !p.navigation.MenuOpen
+		if p.navigation.MenuOpen {
+			p.navigation.EmoteOpen = false
+		}
 	case mobileui.ControlMenuAction:
 		if hit.Screen == mobileui.ScreenInventory {
 			p.inventory.Open(mobileui.ScreenInventory)
 			p.navigation.Open(mobileui.ScreenInventory)
 		} else if hit.Screen == mobileui.ScreenProfile {
+			if p.game != nil && p.game.Online() {
+				p.navigation.MenuOpen = false
+				break
+			}
 			p.profileController.OpenProfile(p.game.MobileProfileModel())
 			p.navigation.Open(mobileui.ScreenProfile)
 		} else if hit.Screen == mobileui.ScreenCharacter || hit.Screen == mobileui.ScreenSkills {
@@ -1070,7 +1295,19 @@ func (p *mobilePresentation) Release(id input.TouchID, x, y int) {
 			p.chatController.Open(p.game.MobileChatModel())
 			p.navigation.OpenLayer(mobileui.ScreenWorldHUD, mobileui.NavigationDetailSheet, "chat")
 		}
-	case mobileui.ControlSkill, mobileui.ControlLootItem, mobileui.ControlSkillPagePrev, mobileui.ControlSkillPageNext:
+	case mobileui.ControlLevelUp:
+		if p.characterSkills != nil {
+			p.characterSkills.Open(mobileui.ScreenCharacter)
+			p.navigation.Open(mobileui.ScreenCharacter)
+		}
+	case mobileui.ControlSkillUp:
+		if p.characterSkills != nil {
+			p.characterSkills.Open(mobileui.ScreenSkills)
+			p.navigation.Open(mobileui.ScreenSkills)
+		}
+	case mobileui.ControlSkill, mobileui.ControlLootItem, mobileui.ControlSkillPagePrev, mobileui.ControlSkillPageNext,
+		mobileui.ControlPrimaryAction, mobileui.ControlTarget, mobileui.ControlSit, mobileui.ControlLoot,
+		mobileui.ControlEmoteToggle, mobileui.ControlEmote:
 		if p.hudController != nil {
 			p.hudController.Model = p.hudModel
 			p.hudController.Navigation = p.navigation
@@ -1078,9 +1315,18 @@ func (p *mobilePresentation) Release(id input.TouchID, x, y int) {
 			p.hudController.Tap(float32(x), float32(y))
 			p.navigation = p.hudController.Navigation
 		}
-	case mobileui.ControlTarget, mobileui.ControlMinimap, mobileui.ControlStatus:
+	case mobileui.ControlMinimap:
+		if p.mapController != nil {
+			p.mapController.SetModel(p.game.MobileMapModel())
+			p.navigation.Open(mobileui.ScreenMap)
+		}
+	case mobileui.ControlStatus:
+		if p.characterSkills != nil {
+			p.characterSkills.Open(mobileui.ScreenCharacter)
+			p.navigation.Open(mobileui.ScreenCharacter)
+		}
 	}
-	p.hud = mobileui.LayoutHUD(p.viewport, mobileui.DefaultTokens(), p.hudModel, p.navigation)
+	p.hud = p.layoutHUD()
 }
 
 func (p *mobilePresentation) Draw(frame *render.Frame) {
@@ -1095,6 +1341,20 @@ func (p *mobilePresentation) Draw(frame *render.Frame) {
 	if p.characters != nil && p.characters.draw(p, frame) {
 		return
 	}
+	if p.game != nil && p.game.Online() && !p.game.SessionPlaying() {
+		p.drawOnlineStatus(frame)
+		return
+	}
+	// The desktop world renderer suppresses UI while the native mobile surface
+	// is active. Reintroduce only the authoritative NPC cut-in here, beneath the
+	// mobile dialog/widget layer. In portrait, anchor it to the dialog sheet.
+	if p.game != nil {
+		dialogTop := 0
+		if p.dialogController != nil && p.dialogController.Model.Open {
+			dialogTop = int(p.dialogController.Layout.Panel.Y)
+		}
+		p.game.DrawMobileNPCCutin(frame, dialogTop)
+	}
 	// The shared ui/mobile widget layer draws every screen that has a builder.
 	// Screens without one still fall through to the host's own drawing below.
 	if p.widgets != nil && p.widgets.drawWidgets(p, frame) {
@@ -1102,10 +1362,6 @@ func (p *mobilePresentation) Draw(frame *render.Frame) {
 	}
 	if p.startup != nil && p.startup.Phase == mobileui.StartupTitle {
 		p.drawStartup(frame)
-		return
-	}
-	if p.game.Online() && !p.game.SessionPlaying() {
-		p.drawOnlineStatus(frame)
 		return
 	}
 	if p.tradeController != nil && p.tradeController.IsOpen() {
@@ -1156,7 +1412,7 @@ func (p *mobilePresentation) Draw(frame *render.Frame) {
 }
 
 func (p *mobilePresentation) drawOnlineStatus(frame *render.Frame) {
-	if p == nil || frame == nil {
+	if p == nil || frame == nil || p.game == nil {
 		return
 	}
 	safe := p.viewport.SafeRect()
@@ -1171,29 +1427,110 @@ func (p *mobilePresentation) drawOnlineStatus(frame *render.Frame) {
 	}
 	colors := mobileColors()
 	scale := p.mobileTextScale()
-	render.DrawRect(frame, float64(safe.X), float64(safe.Y), float64(safe.W), float64(safe.H), color.RGBA{R: 10, G: 22, B: 42, A: 255})
+	render.DrawRect(frame, float64(safe.X), float64(safe.Y), float64(safe.W), float64(safe.H), color.RGBA{R: 10, G: 22, B: 42, A: 210})
 	drawMobilePanel(frame, panel)
-	title := "GORO ONLINE"
-	if model.Phase == mobileui.OnlineLoginCharacters {
-		title = "ONLINE / CHARACTERS"
-	} else if model.Phase == mobileui.OnlineLoginCreate {
-		title = "ONLINE / CHARACTER"
-	}
-	drawMobileTextCentered(frame, title, layout.Title, colors.text, scale*1.5)
-	drawMobileTextFit(frame, model.Status, layout.Status.X, layout.Status.Y+12, layout.Status.W, colors.title, scale)
-	drawMobileTextCentered(frame, model.Network, layout.Network, colors.muted, scale*0.8)
-	server := model.Server
-	if server == "" {
-		server = "configured server"
-	}
-	drawMobileTextCentered(frame, server, layout.Notice, colors.muted, scale*0.65)
 
-	if model.Phase == mobileui.OnlineLoginCharacters {
-		for i, rect := range layout.Slots {
-			if i >= len(model.Characters) {
+	title := "GORO ONLINE"
+	switch model.Phase {
+	case mobileui.OnlineLoginServer:
+		title = "SELECT SERVER"
+	case mobileui.OnlineLoginCredentials:
+		title = "ACCOUNT LOGIN"
+	case mobileui.OnlineLoginCharacterService:
+		title = "SELECT SERVICE"
+	case mobileui.OnlineLoginConnecting:
+		title = "CONNECTING"
+	case mobileui.OnlineLoginCharacters:
+		title = "SELECT CHARACTER"
+	case mobileui.OnlineLoginCreate:
+		title = "CREATE CHARACTER"
+	}
+	drawMobileTextCentered(frame, title, layout.Title, colors.text, scale*1.35)
+	drawMobileTextCentered(frame, model.Status, layout.Status, colors.title, scale*0.82)
+	drawMobileTextCentered(frame, model.Network, layout.Network, colors.muted, scale*0.62)
+	if model.Notice != "" {
+		drawMobileTextCentered(frame, model.Notice, layout.Notice, colors.muted, scale*0.62)
+	}
+
+	switch model.Phase {
+	case mobileui.OnlineLoginServer, mobileui.OnlineLoginCharacterService:
+		for i, rect := range layout.Options {
+			if i >= len(model.Servers) {
 				break
 			}
-			entry := model.Characters[i]
+			entry := model.Servers[i]
+			active := entry.Selected || entry.Index == model.SelectedServer
+			drawMobileCard(frame, rect, colors, active)
+			if active {
+				drawMobileSelectionOutline(frame, rect, colors)
+			}
+			nameRect := mobileui.Rect{X: rect.X + 14, Y: rect.Y + 6, W: rect.W - 28, H: rect.H * 0.52}
+			detailRect := mobileui.Rect{X: rect.X + 14, Y: rect.Y + rect.H*0.50, W: rect.W - 28, H: rect.H * 0.40}
+			drawMobileTextFit(frame, entry.Name, nameRect.X, nameRect.Y+4, nameRect.W, colors.text, scale*0.72)
+			detail := entry.Detail
+			if entry.UserCount > 0 {
+				detail = fmt.Sprintf("%s   users %d", detail, entry.UserCount)
+			}
+			drawMobileTextFit(frame, detail, detailRect.X, detailRect.Y+2, detailRect.W, colors.muted, scale*0.54)
+		}
+		if model.CanSwitchMode {
+			drawMobileTextCentered(frame, "OFFLINE MODE", layout.Mode, colors.accent, scale*0.58)
+		}
+		return
+
+	case mobileui.OnlineLoginCredentials:
+		username := p.onlineUsername
+		if strings.TrimSpace(username) == "" {
+			username = model.Username
+		}
+		if strings.TrimSpace(username) == "" {
+			username = "tap to enter username"
+		}
+		password := ""
+		if p.onlinePassword != "" {
+			password = strings.Repeat("*", len([]rune(p.onlinePassword)))
+		} else if model.PasswordSet {
+			password = "********"
+		} else {
+			password = "tap to enter password"
+		}
+		drawMobileButton(frame, layout.Username, "ID   "+username, colors, scale*0.68, p.onlineInputMode == androidTextInputLoginUsername)
+		drawMobileButton(frame, layout.Password, "Password   "+password, colors, scale*0.68, p.onlineInputMode == androidTextInputLoginPassword)
+		loginEnabled := strings.TrimSpace(p.onlineUsername) != "" || strings.TrimSpace(model.Username) != ""
+		loginEnabled = loginEnabled && (p.onlinePassword != "" || model.PasswordSet)
+		drawMobileButton(frame, layout.Submit, "LOGIN", colors, scale*0.78, loginEnabled)
+		if model.CanSwitchMode {
+			drawMobileTextCentered(frame, "OFFLINE MODE", layout.Mode, colors.accent, scale*0.58)
+		}
+		return
+
+	case mobileui.OnlineLoginCreate:
+		name := p.onlineCharacterName
+		if strings.TrimSpace(name) == "" {
+			name = model.CreateName
+		}
+		if strings.TrimSpace(name) == "" {
+			name = "tap to enter character name"
+		}
+		drawMobileButton(frame, layout.Username, "Name   "+name, colors, scale*0.68, p.onlineInputMode == androidTextInputLoginCharacterName)
+		enabled := len([]byte(strings.TrimSpace(name))) >= 4 && name != "tap to enter character name"
+		drawMobileButton(frame, layout.Submit, "CREATE", colors, scale*0.74, enabled)
+		drawMobileButton(frame, layout.Cancel, "CANCEL", colors, scale*0.74, true)
+		return
+
+	case mobileui.OnlineLoginCharacters:
+		pageStart := (model.SelectedSlot / 3) * 3
+		pageCount := (len(model.Characters) + 2) / 3
+		if pageCount < 1 {
+			pageCount = 1
+		}
+		page := pageStart / 3
+		for i, rect := range layout.Slots {
+			index := pageStart + i
+			if index < 0 || index >= len(model.Characters) {
+				continue
+			}
+			entry := model.Characters[index]
 			active := entry.Slot == model.SelectedSlot
 			drawMobileCard(frame, rect, colors, active)
 			if active {
@@ -1201,24 +1538,71 @@ func (p *mobilePresentation) drawOnlineStatus(frame *render.Frame) {
 			}
 			label := fmt.Sprintf("SLOT %d", entry.Slot+1)
 			if entry.Occupied {
-				label = fmt.Sprintf("%s  LV %d", trimText(entry.Name, 14), entry.Level)
+				label = trimText(entry.Name, 16)
+				previewTop := rect.Y + 30
+				previewBottom := rect.Bottom() - 24
+				if previewBottom > previewTop {
+					p.game.DrawMobileLoginCharacterPreview(frame, entry.Slot,
+						int(rect.X+6), int(previewTop), int(rect.W-12), int(previewBottom-previewTop))
+				}
 			}
-			drawMobileTextCentered(frame, label, mobileui.Rect{X: rect.X + 8, Y: rect.Y + 20, W: rect.W - 16, H: 34}, colors.text, scale*0.72)
+			drawMobileTextCentered(frame, label, mobileui.Rect{X: rect.X + 6, Y: rect.Y + 4, W: rect.W - 12, H: 26}, colors.text, scale*0.62)
 			if entry.Occupied {
-				drawMobileTextCentered(frame, entry.JobName, mobileui.Rect{X: rect.X + 8, Y: rect.Y + 62, W: rect.W - 16, H: 28}, colors.muted, scale*0.58)
+				footer := fmt.Sprintf("%s   Lv %d", trimText(entry.JobName, 12), entry.Level)
+				drawMobileTextCentered(frame, footer, mobileui.Rect{X: rect.X + 6, Y: rect.Bottom()-23, W: rect.W - 12, H: 18}, colors.muted, scale*0.48)
 			} else {
-				drawMobileTextCentered(frame, "CREATE", mobileui.Rect{X: rect.X + 8, Y: rect.Y + 62, W: rect.W - 16, H: 28}, colors.accent, scale*0.60)
+				drawMobileTextCentered(frame, "EMPTY SLOT", mobileui.Rect{X: rect.X + 6, Y: rect.Y + rect.H*0.48, W: rect.W - 12, H: 24}, colors.accent, scale*0.54)
 			}
 		}
-		drawMobileButton(frame, layout.Create, "CREATE SELECTED", colors, scale*0.68, model.CanCreate)
+
+		var selected mobileui.OnlineCharacterSlot
+		for _, entry := range model.Characters {
+			if entry.Slot == model.SelectedSlot {
+				selected = entry
+				break
+			}
+		}
+		if layout.CharacterInfo.W > 0 && layout.CharacterInfo.H > 0 {
+			drawMobilePanel(frame, layout.CharacterInfo)
+			if selected.Occupied {
+				pad := float32(14)
+				innerX := layout.CharacterInfo.X + pad
+				innerW := layout.CharacterInfo.W - 2*pad
+				rowH := minf32(32, maxf32(20, (layout.CharacterInfo.H-16)/7))
+				y := layout.CharacterInfo.Y + 8
+				drawMobileTextFit(frame, trimText(selected.Name, 20), innerX, y, innerW, colors.text, scale*0.68)
+				y += rowH
+				drawMobileTextFit(frame, trimText(selected.JobName, 20), innerX, y, innerW, colors.muted, scale*0.56)
+				y += rowH
+				drawMobileTextFit(frame, fmt.Sprintf("Base %d   Job %d   EXP %d", selected.Level, selected.JobLevel, selected.Exp), innerX, y, innerW, colors.muted, scale*0.54)
+				y += rowH
+				drawMobileTextFit(frame, fmt.Sprintf("HP %d/%d   SP %d/%d", selected.HP, selected.MaxHP, selected.SP, selected.MaxSP), innerX, y, innerW, colors.muted, scale*0.54)
+				y += rowH
+				drawMobileTextFit(frame, fmt.Sprintf("STR %d   AGI %d   VIT %d", selected.Str, selected.Agi, selected.Vit), innerX, y, innerW, colors.text, scale*0.54)
+				y += rowH
+				drawMobileTextFit(frame, fmt.Sprintf("INT %d   DEX %d   LUK %d", selected.Int, selected.Dex, selected.Luk), innerX, y, innerW, colors.text, scale*0.54)
+				y += rowH
+				drawMobileTextFit(frame, fmt.Sprintf("Zeny %d", selected.Zeny), innerX, y, innerW, colors.accent, scale*0.54)
+			} else {
+				drawMobileTextCentered(frame, fmt.Sprintf("Slot %d is empty", model.SelectedSlot+1), layout.CharacterInfo, colors.muted, scale*0.62)
+			}
+		}
+		drawMobileTextCentered(frame, fmt.Sprintf("PAGE %d / %d", page+1, pageCount), layout.PageLabel, colors.muted, scale*0.54)
+		drawMobileButton(frame, layout.PagePrev, "‹ PREV", colors, scale*0.58, page > 0)
+		drawMobileButton(frame, layout.PageNext, "NEXT ›", colors, scale*0.58, page+1 < pageCount)
+		actionLabel := "CREATE"
+		actionEnabled := model.CanCreate
+		if selected.Occupied {
+			actionLabel = "ENTER WORLD"
+			actionEnabled = true
+		}
+		drawMobileButton(frame, layout.Create, actionLabel, colors, scale*0.62, actionEnabled)
 		return
+
+	default:
+		drawMobileButton(frame, layout.Reconnect, "RECONNECT", colors, scale*0.64, model.CanReconnect)
+		drawMobileButton(frame, layout.Disconnect, "DISCONNECT", colors, scale*0.64, model.CanDisconnect)
 	}
-	if model.Notice != "" {
-		drawMobileTextCentered(frame, model.Notice, mobileui.Rect{X: panel.X + 28, Y: layout.Notice.Bottom() + 24, W: panel.W - 56, H: 80}, colors.muted, scale*0.68)
-	}
-	drawMobileButton(frame, layout.Reconnect, "RECONNECT", colors, scale*0.68, model.CanReconnect)
-	drawMobileButton(frame, layout.Disconnect, "DISCONNECT", colors, scale*0.68, model.CanDisconnect)
-	drawMobileTextCentered(frame, "OFFLINE MODE", layout.Mode, colors.accent, scale*0.66)
 }
 
 func (p *mobilePresentation) handleOnlineTouch(x, y float32) {
@@ -1227,34 +1611,153 @@ func (p *mobilePresentation) handleOnlineTouch(x, y float32) {
 	}
 	model := p.game.MobileLoginModel()
 	layout := mobileui.LayoutOnlineLogin(p.viewport, model)
-	if model.Phase == mobileui.OnlineLoginCharacters {
-		for i, rect := range layout.Slots {
-			if !rect.Contains(x, y) || i >= len(model.Characters) {
+
+	switch model.Phase {
+	case mobileui.OnlineLoginServer, mobileui.OnlineLoginCharacterService:
+		for i, rect := range layout.Options {
+			if !rect.Contains(x, y) || i >= len(model.Servers) {
 				continue
 			}
-			entry := model.Characters[i]
-			kind := input.CommandOnlineCreateCharacter
-			if entry.Occupied {
-				kind = input.CommandOnlineSelectCharacter
+			entry := model.Servers[i]
+			kind := input.CommandOnlineSelectLoginServer
+			if model.Phase == mobileui.OnlineLoginCharacterService {
+				kind = input.CommandOnlineSelectCharacterService
 			}
-			p.emitMobileCommand(input.PlayerCommand{Kind: kind, Slot: uint16(entry.Slot)})
+			p.onlineInputMode = androidTextInputNone
+			p.syncTextInputState()
+			p.emitMobileCommand(input.PlayerCommand{Kind: kind, Slot: uint16(entry.Index)})
 			return
 		}
-		if layout.Create.Contains(x, y) && model.CanCreate {
-			p.emitMobileCommand(input.PlayerCommand{Kind: input.CommandOnlineCreateCharacter, Slot: uint16(model.SelectedSlot)})
+		if layout.Mode.Contains(x, y) && model.CanSwitchMode && p.modeChanged != nil {
+			p.modeChanged(false)
+		}
+		return
+
+	case mobileui.OnlineLoginCredentials:
+		if layout.Username.Contains(x, y) {
+			if strings.TrimSpace(p.onlineUsername) == "" {
+				p.onlineUsername = model.Username
+			}
+			p.onlineInputMode = androidTextInputLoginUsername
+			p.syncTextInputState()
+			return
+		}
+		if layout.Password.Contains(x, y) {
+			p.onlineInputMode = androidTextInputLoginPassword
+			p.syncTextInputState()
+			return
+		}
+		if layout.Submit.Contains(x, y) {
+			username := p.onlineUsername
+			if strings.TrimSpace(username) == "" {
+				username = model.Username
+			}
+			password := p.onlinePassword
+			if strings.TrimSpace(username) == "" || (password == "" && !model.PasswordSet) {
+				return
+			}
+			p.onlineInputMode = androidTextInputNone
+			p.syncTextInputState()
+			p.emitMobileCommand(input.PlayerCommand{
+				Kind: input.CommandOnlineSubmitCredentials,
+				Username: username,
+				Password: password,
+			})
+			return
+		}
+		if layout.Mode.Contains(x, y) && model.CanSwitchMode && p.modeChanged != nil {
+			p.onlineInputMode = androidTextInputNone
+			p.syncTextInputState()
+			p.modeChanged(false)
+			return
+		}
+		// A text field is only active while the player is explicitly editing it.
+		// Tapping the background must not behave like another username tap.
+		if p.onlineInputMode != androidTextInputNone {
+			p.onlineInputMode = androidTextInputNone
+			p.syncTextInputState()
+		}
+		return
+
+	case mobileui.OnlineLoginCreate:
+		if layout.Username.Contains(x, y) {
+			if strings.TrimSpace(p.onlineCharacterName) == "" {
+				p.onlineCharacterName = model.CreateName
+			}
+			p.onlineInputMode = androidTextInputLoginCharacterName
+			p.syncTextInputState()
+			return
+		}
+		if layout.Submit.Contains(x, y) {
+			name := strings.TrimSpace(p.onlineCharacterName)
+			if name == "" {
+				name = strings.TrimSpace(model.CreateName)
+			}
+			if len([]byte(name)) < 4 {
+				return
+			}
+			p.onlineInputMode = androidTextInputNone
+			p.syncTextInputState()
+			p.emitMobileCommand(input.PlayerCommand{Kind: input.CommandOnlineCreateCharacter, Slot: uint16(model.CreateSlot), Text: name})
+			return
+		}
+		if layout.Cancel.Contains(x, y) {
+			p.onlineInputMode = androidTextInputNone
+			p.onlineCharacterName = ""
+			p.syncTextInputState()
+			p.emitMobileCommand(input.PlayerCommand{Kind: input.CommandOnlineCancelCharacterCreate})
+			return
+		}
+		if p.onlineInputMode != androidTextInputNone {
+			p.onlineInputMode = androidTextInputNone
+			p.syncTextInputState()
+		}
+		return
+
+	case mobileui.OnlineLoginCharacters:
+		pageStart := (model.SelectedSlot / 3) * 3
+		for i, rect := range layout.Slots {
+			index := pageStart + i
+			if !rect.Contains(x, y) || index < 0 || index >= len(model.Characters) {
+				continue
+			}
+			entry := model.Characters[index]
+			p.emitMobileCommand(input.PlayerCommand{Kind: input.CommandOnlineFocusCharacter, Slot: uint16(entry.Slot)})
+			return
+		}
+		if layout.PagePrev.Contains(x, y) && pageStart > 0 {
+			p.emitMobileCommand(input.PlayerCommand{Kind: input.CommandOnlineFocusCharacter, Slot: uint16(pageStart - 3)})
+			return
+		}
+		if layout.PageNext.Contains(x, y) && pageStart+3 < len(model.Characters) {
+			p.emitMobileCommand(input.PlayerCommand{Kind: input.CommandOnlineFocusCharacter, Slot: uint16(pageStart + 3)})
+			return
+		}
+		if layout.Create.Contains(x, y) {
+			selectedOccupied := false
+			for _, entry := range model.Characters {
+				if entry.Slot == model.SelectedSlot {
+					selectedOccupied = entry.Occupied
+					break
+				}
+			}
+			kind := input.CommandOnlineCreateCharacter
+			if selectedOccupied {
+				kind = input.CommandOnlineSelectCharacter
+			} else if !model.CanCreate {
+				return
+			}
+			p.emitMobileCommand(input.PlayerCommand{Kind: kind, Slot: uint16(model.SelectedSlot)})
 		}
 		return
 	}
+
 	if layout.Reconnect.Contains(x, y) && model.CanReconnect {
 		p.emitMobileCommand(input.PlayerCommand{Kind: input.CommandOnlineReconnect})
 		return
 	}
 	if layout.Disconnect.Contains(x, y) && model.CanDisconnect {
 		p.emitMobileCommand(input.PlayerCommand{Kind: input.CommandOnlineDisconnect})
-		return
-	}
-	if layout.Mode.Contains(x, y) && model.CanSwitchMode && p.modeChanged != nil {
-		p.modeChanged(false)
 	}
 }
 
@@ -1390,13 +1893,23 @@ func (p *mobilePresentation) drawHUD(frame *render.Frame) {
 	drawMobileBar(frame, "HP", l.PlayerPanel.X+12, l.PlayerPanel.Y+68, l.PlayerPanel.W-24, 22, p.hudModel.Player.HP, p.hudModel.Player.MaxHP, colors.hp, colors, textScale)
 	drawMobileBar(frame, "SP", l.PlayerPanel.X+12, l.PlayerPanel.Y+101, l.PlayerPanel.W-24, 22, p.hudModel.Player.SP, p.hudModel.Player.MaxSP, colors.sp, colors, textScale)
 	drawMobileStatuses(frame, l.StatusArea, p.hudModel.Statuses, colors, textScale)
+	if l.LevelUpAction.W > 0 {
+		drawMobileButton(frame, l.LevelUpAction, "LV+", colors, textScale*0.72, true)
+	}
+	if l.SkillUpAction.W > 0 {
+		drawMobileButton(frame, l.SkillUpAction, "SK+", colors, textScale*0.72, true)
+	}
 
 	if p.hudModel.Target.Visible && p.settings.Controls.ShowTargetNames {
 		drawMobilePanel(frame, l.TargetPanel)
 		drawMobileHeader(frame, l.TargetPanel, "TARGET", colors, textScale)
 		drawMobileTextFit(frame, trimText(p.hudModel.Target.Name, 18), l.TargetPanel.X+12, l.TargetPanel.Y+39, l.TargetPanel.W*0.60, colors.text, textScale*0.96)
 		drawMobileTextFit(frame, targetRelationText(p.hudModel.Target.Relation), l.TargetPanel.X+l.TargetPanel.W*0.64, l.TargetPanel.Y+40, l.TargetPanel.W*0.32, colors.muted, textScale*0.78)
-		drawMobileBar(frame, "HP", l.TargetPanel.X+12, l.TargetPanel.Y+72, l.TargetPanel.W-24, 22, p.hudModel.Target.HP, p.hudModel.Target.MaxHP, colors.target, colors, textScale)
+		if p.hudModel.Target.MaxHP > 0 {
+			drawMobileBar(frame, "HP", l.TargetPanel.X+12, l.TargetPanel.Y+72, l.TargetPanel.W-24, 22, p.hudModel.Target.HP, p.hudModel.Target.MaxHP, colors.target, colors, textScale)
+		} else {
+			drawMobileText(frame, "HP --", l.TargetPanel.X+12, l.TargetPanel.Y+78, colors.muted, textScale*0.78)
+		}
 	}
 	if l.LootPanel.W > 0 && len(p.hudModel.Loot) > 0 {
 		drawMobilePanel(frame, l.LootPanel)
@@ -1434,18 +1947,29 @@ func (p *mobilePresentation) drawHUD(frame *render.Frame) {
 		drawMobileHeader(frame, l.Minimap, "MINI MAP", colors, textScale)
 		mapRect := mobileui.Rect{X: l.Minimap.X + 10, Y: l.Minimap.Y + 34, W: l.Minimap.W - 20, H: l.Minimap.H - 70}
 		render.DrawRect(frame, float64(mapRect.X), float64(mapRect.Y), float64(mapRect.W), float64(mapRect.H), colors.mapBackground)
-		p.drawMinimapTerrain(frame, mapRect)
+		if !p.game.DrawMobileMinimap(frame, mapRect) {
+			p.drawMinimapTerrain(frame, mapRect)
+		}
 		drawMobileText(frame, strings.ToUpper(trimText(p.hudModel.Minimap.MapName, 16)), l.Minimap.X+12, l.Minimap.Bottom()-30, colors.muted, textScale*0.72)
 		drawMobileTextFit(frame, fmt.Sprintf("X:%d  Y:%d", p.hudModel.Minimap.PlayerX, p.hudModel.Minimap.PlayerY), l.Minimap.X+l.Minimap.W*0.52, l.Minimap.Bottom()-30, l.Minimap.W*0.42, colors.muted, textScale*0.66)
 	}
 	drawMobileButton(frame, l.Menu, "MENU", colors, textScale*0.86, false)
 
 	for i, slot := range l.SkillSlots {
-		skill := mobileui.SkillSlotModel{Index: i + l.SkillStart, Name: fmt.Sprintf("Skill %d", i+l.SkillStart+1), Usable: true}
-		if i+l.SkillStart < len(p.hudModel.Skills) {
-			skill = p.hudModel.Skills[i+l.SkillStart]
+		index := i + l.SkillStart
+		shortcut, ok := mobileui.ShortcutAt(p.hudModel, index)
+		if !ok {
+			drawMobileEmptySlot(frame, slot, colors)
+			continue
 		}
-		drawMobileSkill(frame, slot, skill, i, p.game, colors, textScale)
+		switch shortcut.Kind {
+		case mobileui.ShortcutItem:
+			drawMobileItemShortcut(frame, slot, shortcut.Item, i, p.game, colors, textScale)
+		case mobileui.ShortcutSkill:
+			drawMobileSkill(frame, slot, shortcut.Skill, i, p.game, colors, textScale)
+		default:
+			drawMobileEmptySlot(frame, slot, colors)
+		}
 	}
 	if l.SkillPagePrev.W > 0 {
 		perPage := l.SkillsPerPage
@@ -1453,7 +1977,7 @@ func (p *mobilePresentation) drawHUD(frame *render.Frame) {
 			perPage = 4
 		}
 		drawMobileButton(frame, l.SkillPagePrev, "‹", colors, textScale*1.05, p.navigation.SkillPage > 0)
-		drawMobileButton(frame, l.SkillPageNext, "›", colors, textScale*1.05, (p.navigation.SkillPage+1)*perPage < len(p.hudModel.Skills))
+		drawMobileButton(frame, l.SkillPageNext, "›", colors, textScale*1.05, (p.navigation.SkillPage+1)*perPage < mobileui.ShortcutCount(p.hudModel))
 	}
 	if p.navigation.Targeting.Mode != input.SkillTargetIdle {
 		drawMobilePanel(frame, l.CombatBanner)
@@ -1537,7 +2061,7 @@ func (p *mobilePresentation) drawMinimapTerrain(frame *render.Frame, rect mobile
 	mapX := clampMinimapCoordinate(float64(p.hudModel.Minimap.PlayerX)*0.5, raster.Width)
 	mapY := clampMinimapCoordinate(float64(p.hudModel.Minimap.PlayerY)*0.5, raster.Height)
 	markerX := drawX + (mapX+0.5)*drawWidth/imageWidth
-	markerY := drawY + (mapY+0.5)*drawHeight/imageHeight
+	markerY := drawY + drawHeight - (mapY+0.5)*drawHeight/imageHeight
 	colors := mobileColors()
 	p.drawMinimapMarkers(frame, mobileui.Rect{X: float32(drawX), Y: float32(drawY), W: float32(drawWidth), H: float32(drawHeight)}, raster, p.hudModel.Minimap.Markers)
 	// A larger crosshair/arrow remains readable on a phone and is distinct
@@ -1586,7 +2110,7 @@ func minimapPoint(rect mobileui.Rect, raster mobileui.MinimapRaster, x, y int) (
 	drawY := float64(rect.Y) + (float64(rect.H)-drawHeight)/2
 	mapX := clampMinimapCoordinate(float64(x)*0.5, raster.Width)
 	mapY := clampMinimapCoordinate(float64(y)*0.5, raster.Height)
-	return drawX + (mapX+0.5)*drawWidth/imageWidth, drawY + (mapY+0.5)*drawHeight/imageHeight
+	return drawX + (mapX+0.5)*drawWidth/imageWidth, drawY + drawHeight - (mapY+0.5)*drawHeight/imageHeight
 }
 
 func clampMinimapCoordinate(value float64, size int) float64 {
@@ -1697,6 +2221,9 @@ func (p *mobilePresentation) drawCharacterSkills(frame *render.Frame) {
 		drawMobileText(frame, trimText(skill.Name, 24), row.X+64, row.Y+10, colors.text, textScale*0.82)
 		drawMobileText(frame, fmt.Sprintf("Lv %d/%d", skill.Level, skill.MaxLevel), row.X+64, row.Bottom()-17, colors.muted, textScale*0.68)
 		drawMobileText(frame, fmt.Sprintf("SP %d", skill.SPCost), row.Right()-78, row.Y+10, colors.accent, textScale*0.68)
+		if i < len(l.UpgradeButtons) && l.UpgradeButtons[i].W > 0 {
+			drawMobileButton(frame, l.UpgradeButtons[i], "+", colors, textScale*0.88, true)
+		}
 	}
 	if l.Detail.W <= 0 || l.Detail.H <= 0 {
 		return
@@ -1727,8 +2254,16 @@ func (p *mobilePresentation) drawCharacterSkills(frame *render.Frame) {
 	drawMobileText(frame, fmt.Sprintf("Level %d / %d", skill.Level, skill.MaxLevel), iconX+iconSize+14, l.Detail.Y+88, colors.muted, textScale*0.82)
 	drawMobileText(frame, fmt.Sprintf("SP cost %d", skill.SPCost), iconX+iconSize+14, l.Detail.Y+118, colors.muted, textScale*0.82)
 	drawMobileText(frame, fmt.Sprintf("Range %d   Target %s", skill.Range, skillTargetText(skill.TargetMode)), l.Detail.X+18, l.Detail.Y+iconSize+82, colors.muted, textScale*0.82)
-	if skill.Upgradable {
-		drawMobileText(frame, "Upgrade authority not available", l.Detail.X+18, l.Detail.Y+iconSize+114, colors.muted, textScale*0.72)
+	descriptionY := l.Detail.Y + iconSize + 114
+	descriptionBottom := l.Detail.Bottom() - 12
+	if l.HotbarButton.W > 0 {
+		descriptionBottom = l.HotbarButton.Y - 10
+		drawMobileButton(frame, l.HotbarButton, "ADD TO BAR", colors, textScale*0.72, true)
+	}
+	if len(skill.Description) > 0 && descriptionBottom > descriptionY {
+		lineAdvance := float32(22)
+		maxLines := int((descriptionBottom - descriptionY) / lineAdvance)
+		drawMobileRichWrappedTextLimited(frame, mobileDescriptionText(skill.Description), l.Detail.X+18, descriptionY, l.Detail.W-36, lineAdvance, maxLines, colors.muted, textScale*0.68)
 	}
 }
 
@@ -1837,6 +2372,9 @@ func (p *mobilePresentation) drawInventory(frame *render.Frame) {
 		}
 		if l.PrimaryAction.W > 0 {
 			drawMobileButton(frame, l.PrimaryAction, strings.ToUpper(c.State.Selection.Detail.PrimaryAction), colors, textScale*0.82, c.State.Selection.Detail.PrimaryEnabled)
+		}
+		if l.ShortcutAction.W > 0 && d.Usable {
+			drawMobileButton(frame, l.ShortcutAction, "ADD TO BAR", colors, textScale*0.72, true)
 		}
 		if l.SecondaryAction.W > 0 {
 			drawMobileButton(frame, l.SecondaryAction, "DROP", colors, textScale*0.82, c.State.Selection.Detail.SecondaryEnabled)
@@ -2006,7 +2544,9 @@ func (p *mobilePresentation) drawMap(frame *render.Frame) {
 	drawMobilePanel(frame, l.MapViewport)
 	mapRect := mobileui.Rect{X: l.MapViewport.X + 12, Y: l.MapViewport.Y + 12, W: l.MapViewport.W - 24, H: l.MapViewport.H - 24}
 	render.DrawRect(frame, float64(mapRect.X), float64(mapRect.Y), float64(mapRect.W), float64(mapRect.H), colors.mapBackground)
-	p.drawMinimapTerrain(frame, mapRect)
+	if !p.game.DrawMobileMinimap(frame, mapRect) {
+		p.drawMinimapTerrain(frame, mapRect)
+	}
 	for _, warp := range model.Warps {
 		markerX, markerY, ok := mapMarkerPosition(mapRect, model.Raster, warp.X, warp.Y)
 		if !ok {
@@ -2084,15 +2624,41 @@ func (p *mobilePresentation) drawSurface(frame *render.Frame, controller *mobile
 		if !ok {
 			continue
 		}
+		labelH := mobileui.SurfaceRowLabelHeight()
 		if item.Kind == mobileui.SurfaceItemSection {
-			drawMobileText(frame, item.Label, row.X+12, row.Y+34, colors.accent, textScale*0.68)
+			drawMobileText(frame, item.Label, row.X+12, row.Y+28, colors.accent, textScale*0.68)
+			if item.Detail != "" && row.H > labelH {
+				drawMobileWrappedTextLimited(
+					frame, item.Detail,
+					row.X+12, row.Y+labelH+4,
+					int(maxf32(20, (row.W-24)/float32(11*textScale))),
+					int(22*textScale), 1,
+					colors.muted, textScale*0.62,
+				)
+			}
 			render.DrawLine(frame, float64(row.X), float64(row.Bottom()-2), float64(row.Right()), float64(row.Bottom()-2), colors.border)
 			continue
 		}
+
 		selected := controller.State.SelectedID == item.ID
-		drawMobileButton(frame, row, strings.ToUpper(trimText(item.Label, 28)), colors, textScale*0.80, selected)
+		// Paint the desktop-like row chrome first, then lay out the label/value
+		// line and explanatory text explicitly. drawMobileButton's centered
+		// label would otherwise waste the detail space the layout reserves.
+		drawMobileButton(frame, row, "", colors, textScale*0.80, selected)
+		valueW := float32(148)
+		labelW := maxf32(40, row.W-36-valueW)
+		drawMobileTextFit(frame, trimText(item.Label, 34), row.X+12, row.Y+20, labelW, colors.text, textScale*0.76)
 		if item.Value != "" {
-			drawMobileTextFit(frame, item.Value, row.Right()-148, row.Y+20, 136, colors.muted, textScale*0.70)
+			drawMobileTextFit(frame, item.Value, row.Right()-valueW, row.Y+20, valueW-12, colors.muted, textScale*0.70)
+		}
+		if item.Detail != "" && row.H > labelH {
+			drawMobileWrappedTextLimited(
+				frame, item.Detail,
+				row.X+12, row.Y+labelH+4,
+				int(maxf32(20, (row.W-24)/float32(11*textScale))),
+				int(22*textScale), 2,
+				colors.muted, textScale*0.62,
+			)
 		}
 	}
 	if controller.Model.Notice != "" {
@@ -2517,7 +3083,7 @@ func mapMarkerPosition(rect mobileui.Rect, raster mobileui.MinimapRaster, x, y i
 	drawY := float64(rect.Y) + (float64(rect.H)-drawHeight)/2
 	mapX := clampMinimapCoordinate(float64(x)*0.5, raster.Width)
 	mapY := clampMinimapCoordinate(float64(y)*0.5, raster.Height)
-	return drawX + (mapX+0.5)*drawWidth/imageWidth, drawY + (mapY+0.5)*drawHeight/imageHeight, true
+	return drawX + (mapX+0.5)*drawWidth/imageWidth, drawY + drawHeight - (mapY+0.5)*drawHeight/imageHeight, true
 }
 
 func (p *mobilePresentation) drawDialog(frame *render.Frame) {
@@ -2614,6 +3180,13 @@ func (p *mobilePresentation) drawEconomy(frame *render.Frame) {
 	for _, tab := range layout.Tabs {
 		drawMobileButton(frame, tab.Rect, strings.ToUpper(tab.Tab.String()), colors, textScale*0.76, tab.Tab == c.Tab)
 	}
+	if len(items) == 0 {
+		label := "NO ITEMS AVAILABLE"
+		if c.Tab == mobileui.ShopSellTab {
+			label = "NO SELLABLE ITEMS"
+		}
+		centerMobileText(frame, label, layout.ListViewport.X, layout.ListViewport.Y+24, layout.ListViewport.W, colors.muted, textScale*0.72)
+	}
 	for rowNumber, row := range layout.Rows {
 		if rowNumber >= len(layout.RowIndices) {
 			break
@@ -2629,6 +3202,25 @@ func (p *mobilePresentation) drawEconomy(frame *render.Frame) {
 		}
 		drawMobileActionRow(frame, row, fmt.Sprintf("%s   %d zeny", trimText(item.Name, 28), item.Price), "BUY", colors, textScale*0.86, textScale*0.78, item.CanBuy)
 	}
+	if shop.CartEnabled && layout.CartPanel.W > 0 {
+		drawMobilePanel(frame, layout.CartPanel)
+		title := "BUYING"
+		action := "BUY"
+		if c.Tab == mobileui.ShopSellTab {
+			title, action = "SELLING", "SELL"
+		}
+		drawMobileTextFit(frame, title, layout.CartPanel.X+10, layout.CartPanel.Y+7, layout.CartPanel.W-20, colors.title, textScale*0.72)
+		drawMobileTextFit(frame, "TAP ITEM TO REMOVE", layout.CartPanel.X+10, layout.CartPanel.Y+31, layout.CartPanel.W-20, colors.muted, textScale*0.54)
+		for i, row := range layout.CartRows {
+			if i >= len(shop.Cart) {
+				break
+			}
+			entry := shop.Cart[i]
+			drawMobileActionRow(frame, row, fmt.Sprintf("%s  x%d", trimText(entry.Name, 18), entry.Quantity), fmt.Sprintf("%d z", entry.Total), colors, textScale*0.70, textScale*0.62, true)
+		}
+		drawMobileTextBoxFit(frame, fmt.Sprintf("SUBTOTAL %d z", shop.CartTotal), layout.CartSubtotal, colors.title, textScale*0.68)
+		drawMobileButton(frame, layout.CartConfirm, action, colors, textScale*0.72, len(shop.Cart) > 0)
+	}
 	p.drawEconomyQuantity(frame)
 }
 
@@ -2642,19 +3234,32 @@ func (p *mobilePresentation) drawEconomyQuantity(frame *render.Frame) {
 	l := c.Layout
 	render.DrawRect(frame, float64(l.Safe.X), float64(l.Safe.Y), float64(l.Safe.W), float64(l.Safe.H), color.RGBA{R: 18, G: 38, B: 62, A: 140})
 	drawMobilePanel(frame, l.QuantityModal)
-	drawMobileHeader(frame, l.QuantityModal, "QUANTITY", colors, textScale)
-	action := "WITHDRAW"
+	title := "Withdraw"
 	switch c.Quantity.Action {
 	case mobileui.EconomyQuantityBuy:
-		action = "BUY"
+		title = "Buy"
 	case mobileui.EconomyQuantitySell:
-		action = "SELL"
+		title = "Sell"
 	}
-	drawMobileText(frame, fmt.Sprintf("%s   %d / %d", action, c.Quantity.Value, c.Quantity.Maximum), l.QuantityModal.X+20, l.QuantityModal.Y+76, colors.text, textScale*1.08)
+	drawMobileHeaderWithAction(frame, l.QuantityModal, title, l.QuantityCancel, colors, textScale)
+	drawMobileButton(frame, l.QuantityCancel, "Cancel", colors, textScale*0.72, false)
+
+	bodyTop := l.QuantityModal.Y + 36
+	bodyBottom := l.QuantityMinus.Y
+	bodyH := maxf32(0, bodyBottom-bodyTop)
+	labelRect := mobileui.Rect{X: l.QuantityModal.X, Y: bodyTop, W: l.QuantityModal.W, H: bodyH * 0.42}
+	valueRect := mobileui.Rect{X: l.QuantityModal.X, Y: bodyTop + bodyH*0.42, W: l.QuantityModal.W, H: bodyH * 0.58}
+	drawMobileTextCentered(frame, fmt.Sprintf("Max %d", c.Quantity.Maximum), labelRect, colors.muted, textScale*0.72)
+	drawMobileTextCentered(frame, fmt.Sprintf("%d", c.Quantity.Value), valueRect, colors.title, textScale*1.05)
+
 	drawMobileButton(frame, l.QuantityMinus, "−", colors, textScale*1.15, false)
 	drawMobileButton(frame, l.QuantityPlus, "+", colors, textScale*1.15, false)
-	drawMobileButton(frame, l.QuantityConfirm, "CONFIRM", colors, textScale*0.72, true)
-	drawMobileButton(frame, l.QuantityCancel, "CANCEL", colors, textScale*0.72, false)
+	drawMobileButton(frame, l.QuantityMax, "Max", colors, textScale*0.72, false)
+	confirmLabel := "Confirm"
+	if c.Shop.CartEnabled && (c.Quantity.Action == mobileui.EconomyQuantityBuy || c.Quantity.Action == mobileui.EconomyQuantitySell) {
+		confirmLabel = "Add"
+	}
+	drawMobileButton(frame, l.QuantityConfirm, confirmLabel, colors, textScale*0.72, true)
 }
 
 type mobilePalette struct {
@@ -3014,16 +3619,29 @@ func drawMobileStatuses(frame *render.Frame, rect mobileui.Rect, statuses []mobi
 	}
 }
 
-func drawMobileSkill(frame *render.Frame, rect mobileui.Rect, skill mobileui.SkillSlotModel, index int, game *app.Game, colors mobilePalette, scale float64) {
+func drawMobileItemShortcut(frame *render.Frame, rect mobileui.Rect, item mobileui.InventoryItemModel, _ int, game *app.Game, colors mobilePalette, scale float64) {
+	active := item.Usable && item.Index != 0 && item.Quantity > 0
+	drawMobileCard(frame, rect, colors, active)
+	iconSize := minf32(64, maxf32(40, minf32(rect.W, rect.H)-10))
+	iconX := rect.X + (rect.W-iconSize)/2
+	iconY := rect.Y + (rect.H-iconSize)/2
+	if game != nil && item.ItemID != 0 {
+		game.DrawMobileInventoryItemIcon(frame, item, int(iconX), int(iconY), int(iconSize))
+	}
+	if !active {
+		render.DrawRect(frame, float64(rect.X+3), float64(rect.Y+3), float64(rect.W-6), float64(rect.H-6), color.RGBA{R: 30, G: 46, B: 66, A: 120})
+	}
+	if item.Quantity > 1 {
+		drawMobileShortcutBadge(frame, strconv.Itoa(item.Quantity), rect, true, scale)
+	}
+}
+
+func drawMobileSkill(frame *render.Frame, rect mobileui.Rect, skill mobileui.SkillSlotModel, _ int, game *app.Game, colors mobilePalette, scale float64) {
 	active := skill.Usable && skill.CooldownRemaining <= 0
 	drawMobileCard(frame, rect, colors, active)
-	drawMobileTextFit(frame, fmt.Sprintf("F%d", index+1), rect.X+7, rect.Y+7, rect.W*0.30, colors.accent, scale*0.52)
-	if skill.Level > 0 {
-		drawMobileTextFit(frame, fmt.Sprintf("Lv%d", skill.Level), rect.X+rect.W*0.62, rect.Y+7, rect.W*0.31, colors.muted, scale*0.48)
-	}
-	iconSize := minf32(64, maxf32(40, rect.H-34))
+	iconSize := minf32(64, maxf32(40, minf32(rect.W, rect.H)-10))
 	iconX := rect.X + (rect.W-iconSize)/2
-	iconY := rect.Y + 17
+	iconY := rect.Y + (rect.H-iconSize)/2
 	render.DrawRect(frame, float64(iconX), float64(iconY), float64(iconSize), float64(iconSize), colors.header)
 	glyph := "?"
 	if skill.Name != "" {
@@ -3034,13 +3652,15 @@ func drawMobileSkill(frame *render.Frame, rect mobileui.Rect, skill mobileui.Ski
 	if game != nil {
 		game.DrawMobileSkillIcon(frame, mobileui.MobileSkillModel{SkillID: skill.SkillID}, int(iconX), int(iconY), int(iconSize))
 	}
-	drawMobileTextFit(frame, mobileSkillDisplayName(skill.Name), rect.X+5, rect.Bottom()-17, rect.W-10, colors.text, scale*0.48)
 	if !active {
 		render.DrawRect(frame, float64(rect.X+3), float64(rect.Y+3), float64(rect.W-6), float64(rect.H-6), color.RGBA{R: 30, G: 46, B: 66, A: 120})
-		if skill.CooldownRemaining > 0 {
-			seconds := int(skill.CooldownRemaining.Seconds() + 0.99)
-			drawMobileText(frame, fmt.Sprintf("%ds", seconds), rect.X+rect.W/2-10, rect.Y+rect.H/2-8, color.RGBA{R: 255, G: 255, B: 255, A: 255}, scale*0.82)
-		}
+	}
+	if skill.Level > 0 {
+		drawMobileShortcutBadge(frame, "Lv"+strconv.Itoa(skill.Level), rect, false, scale)
+	}
+	if skill.CooldownRemaining > 0 {
+		seconds := int(skill.CooldownRemaining.Seconds() + 0.99)
+		drawMobileTextCentered(frame, fmt.Sprintf("%ds", seconds), rect, color.RGBA{R: 255, G: 255, B: 255, A: 255}, scale*0.78)
 	}
 }
 

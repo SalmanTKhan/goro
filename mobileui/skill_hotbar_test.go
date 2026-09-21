@@ -3,6 +3,7 @@ package mobileui
 import (
 	"testing"
 
+	"github.com/kivutar/goro/db"
 	"github.com/kivutar/goro/input"
 	"github.com/kivutar/goro/session"
 )
@@ -169,5 +170,89 @@ func TestStarterSkillLoadoutSkipsMissingSkills(t *testing.T) {
 	skills, hotkeys := session.StarterSkillLoadout(content)
 	if len(skills.List) != 1 || len(hotkeys.Slots) != 1 {
 		t.Fatalf("partial pack should yield 1/1, got %d / %d", len(skills.List), len(hotkeys.Slots))
+	}
+}
+
+
+func TestTallPortraitSkillsUseCompactGrid(t *testing.T) {
+	viewport := Viewport{Width: 840, Height: 2289, SafeTop: 48, SafeBottom: 96}
+	layout := LayoutHUD(viewport, DefaultTokens(), Fixture("skills-paged"), Navigation{})
+	if len(layout.SkillSlots) != 6 {
+		t.Fatalf("skill slots=%d, want 6", len(layout.SkillSlots))
+	}
+	if layout.SkillSlots[3].Y <= layout.SkillSlots[0].Y {
+		t.Fatalf("portrait skills did not form a second row: %+v", layout.SkillSlots)
+	}
+	if layout.SkillBar.W >= layout.Safe.W*0.60 {
+		t.Fatalf("portrait skill dock is still too wide: bar=%+v safe=%+v", layout.SkillBar, layout.Safe)
+	}
+	if layout.SkillPagePrev.W == 0 || layout.SkillPageNext.W == 0 {
+		t.Fatalf("overflowing portrait hotbar has no page controls: %+v", layout)
+	}
+}
+
+
+func TestProjectSessionCopiesProgressionIntoHUD(t *testing.T) {
+	s := &session.Session{}
+	s.Progress.BaseLevel = 16
+	s.Progress.JobLevel = 10
+	s.Progress.BaseExp = 1234
+	s.Progress.NextBaseExp = 5000
+	s.Progress.JobExp = 321
+	s.Progress.NextJobExp = 900
+	s.Stats.Points = 7
+	s.Skills.Points = 3
+
+	model := ProjectSession(s, TargetHUDModel{})
+	if model.Player.StatPoints != 7 || model.Player.SkillPoints != 3 {
+		t.Fatalf("progression points were not projected: %+v", model.Player)
+	}
+	if model.Player.BaseExp != 1234 || model.Player.NextBaseExp != 5000 ||
+		model.Player.JobExp != 321 || model.Player.NextJobExp != 900 {
+		t.Fatalf("experience progression was not projected: %+v", model.Player)
+	}
+}
+
+
+func TestProjectSessionBuildsMixedSkillAndItemShortcuts(t *testing.T) {
+	s := &session.Session{}
+	s.Vitals.SP = 100
+	s.Skills.List = []session.Skill{{ID: 5, Type: 1, Level: 3, MaxLevel: 10, SPCost: 8, Name: "SM_BASH"}}
+	s.Inventory.Items = []session.InventoryItem{{Index: 12, ItemID: 501, Type: db.ItemTypeHealing, Identified: true, Amount: 9}}
+	s.Hotkeys = session.Hotkeys{Loaded: true, Slots: []session.HotkeySlot{
+		{Type: session.HotkeyTypeItem, ID: 501},
+		{Type: session.HotkeyTypeSkill, ID: 5, Level: 3},
+	}}
+
+	model := ProjectSession(s, TargetHUDModel{})
+	if ShortcutCount(model) != 2 {
+		t.Fatalf("shortcut count=%d, want 2: %+v", ShortcutCount(model), model.Shortcuts)
+	}
+	item, ok := ShortcutAt(model, 0)
+	if !ok || item.Kind != ShortcutItem || item.Item.ItemID != 501 || item.Item.Index != 12 || item.Item.Quantity != 9 || !item.Item.Usable {
+		t.Fatalf("item shortcut projection=%+v ok=%t", item, ok)
+	}
+	skill, ok := ShortcutAt(model, 1)
+	if !ok || skill.Kind != ShortcutSkill || skill.Skill.SkillID != 5 || skill.Skill.Level != 3 {
+		t.Fatalf("skill shortcut projection=%+v ok=%t", skill, ok)
+	}
+}
+
+func TestControllerUsesItemShortcut(t *testing.T) {
+	var commands input.CommandBuffer
+	model := Fixture("normal")
+	model.Skills = nil
+	model.Shortcuts = []ShortcutSlotModel{{
+		Kind: ShortcutItem,
+		Item: InventoryItemModel{Index: 12, ItemID: 501, Quantity: 4, Usable: true},
+	}}
+	c := NewController(model, Viewport{Width: 840, Height: 2289}, &commands)
+	slot := c.Layout.SkillSlots[0]
+	if !c.Tap(slot.X+2, slot.Y+2) {
+		t.Fatal("item shortcut tap not consumed")
+	}
+	got := commands.Commands()
+	if len(got) != 1 || got[0].Kind != input.CommandUseItem || got[0].ItemIndex != 12 || got[0].ItemID != 501 {
+		t.Fatalf("item shortcut command=%+v", got)
 	}
 }

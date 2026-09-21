@@ -24,7 +24,7 @@ type EquipmentSlotRect struct {
 }
 
 type MobileInventoryLayout struct {
-	Safe, Header, TabsArea, CategoryButton, GridViewport, EquipmentViewport, PaperDoll, PaperDollCluster, DetailPanel, DetailIcon, DetailTitle, DetailMeta, DetailDescription, PrimaryAction, SecondaryAction, EquipmentButton, StorageButton, BackButton, QuantityModal Rect
+	Safe, Header, TabsArea, CategoryButton, GridViewport, EquipmentViewport, PaperDoll, PaperDollCluster, DetailPanel, DetailIcon, DetailTitle, DetailMeta, DetailDescription, PrimaryAction, SecondaryAction, ShortcutAction, EquipmentButton, StorageButton, BackButton, QuantityModal Rect
 	QuantityMinus, QuantityPlus, QuantityConfirm, QuantityCancel                                                                                                                                                                                                         Rect
 	Tabs, CategoryOptions                                                                                                                                                                                                                                                []InventoryTabRect
 	Cells                                                                                                                                                                                                                                                                []InventoryCellRect
@@ -105,12 +105,12 @@ func LayoutInventory(viewport Viewport, tokens InventoryTokens, model MobileInve
 	// full-height pale rectangle just because the device is tall. When the
 	// actual item rows exceed the available space, the viewport naturally
 	// expands to the full scrollable height.
-	grid := LayoutGrid(layout.GridViewport, len(items), inventoryGridSpec(layout.Portrait, fold))
+	grid := LayoutGrid(layout.GridViewport, len(items), inventoryGridSpec(layout.Portrait, fold, len(items)))
 	minimumRows := maxInt(2, grid.Rows)
 	minimumGridH := grid.OuterPadding + float32(minimumRows)*grid.CellHeight + float32(maxInt(0, minimumRows-1))*grid.VerticalGap + tokens.Gap + 58
 	if gridH > minimumGridH {
 		layout.GridViewport.H = minimumGridH
-		grid = LayoutGrid(layout.GridViewport, len(items), inventoryGridSpec(layout.Portrait, fold))
+		grid = LayoutGrid(layout.GridViewport, len(items), inventoryGridSpec(layout.Portrait, fold, len(items)))
 	}
 	if detailH > 0 {
 		layout.DetailPanel = Rect{contentX, layout.GridViewport.Bottom() + tokens.Gap, contentW, detailH}
@@ -132,10 +132,23 @@ func LayoutInventory(viewport Viewport, tokens InventoryTokens, model MobileInve
 		layout.Cells = append(layout.Cells, InventoryCellRect{Index: items[i].Index, Rect: cell})
 	}
 	if state.Selection.HasSelection && layout.DetailPanel.W > 0 {
-		buttonW := maxf(tokens.MinTouchTarget, (layout.DetailPanel.W-3*tokens.Gap)/2)
 		actionEdge, actionHeight := detailActionMetrics(layout.DetailPanel, tokens)
-		layout.PrimaryAction = Rect{layout.DetailPanel.X + tokens.Gap, layout.DetailPanel.Bottom() - actionEdge - actionHeight, buttonW, actionHeight}
-		layout.SecondaryAction = Rect{layout.PrimaryAction.Right() + tokens.Gap, layout.PrimaryAction.Y, layout.PrimaryAction.W, layout.PrimaryAction.H}
+		usableShortcut := state.Selection.Detail.Item.Usable
+		if usableShortcut && layout.DetailPanel.W < 520 {
+			buttonW := maxf(tokens.MinTouchTarget, (layout.DetailPanel.W-3*tokens.Gap)/2)
+			layout.PrimaryAction = Rect{X: layout.DetailPanel.X + tokens.Gap, Y: layout.DetailPanel.Bottom() - actionEdge - actionHeight, W: buttonW, H: actionHeight}
+			layout.SecondaryAction = Rect{X: layout.PrimaryAction.Right() + tokens.Gap, Y: layout.PrimaryAction.Y, W: buttonW, H: actionHeight}
+			layout.ShortcutAction = Rect{X: layout.DetailPanel.X + tokens.Gap, Y: layout.PrimaryAction.Y - tokens.Gap - actionHeight, W: layout.DetailPanel.W - 2*tokens.Gap, H: actionHeight}
+		} else if usableShortcut {
+			buttonW := maxf(tokens.MinTouchTarget, (layout.DetailPanel.W-4*tokens.Gap)/3)
+			layout.PrimaryAction = Rect{X: layout.DetailPanel.X + tokens.Gap, Y: layout.DetailPanel.Bottom() - actionEdge - actionHeight, W: buttonW, H: actionHeight}
+			layout.ShortcutAction = Rect{X: layout.PrimaryAction.Right() + tokens.Gap, Y: layout.PrimaryAction.Y, W: buttonW, H: actionHeight}
+			layout.SecondaryAction = Rect{X: layout.ShortcutAction.Right() + tokens.Gap, Y: layout.PrimaryAction.Y, W: buttonW, H: actionHeight}
+		} else {
+			buttonW := maxf(tokens.MinTouchTarget, (layout.DetailPanel.W-3*tokens.Gap)/2)
+			layout.PrimaryAction = Rect{X: layout.DetailPanel.X + tokens.Gap, Y: layout.DetailPanel.Bottom() - actionEdge - actionHeight, W: buttonW, H: actionHeight}
+			layout.SecondaryAction = Rect{X: layout.PrimaryAction.Right() + tokens.Gap, Y: layout.PrimaryAction.Y, W: layout.PrimaryAction.W, H: layout.PrimaryAction.H}
+		}
 		layoutDetailContent(&layout, tokens)
 	}
 	if state.Quantity.Open {
@@ -157,15 +170,25 @@ func LayoutInventory(viewport Viewport, tokens InventoryTokens, model MobileInve
 	return layout
 }
 
-func inventoryGridSpec(portrait, fold bool) GridSpec {
+func inventoryGridSpec(portrait, fold bool, itemCount int) GridSpec {
 	if portrait {
-		return GridSpec{MinCellWidth: 48, MaxCellWidth: 260, MinRowHeight: 0, HorizontalGap: 16, VerticalGap: 16, PreferredColumns: 4, MinColumns: 4, MaxColumns: 4, AspectRatio: 1, FillWidth: true, OuterPadding: 16}
+		columns := 4
+		switch {
+		case itemCount <= 4:
+			columns = 2
+		case itemCount <= 12:
+			columns = 3
+		}
+		return GridSpec{MinCellWidth: 64, MaxCellWidth: 260, MinRowHeight: 0, HorizontalGap: 16, VerticalGap: 16, PreferredColumns: columns, MinColumns: columns, MaxColumns: columns, AspectRatio: 1, FillWidth: true, OuterPadding: 16}
 	}
 	preferred := 6
 	if fold {
 		preferred = 5
 	}
-	return GridSpec{MinCellWidth: 96, MaxCellWidth: 248, MinRowHeight: 0, HorizontalGap: 16, VerticalGap: 16, PreferredColumns: preferred, MinColumns: 4, MaxColumns: 6, AspectRatio: 1, FillWidth: false, OuterPadding: 16}
+	if itemCount > 0 && itemCount < preferred {
+		preferred = maxInt(3, itemCount)
+	}
+	return GridSpec{MinCellWidth: 96, MaxCellWidth: 248, MinRowHeight: 0, HorizontalGap: 16, VerticalGap: 16, PreferredColumns: preferred, MinColumns: 3, MaxColumns: preferred, AspectRatio: 1, FillWidth: true, OuterPadding: 16}
 }
 
 func ScrollExtent(model MobileInventoryModel, state InventoryInteractionState, tokens InventoryTokens, viewport Rect) InventoryScrollState {
@@ -185,7 +208,7 @@ func ScrollExtentForLayout(model MobileInventoryModel, state InventoryInteractio
 		return InventoryScrollState{ViewportExtent: layout.GridViewport.H, ContentExtent: layout.GridContentExtent, Offset: state.Scroll.Offset, RowExtent: layout.GridRowExtent}
 	}
 	items := state.FilteredItems(model)
-	grid := LayoutGrid(layout.GridViewport, len(items), inventoryGridSpec(layout.Portrait, layout.Safe.W > layout.Safe.H && layout.Safe.H <= 900))
+	grid := LayoutGrid(layout.GridViewport, len(items), inventoryGridSpec(layout.Portrait, layout.Safe.W > layout.Safe.H && layout.Safe.H <= 900, len(items)))
 	return InventoryScrollState{ViewportExtent: layout.GridViewport.H, ContentExtent: grid.Scroll.ContentExtent, Offset: state.Scroll.Offset, RowExtent: grid.Scroll.RowExtent}
 }
 
@@ -279,6 +302,9 @@ func layoutDetailContent(layout *MobileInventoryLayout, tokens InventoryTokens) 
 	descriptionBottom := layout.DetailPanel.Bottom() - tokens.Gap
 	if layout.PrimaryAction.H > 0 {
 		descriptionBottom = layout.PrimaryAction.Y - tokens.Gap
+	}
+	if layout.ShortcutAction.H > 0 && layout.ShortcutAction.Y < descriptionBottom {
+		descriptionBottom = layout.ShortcutAction.Y - tokens.Gap
 	}
 	layout.DetailDescription = Rect{X: layout.DetailPanel.X + tokens.Gap, Y: descriptionY, W: maxf(0, layout.DetailPanel.W-2*tokens.Gap), H: maxf(0, descriptionBottom-descriptionY)}
 }

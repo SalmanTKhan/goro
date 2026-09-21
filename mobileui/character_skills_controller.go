@@ -11,6 +11,7 @@ type CharacterSkillsController struct {
 	SkillsLayout    SkillsLayout
 	CharacterOffset float32
 	SkillOffset     float32
+	Sink            input.CommandSink
 }
 
 func NewCharacterSkillsController(character MobileCharacterModel, skills MobileSkillsModel, viewport Viewport) *CharacterSkillsController {
@@ -23,15 +24,20 @@ func (c *CharacterSkillsController) SetModels(character MobileCharacterModel, sk
 	if c == nil {
 		return
 	}
+	// Selection is controller UI state, not session projection state. Preserve
+	// it across the per-frame model refresh so tapping a skill can actually
+	// open and keep its description/action sheet visible.
+	selection := c.Skills.Selection
 	c.Character, c.Skills = character, skills
-	if c.Skills.Selection.HasSelection {
-		index := c.Skills.Selection.SelectedIndex
+	if selection.HasSelection {
+		index := selection.SelectedIndex
 		if index < 0 || index >= len(skills.Skills) {
-			c.Skills.Selection = SkillSelectionModel{}
+			selection = SkillSelectionModel{}
 		} else {
-			c.Skills.Selection.Skill = skills.Skills[index]
+			selection.Skill = skills.Skills[index]
 		}
 	}
+	c.Skills.Selection = selection
 	c.relayout()
 }
 
@@ -81,6 +87,21 @@ func (c *CharacterSkillsController) Tap(x, y float32) bool {
 		c.relayout()
 		return true
 	}
+	if c.Skills.Selection.HasSelection && c.SkillsLayout.HotbarButton.Contains(x, y) {
+		if c.Sink != nil {
+			c.Sink.Emit(input.PlayerCommand{Kind: input.CommandAssignSkillHotkey, SkillID: c.Skills.Selection.Skill.SkillID})
+		}
+		return true
+	}
+	for index, button := range c.SkillsLayout.UpgradeButtons {
+		if button.W <= 0 || !button.Contains(x, y) || index >= len(c.Skills.Skills) {
+			continue
+		}
+		if c.Sink != nil {
+			c.Sink.Emit(input.PlayerCommand{Kind: input.CommandUpgradeSkill, SkillID: c.Skills.Skills[index].SkillID})
+		}
+		return true
+	}
 	for index, row := range c.SkillsLayout.Rows {
 		if row.Contains(x, y) && index < len(c.Skills.Skills) {
 			c.Skills.Selection = SkillSelectionModel{SelectedIndex: index, HasSelection: true, Skill: c.Skills.Skills[index]}
@@ -96,11 +117,16 @@ func (c *CharacterSkillsController) ScrollBy(delta float32) bool {
 		return false
 	}
 	if c.Screen == ScreenCharacter {
+		before := c.CharacterOffset
 		maxOffset := maxf(0, c.CharacterLayout.ContentExtent-c.CharacterLayout.ContentViewport.H)
 		c.CharacterOffset = clampf(c.CharacterOffset+delta, 0, maxOffset)
+		if c.CharacterOffset == before {
+			return false
+		}
 		c.relayout()
 		return true
 	}
+	before := c.SkillOffset
 	viewportExtent := c.SkillsLayout.ListViewport.H - 16
 	if viewportExtent < 0 {
 		viewportExtent = 0
@@ -116,6 +142,9 @@ func (c *CharacterSkillsController) ScrollBy(delta float32) bool {
 	}
 	if c.SkillOffset > maxOffset {
 		c.SkillOffset = maxOffset
+	}
+	if c.SkillOffset == before {
+		return false
 	}
 	c.relayout()
 	return true

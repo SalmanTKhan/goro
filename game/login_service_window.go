@@ -42,7 +42,7 @@ func (m *LoginMode) updateCharacterServiceWindow(ctx client.Context) {
 }
 
 func (m *LoginMode) updateServiceWindow(ctx client.Context, title string, names []string, selected int, callbacks gameui.ServiceWindowCallbacks) {
-	if ctx.Config.Headless {
+	if ctx.Config.Headless || ctx.Config.Render.NoUI {
 		return
 	}
 	if m.serviceWindow == nil {

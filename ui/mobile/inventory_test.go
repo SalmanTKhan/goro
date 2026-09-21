@@ -182,3 +182,82 @@ func TestGroupDigitsFormatsZeny(t *testing.T) {
 		}
 	}
 }
+
+
+func TestHUDIconRectsIncludeItemShortcuts(t *testing.T) {
+	model := mobileui.Fixture("normal")
+	model.Skills = nil
+	model.Shortcuts = []mobileui.ShortcutSlotModel{{
+		Kind: mobileui.ShortcutItem,
+		Item: mobileui.InventoryItemModel{Index: 4, ItemID: 501, Identified: true, Quantity: 7, Usable: true},
+	}}
+	layout := mobileui.LayoutHUD(mobileui.Viewport{Width: 840, Height: 2289}, mobileui.DefaultTokens(), model, mobileui.Navigation{})
+	skills, items := HUDIconRects(model, layout)
+	if len(skills) != 0 || len(items) != 1 {
+		t.Fatalf("mixed hotbar icons skills=%d items=%d", len(skills), len(items))
+	}
+	if items[0].ShortcutBadge != "7" || items[0].Item.ItemID != 501 || items[0].Item.Quantity != 7 {
+		t.Fatalf("item shortcut placement=%+v", items[0])
+	}
+	if items[0].OverlayRect != layout.SkillSlots[0] || items[0].Dimmed {
+		t.Fatalf("item shortcut chrome=%+v slot=%+v", items[0], layout.SkillSlots[0])
+	}
+}
+
+func TestHUDShortcutBadgesMatchDesktopSemantics(t *testing.T) {
+	model := mobileui.Fixture("normal")
+	model.Skills = nil
+	model.Shortcuts = []mobileui.ShortcutSlotModel{
+		{
+			Kind: mobileui.ShortcutItem,
+			Item: mobileui.InventoryItemModel{Index: 4, ItemID: 501, Identified: true, Quantity: 49, Usable: true},
+		},
+		{
+			Kind: mobileui.ShortcutSkill,
+			Skill: mobileui.SkillSlotModel{SkillID: 5, Level: 7, Usable: true, Name: "Bash"},
+		},
+	}
+	layout := mobileui.LayoutHUD(mobileui.Viewport{Width: 840, Height: 2289}, mobileui.DefaultTokens(), model, mobileui.Navigation{})
+	skills, items := HUDIconRects(model, layout)
+	if len(skills) != 1 || len(items) != 1 {
+		t.Fatalf("shortcut icon counts skills=%d items=%d", len(skills), len(items))
+	}
+	if items[0].ShortcutBadge != "49" {
+		t.Fatalf("item badge=%q, want desktop-style raw quantity 49", items[0].ShortcutBadge)
+	}
+	if skills[0].ShortcutBadge != "Lv7" {
+		t.Fatalf("skill badge=%q, want Lv7", skills[0].ShortcutBadge)
+	}
+	if skills[0].OverlayRect != layout.SkillSlots[1] || items[0].OverlayRect != layout.SkillSlots[0] {
+		t.Fatalf("badge overlay rects do not match slots: skill=%+v item=%+v slots=%+v", skills[0].OverlayRect, items[0].OverlayRect, layout.SkillSlots)
+	}
+}
+
+func TestHUDShortcutChromeMarksUnavailableEntriesDimmed(t *testing.T) {
+	model := mobileui.Fixture("normal")
+	model.Skills = nil
+	model.Shortcuts = []mobileui.ShortcutSlotModel{
+		{
+			Kind: mobileui.ShortcutItem,
+			Item: mobileui.InventoryItemModel{ItemID: 501, Quantity: 0, Usable: false},
+		},
+		{
+			Kind: mobileui.ShortcutSkill,
+			Skill: mobileui.SkillSlotModel{SkillID: 5, Level: 3, Usable: false},
+		},
+	}
+	layout := mobileui.LayoutHUD(mobileui.Viewport{Width: 840, Height: 2289}, mobileui.DefaultTokens(), model, mobileui.Navigation{})
+	skills, items := HUDIconRects(model, layout)
+	if len(skills) != 1 || len(items) != 1 {
+		t.Fatalf("shortcut icon counts skills=%d items=%d", len(skills), len(items))
+	}
+	if !items[0].Dimmed || !skills[0].Dimmed {
+		t.Fatalf("unavailable shortcut chrome was not dimmed: item=%+v skill=%+v", items[0], skills[0])
+	}
+	if items[0].ShortcutBadge != "" {
+		t.Fatalf("empty item stack should not show a quantity badge: %q", items[0].ShortcutBadge)
+	}
+	if skills[0].ShortcutBadge != "Lv3" {
+		t.Fatalf("disabled skill must retain its level badge: %q", skills[0].ShortcutBadge)
+	}
+}

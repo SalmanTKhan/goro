@@ -58,6 +58,38 @@ func TestControllerTargetingCancelButtonEmitsCancel(t *testing.T) {
 	}
 }
 
+
+func TestControllerPrimaryActionAttacksHostileTarget(t *testing.T) {
+	var commands input.CommandBuffer
+	c := NewController(Fixture("monster"), FoldOuterViewport(), &commands)
+	if c.Layout.PrimaryAction.W < DefaultTokens().MinTouchTarget || c.Layout.PrimaryAction.H < DefaultTokens().MinTouchTarget {
+		t.Fatalf("primary action is not touch-safe: %+v", c.Layout.PrimaryAction)
+	}
+	if !c.ConsumeTouch(input.TouchPoint{X: int(c.Layout.PrimaryAction.X + 4), Y: int(c.Layout.PrimaryAction.Y + 4)}) {
+		t.Fatal("primary action touch was not owned by HUD")
+	}
+	if !c.Tap(c.Layout.PrimaryAction.X+4, c.Layout.PrimaryAction.Y+4) {
+		t.Fatal("primary action tap was not handled")
+	}
+	got := commands.Commands()
+	if len(got) != 1 || got[0].Kind != input.CommandAttackActor || got[0].ActorID != 9001 {
+		t.Fatalf("unexpected primary action command: %+v", got)
+	}
+}
+
+func TestControllerTargetFrameUsesRelationAction(t *testing.T) {
+	model := Fixture("long-target")
+	var commands input.CommandBuffer
+	c := NewController(model, FoldOuterViewport(), &commands)
+	if !c.Tap(c.Layout.TargetPanel.X+4, c.Layout.TargetPanel.Y+4) {
+		t.Fatal("target frame tap was not handled")
+	}
+	got := commands.Commands()
+	if len(got) != 1 || got[0].Kind != input.CommandInteractActor || got[0].ActorID != model.Target.ID {
+		t.Fatalf("unexpected target-frame command: %+v", got)
+	}
+}
+
 func TestControllerConsumesDisabledAndMenuControls(t *testing.T) {
 	model := Fixture("cooldowns")
 	var commands input.CommandBuffer
@@ -79,5 +111,85 @@ func TestControllerConsumesDisabledAndMenuControls(t *testing.T) {
 	}
 	if c.Tap(1, 1) {
 		t.Fatal("empty world tap was incorrectly consumed")
+	}
+}
+
+func TestControllerWorldUtilityActionsEmitSemanticCommands(t *testing.T) {
+	model := Fixture("loot-basic")
+	model.Emotes = []EmoteModel{{ID: 15, Label: "thx"}}
+	var commands input.CommandBuffer
+	controller := NewController(model, FoldOuterViewport(), &commands)
+
+	if !controller.Tap(controller.Layout.SitAction.X+4, controller.Layout.SitAction.Y+4) {
+		t.Fatal("sit action was not handled")
+	}
+	if !controller.Tap(controller.Layout.LootAction.X+4, controller.Layout.LootAction.Y+4) {
+		t.Fatal("loot action was not handled")
+	}
+	got := commands.Commands()
+	if len(got) != 2 || got[0].Kind != input.CommandToggleSit || got[1].Kind != input.CommandLootFocused {
+		t.Fatalf("world utility commands = %+v", got)
+	}
+
+	if !controller.Tap(controller.Layout.EmoteAction.X+4, controller.Layout.EmoteAction.Y+4) || !controller.Navigation.EmoteOpen {
+		t.Fatal("emote action did not open quick picker")
+	}
+	if len(controller.Layout.EmoteRows) != 1 {
+		t.Fatalf("emote rows = %d, want one", len(controller.Layout.EmoteRows))
+	}
+	row := controller.Layout.EmoteRows[0]
+	if !controller.Tap(row.X+4, row.Y+4) {
+		t.Fatal("emote row was not handled")
+	}
+	got = commands.Commands()
+	if len(got) != 3 || got[2].Kind != input.CommandEmotion || got[2].EmotionID != 15 {
+		t.Fatalf("emote command = %+v", got)
+	}
+	if controller.Navigation.EmoteOpen {
+		t.Fatal("emote picker stayed open after selection")
+	}
+}
+
+func TestControllerBackClosesQuickEmotesBeforeLeavingHUD(t *testing.T) {
+	model := Fixture("normal")
+	model.Emotes = []EmoteModel{{ID: 0, Label: "!"}}
+	controller := NewController(model, FoldOuterViewport(), nil)
+	controller.Tap(controller.Layout.EmoteAction.X+4, controller.Layout.EmoteAction.Y+4)
+	if !controller.Navigation.EmoteOpen {
+		t.Fatal("emote picker did not open")
+	}
+	if !controller.Back() || controller.Navigation.EmoteOpen {
+		t.Fatal("back did not close emote picker")
+	}
+	if controller.Navigation.Screen != ScreenWorldHUD {
+		t.Fatalf("back left world HUD: %v", controller.Navigation.Screen)
+	}
+}
+
+func TestControllerUnavailableEmotesStayClosed(t *testing.T) {
+	controller := NewController(Fixture("normal"), FoldOuterViewport(), nil)
+	if !controller.Tap(controller.Layout.EmoteAction.X+4, controller.Layout.EmoteAction.Y+4) {
+		t.Fatal("disabled emote control did not consume its touch")
+	}
+	if controller.Navigation.EmoteOpen {
+		t.Fatal("disabled emote control opened an empty picker")
+	}
+}
+
+
+func TestProgressionAlertsOpenCharacterAndSkills(t *testing.T) {
+	viewport := Viewport{Width: 840, Height: 2289, SafeTop: 48, SafeBottom: 96}
+	c := NewController(Fixture("progression"), viewport, nil)
+
+	level := c.Layout.LevelUpAction
+	if !c.Tap(level.X+2, level.Y+2) || c.Navigation.Screen != ScreenCharacter {
+		t.Fatalf("level-up did not open character screen: nav=%+v", c.Navigation)
+	}
+
+	c.Navigation.Open(ScreenWorldHUD)
+	c.relayout()
+	skill := c.Layout.SkillUpAction
+	if !c.Tap(skill.X+2, skill.Y+2) || c.Navigation.Screen != ScreenSkills {
+		t.Fatalf("skill-up did not open skills screen: nav=%+v", c.Navigation)
 	}
 }

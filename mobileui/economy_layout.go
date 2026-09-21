@@ -2,10 +2,12 @@ package mobileui
 
 type EconomyLayout struct {
 	Safe, Panel, Header, Close, ListViewport                                    Rect
-	QuantityModal, QuantityMinus, QuantityPlus, QuantityConfirm, QuantityCancel Rect
+	CartPanel, CartSubtotal, CartConfirm                                         Rect
+	QuantityModal, QuantityMinus, QuantityPlus, QuantityMax, QuantityConfirm, QuantityCancel Rect
 	Tabs                                                                        []EconomyTabRect
 	Rows                                                                        []Rect
 	RowIndices                                                                  []int
+	CartRows                                                                    []Rect
 	Portrait                                                                    bool
 }
 
@@ -32,6 +34,10 @@ func LayoutShop(viewport Viewport, rowCount int, selected ShopTab) EconomyLayout
 }
 
 func LayoutShopScrolled(viewport Viewport, rowCount int, selected ShopTab, offset float32) EconomyLayout {
+	return LayoutShopCartScrolled(viewport, rowCount, selected, offset, false, 0)
+}
+
+func LayoutShopCartScrolled(viewport Viewport, rowCount int, selected ShopTab, offset float32, cartEnabled bool, cartCount int) EconomyLayout {
 	safe := viewport.SafeRect()
 	layout := EconomyLayout{Safe: safe}
 	if safe.W <= 0 || safe.H <= 0 {
@@ -57,23 +63,103 @@ func LayoutShopScrolled(viewport Viewport, rowCount int, selected ShopTab, offse
 	}
 	layout.Header = Rect{X: layout.Panel.X + pad, Y: layout.Panel.Y + 16, W: layout.Panel.W - 2*pad, H: 56}
 	layout.Close = Rect{X: layout.Header.Right() - 112, Y: layout.Header.Y, W: 112, H: 52}
-	tabW := (layout.Panel.W - 56) / 2
+
+	contentX := layout.Panel.X + pad
+	contentW := maxf(0, layout.Panel.W-2*pad)
 	tabY := layout.Header.Bottom() + 8
-	if layout.Portrait {
-		tabW = (layout.Panel.W - 2*pad - 8) / 2
-	}
-	layout.Tabs = []EconomyTabRect{
-		{Tab: ShopBuyTab, Rect: Rect{X: layout.Panel.X + pad, Y: tabY, W: tabW, H: 52}},
-		{Tab: ShopSellTab, Rect: Rect{X: layout.Panel.X + pad + tabW + 8, Y: tabY, W: tabW, H: 52}},
-	}
-	// Keep the same content inset as the panel header on wide landscape
-	// displays so the last row does not sit against the panel edge.
 	listBottomPad := float32(20)
 	if layout.Portrait {
 		listBottomPad = 16
 	}
-	layout.ListViewport = Rect{X: layout.Panel.X + pad, Y: tabY + 64, W: layout.Panel.W - 2*pad, H: maxf(0, layout.Panel.Bottom()-listBottomPad-(tabY+64))}
+
+	listW := contentW
+	if cartEnabled && !layout.Portrait {
+		cartGap := float32(12)
+		cartW := minf(420, maxf(280, contentW*0.34))
+		if contentW-cartW-cartGap >= 280 {
+			listW = contentW - cartW - cartGap
+			layout.CartPanel = Rect{
+				X: contentX + listW + cartGap,
+				Y: tabY,
+				W: cartW,
+				H: maxf(0, layout.Panel.Bottom()-listBottomPad-tabY),
+			}
+		}
+	}
+
+	tabW := (listW - 8) / 2
+	layout.Tabs = []EconomyTabRect{
+		{Tab: ShopBuyTab, Rect: Rect{X: contentX, Y: tabY, W: tabW, H: 52}},
+		{Tab: ShopSellTab, Rect: Rect{X: contentX + tabW + 8, Y: tabY, W: tabW, H: 52}},
+	}
+	listY := tabY + 64
+	listBottom := layout.Panel.Bottom() - listBottomPad
+
+	if cartEnabled && layout.Portrait {
+		// Keep the phone shop visually stable: the transaction preview owns the
+		// bottom quarter of the shop panel, while Buy/Sell owns the upper
+		// three-quarters. This avoids the cart jumping in size with item count.
+		cartGap := float32(12)
+		cartH := layout.Panel.H * 0.25
+		minCartH := economyRowHeight + 116 // 58px heading + one full row + 58px footer
+		if cartH < minCartH {
+			cartH = minCartH
+		}
+		maxCartH := maxf(0, listBottom-listY-cartGap-180)
+		if cartH > maxCartH {
+			cartH = maxCartH
+		}
+		if cartH > 0 {
+			layout.CartPanel = Rect{
+				X: contentX,
+				Y: listBottom - cartH,
+				W: contentW,
+				H: cartH,
+			}
+			listBottom = layout.CartPanel.Y - cartGap
+		}
+	}
+
+	layout.ListViewport = Rect{X: contentX, Y: listY, W: listW, H: maxf(0, listBottom-listY)}
 	layout.Rows, layout.RowIndices = economyVisibleRows(layout.ListViewport, rowCount, offset)
+
+	if layout.CartPanel.W > 0 && layout.CartPanel.H > 0 {
+		cartPad := float32(10)
+		titleH := float32(58)
+		footerH := float32(58)
+		bodyY := layout.CartPanel.Y + titleH
+		bodyBottom := layout.CartPanel.Bottom() - footerH
+		rowGap := float32(8)
+		rowH := economyRowHeight
+		available := maxf(0, bodyBottom-bodyY)
+		maxRows := int((available + rowGap) / (rowH + rowGap))
+		if maxRows < 0 {
+			maxRows = 0
+		}
+		visible := minInt(cartCount, maxRows)
+		for i := 0; i < visible; i++ {
+			layout.CartRows = append(layout.CartRows, Rect{
+				X: layout.CartPanel.X + cartPad,
+				Y: bodyY + float32(i)*(rowH+rowGap),
+				W: layout.CartPanel.W - 2*cartPad,
+				H: rowH,
+			})
+		}
+		footerY := layout.CartPanel.Bottom() - footerH + 3
+		confirmW := minf(150, maxf(112, layout.CartPanel.W*0.38))
+		layout.CartConfirm = Rect{
+			X: layout.CartPanel.Right() - cartPad - confirmW,
+			Y: footerY,
+			W: confirmW,
+			H: 48,
+		}
+		layout.CartSubtotal = Rect{
+			X: layout.CartPanel.X + cartPad,
+			Y: footerY,
+			W: maxf(0, layout.CartConfirm.X-layout.CartPanel.X-2*cartPad),
+			H: 48,
+		}
+	}
 	return layout
 }
 
@@ -116,7 +202,7 @@ func LayoutStorageScrolled(viewport Viewport, rowCount int, offset float32) Econ
 	return layout
 }
 
-func LayoutEconomyQuantity(viewport Viewport) (modal, minus, plus, confirm, cancel Rect) {
+func LayoutEconomyQuantity(viewport Viewport) (modal, minus, plus, maximum, confirm, cancel Rect) {
 	safe := viewport.SafeRect()
 	if safe.W <= 0 || safe.H <= 0 {
 		return
@@ -128,10 +214,13 @@ func LayoutEconomyQuantity(viewport Viewport) (modal, minus, plus, confirm, canc
 	modalH := minf(300, maxf(240, safe.H*0.40))
 	modal = Rect{X: safe.X + (safe.W-modalW)/2, Y: safe.Y + (safe.H-modalH)/2, W: modalW, H: modalH}
 	buttonY := modal.Bottom() - 68
-	buttonW := (modal.W - 4*12) / 3
-	minus = Rect{X: modal.X + 12, Y: buttonY, W: buttonW, H: 56}
-	plus = Rect{X: minus.Right() + 12, Y: buttonY, W: buttonW, H: 56}
-	confirm = Rect{X: plus.Right() + 12, Y: buttonY, W: buttonW, H: 56}
+	gap := float32(8)
+	sidePad := float32(12)
+	buttonW := (modal.W - 2*sidePad - 3*gap) / 4
+	minus = Rect{X: modal.X + sidePad, Y: buttonY, W: buttonW, H: 56}
+	plus = Rect{X: minus.Right() + gap, Y: buttonY, W: buttonW, H: 56}
+	maximum = Rect{X: plus.Right() + gap, Y: buttonY, W: buttonW, H: 56}
+	confirm = Rect{X: maximum.Right() + gap, Y: buttonY, W: buttonW, H: 56}
 	cancel = Rect{X: modal.Right() - 112 - 12, Y: modal.Y + 12, W: 112, H: 52}
 	return
 }

@@ -245,3 +245,96 @@ func TestDialogSpeakerBlocksCollapseRepeatedSpeakerLabels(t *testing.T) {
 		}
 	}
 }
+
+
+func TestDialogLandscapeMenuUsesReadableRows(t *testing.T) {
+	model := MobileDialogModel{
+		Open: true,
+		Title: "Nelliorde",
+		Message: "Can I sing, you ask? Certainly, and if I may say so, pleasureably...",
+		Options: []DialogOption{
+			{Label: "Bragi's Poem", Action: DialogMenuChoice, Enabled: true},
+			{Label: "Eternal Chaos", Action: DialogMenuChoice, Enabled: true},
+			{Label: "Assassin Cross of Sunset", Action: DialogMenuChoice, Enabled: true},
+			{Label: "Cancel", Action: DialogNPCClose, Enabled: true},
+		},
+	}
+	layout := LayoutDialog(Viewport{Width: 1295, Height: 509, SafeRight: 72}, model)
+	if len(layout.Options) != 4 {
+		t.Fatalf("option count=%d", len(layout.Options))
+	}
+	if layout.Options[2].Y <= layout.Options[0].Y {
+		t.Fatalf("four choices should wrap to multiple rows: %+v", layout.Options)
+	}
+	if layout.Options[0].W < 200 {
+		t.Fatalf("menu choice too narrow: %+v", layout.Options[0])
+	}
+}
+
+func TestDialogPortraitCapsSheetAndScrollsBody(t *testing.T) {
+	model := MobileDialogModel{
+		Open: true,
+		Title: "Rachel",
+		Message: strings.Repeat("A long sentence that must remain readable in portrait mode. ", 20),
+		Options: []DialogOption{{Label: "Close", Action: DialogNPCClose, Enabled: true}},
+	}
+	viewport := Viewport{Width: 1080, Height: 2340, SafeTop: 48, SafeBottom: 96}
+	c := NewDialogController(model, viewport, nil)
+	safe := viewport.SafeRect()
+	if c.Layout.Panel.H > safe.H*0.53 {
+		t.Fatalf("portrait dialog grew over cut-in band: panel=%+v safe=%+v", c.Layout.Panel, safe)
+	}
+	if c.Layout.MessageContentHeight <= c.Layout.Message.H {
+		t.Fatalf("long portrait message should overflow: content=%v viewport=%v", c.Layout.MessageContentHeight, c.Layout.Message.H)
+	}
+	if !c.ScrollBy(120) || c.ScrollOffset <= 0 {
+		t.Fatalf("dialog body did not scroll: offset=%v", c.ScrollOffset)
+	}
+}
+
+
+func TestDialogPortraitMenuUsesTwoColumnsWhenWidthAllows(t *testing.T) {
+	model := MobileDialogModel{
+		Open: true,
+		Title: "Nelliorde",
+		Message: "Can I sing, you ask? Certainly, and if I may say so, pleasureably. Which song would you care to hear?",
+		Options: []DialogOption{
+			{Label: "Bragi's Poem", Action: DialogMenuChoice, Enabled: true},
+			{Label: "Eternal Chaos", Action: DialogMenuChoice, Enabled: true},
+			{Label: "Assassin in the Sunset", Action: DialogMenuChoice, Enabled: true},
+			{Label: "Cancel", Action: DialogNPCClose, Enabled: true},
+		},
+	}
+	layout := LayoutDialog(Viewport{Width: 840, Height: 2289, SafeTop: 48, SafeBottom: 96}, model)
+	if !layout.Portrait || len(layout.Options) != 4 {
+		t.Fatalf("unexpected portrait menu layout: portrait=%t options=%d", layout.Portrait, len(layout.Options))
+	}
+	if layout.Options[0].Y != layout.Options[1].Y {
+		t.Fatalf("first two portrait choices should share a row: %+v", layout.Options)
+	}
+	if layout.Options[2].Y <= layout.Options[0].Y || layout.Options[2].Y != layout.Options[3].Y {
+		t.Fatalf("second portrait row was not formed: %+v", layout.Options)
+	}
+	if layout.Options[0].W < 180 || layout.Options[2].W < 180 {
+		t.Fatalf("portrait menu choices are too narrow: %+v", layout.Options)
+	}
+}
+
+func TestDialogCentersIncompleteFinalChoiceRow(t *testing.T) {
+	model := MobileDialogModel{
+		Open: true,
+		Title: "NPC",
+		Message: "Pick one.",
+		Options: []DialogOption{
+			{Label: "One", Action: DialogMenuChoice, Enabled: true},
+			{Label: "Two", Action: DialogMenuChoice, Enabled: true},
+			{Label: "Cancel", Action: DialogNPCClose, Enabled: true},
+		},
+	}
+	layout := LayoutDialog(Viewport{Width: 840, Height: 2289, SafeTop: 48, SafeBottom: 96}, model)
+	last := layout.Options[2]
+	centerDelta := (last.X + last.W/2) - (layout.Actions.X + layout.Actions.W/2)
+	if centerDelta < -0.5 || centerDelta > 0.5 {
+		t.Fatalf("single final-row choice is not centered: option=%+v actions=%+v delta=%.2f", last, layout.Actions, centerDelta)
+	}
+}

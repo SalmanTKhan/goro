@@ -17,7 +17,7 @@ func TestInventoryPresentationUsesGridWorkspaceAndCompactChrome(t *testing.T) {
 		if layout.GridViewport.W <= 0 || layout.GridViewport.H <= 0 || layout.GridViewport.Right() > layout.Safe.Right()+0.01 {
 			t.Fatalf("viewport %+v: invalid grid workspace: grid=%+v safe=%+v", viewport, layout.GridViewport, layout.Safe)
 		}
-		if layout.GridColumns < 4 {
+		if layout.GridColumns < 3 {
 			t.Fatalf("viewport %+v: grid has only %d columns", viewport, layout.GridColumns)
 		}
 		for _, item := range model.Items {

@@ -54,6 +54,122 @@ func (c *NPCCutinOverlay) Draw(screen *render.Frame) {
 	if c == nil || screen == nil || npcCutinIsMovable(c.position) {
 		return
 	}
+	c.drawTexture(screen)
+}
+
+// DrawMobile renders the authoritative script cut-in beneath the mobile dialog.
+// Mobile owns its own window/chrome, so even the desktop "window" variants are
+// presented as the illustration itself instead of publishing a second desktop
+// widget tree over the touch UI.
+func (c *NPCCutinOverlay) DrawMobile(screen *render.Frame, dialogTop ...int) {
+	if c == nil || screen == nil {
+		return
+	}
+	bounds := screen.Bounds()
+	if bounds.Dy() > bounds.Dx() {
+		top := 0
+		if len(dialogTop) > 0 {
+			top = dialogTop[0]
+		}
+		c.drawMobilePortrait(screen, top)
+		return
+	}
+	c.drawTexture(screen)
+}
+
+type mobilePortraitCutinPlacement struct {
+	X, Y  float64
+	Scale float64
+}
+
+func npcMobilePortraitPlacement(screen image.Rectangle, position uint8, texture *render.Image, dialogTop int) (mobilePortraitCutinPlacement, bool) {
+	if texture == nil || texture.Bounds().Empty() || screen.Empty() {
+		return mobilePortraitCutinPlacement{}, false
+	}
+	tw := float64(texture.Bounds().Dx())
+	th := float64(texture.Bounds().Dy())
+	sw := float64(screen.Dx())
+	sh := float64(screen.Dy())
+	if tw <= 0 || th <= 0 || sw <= 0 || sh <= 0 {
+		return mobilePortraitCutinPlacement{}, false
+	}
+
+	topMargin := sh * 0.03
+	if topMargin < 16 {
+		topMargin = 16
+	}
+	gap := sh * 0.015
+	if gap < 12 {
+		gap = 12
+	}
+	if gap > 20 {
+		gap = 20
+	}
+	bottomLimit := float64(dialogTop) - gap
+	if dialogTop <= screen.Min.Y || bottomLimit <= float64(screen.Min.Y)+topMargin+48 {
+		bottomLimit = float64(screen.Min.Y) + sh*0.64
+	}
+	if bottomLimit > float64(screen.Max.Y)-gap {
+		bottomLimit = float64(screen.Max.Y) - gap
+	}
+
+	availableH := bottomLimit - (float64(screen.Min.Y) + topMargin)
+	if availableH <= 0 {
+		return mobilePortraitCutinPlacement{}, false
+	}
+	maxH := sh * 0.34
+	if availableH < maxH {
+		maxH = availableH
+	}
+	maxW := sw * 0.62
+
+	scale := 1.20
+	if tw*scale > maxW {
+		scale = maxW / tw
+	}
+	if th*scale > maxH {
+		scale = maxH / th
+	}
+	if scale <= 0 {
+		return mobilePortraitCutinPlacement{}, false
+	}
+	drawW := tw * scale
+	drawH := th * scale
+	marginX := sw * 0.04
+	x := float64(screen.Min.X) + marginX
+	switch position {
+	case network.NPCCutinCenter, network.NPCCutinWindow, network.NPCCutinWindowless:
+		x = float64(screen.Min.X) + (sw-drawW)/2
+	case network.NPCCutinRight:
+		x = float64(screen.Max.X) - drawW - marginX
+	}
+	y := bottomLimit - drawH
+	minY := float64(screen.Min.Y) + topMargin
+	if y < minY {
+		y = minY
+	}
+	return mobilePortraitCutinPlacement{X: x, Y: y, Scale: scale}, true
+}
+
+func (c *NPCCutinOverlay) drawMobilePortrait(screen *render.Frame, dialogTop int) {
+	if c == nil || screen == nil || !c.Visible() {
+		return
+	}
+	placement, ok := npcMobilePortraitPlacement(screen.Bounds(), c.position, c.texture, dialogTop)
+	if !ok {
+		return
+	}
+	var opts render.DrawImageOptions
+	opts.GeoM.Scale(placement.Scale, placement.Scale)
+	opts.GeoM.Translate(placement.X, placement.Y)
+	opts.Filter = render.FilterLinear
+	screen.DrawImage(c.texture, &opts)
+}
+
+func (c *NPCCutinOverlay) drawTexture(screen *render.Frame) {
+	if c == nil || screen == nil || !c.Visible() {
+		return
+	}
 	bounds, ok := npcCutinBounds(screen.Bounds(), c.position, c.texture)
 	if !ok {
 		return

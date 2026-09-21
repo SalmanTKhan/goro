@@ -4,6 +4,8 @@ package main
 
 import (
 	"fmt"
+	"image/color"
+	"time"
 
 	uiapp "github.com/gogpu/ui/app"
 	"github.com/gogpu/ui/widget"
@@ -25,8 +27,9 @@ type mobileWidgets struct {
 	kit   uimobile.Kit
 	baked *render.Image
 	w, h  int
-	key   string
-	dirty bool
+	key        string
+	dirty      bool
+	lastRaster time.Time
 	// logged keeps the one-shot diagnostic from repeating every frame.
 	logged bool
 }
@@ -56,10 +59,25 @@ func (m *mobileWidgets) Invalidate() {
 	}
 }
 
+// InvalidateSize drops the retained raster after an orientation or surface
+// size change. Reusing a baked image with the previous dimensions can expose a
+// partially laid-out frame while Android is rotating.
+func (m *mobileWidgets) InvalidateSize() {
+	if m == nil {
+		return
+	}
+	m.dirty = true
+	m.baked = nil
+	m.w, m.h = 0, 0
+	m.key = ""
+	m.logged = false
+}
+
 // sprites is the art a screen wants composited over its raster.
 type sprites struct {
-	items  []uimobile.IconPlacement
-	skills []uimobile.SkillIconPlacement
+	items    []uimobile.IconPlacement
+	skills   []uimobile.SkillIconPlacement
+	statuses []uimobile.StatusIconPlacement
 	// preview is the character sprite's frame on the profile screen. It draws
 	// through a different call than item art, so it is reported separately.
 	preview      mobileui.Rect
@@ -73,6 +91,10 @@ type sprites struct {
 func (p *mobilePresentation) tree(k uimobile.Kit) (widget.Widget, sprites) {
 	vp := p.viewport
 	switch {
+	case p.game != nil && p.game.Online() && !p.game.SessionPlaying():
+		// Pre-world online login is drawn by drawOnlineStatus. Never let a
+		// retained world HUD cover server/account/character-service selection.
+		return nil, sprites{}
 	case p.startup != nil && p.startup.Phase == mobileui.StartupTitle:
 		return k.StartupTree(p.startup.Model, mobileui.LayoutStartup(vp)), sprites{}
 
@@ -96,7 +118,7 @@ func (p *mobilePresentation) tree(k uimobile.Kit) (widget.Widget, sprites) {
 
 	case p.dialogController != nil && p.dialogController.Model.Open:
 		c := p.dialogController
-		return k.DialogTree(c.Model, c.Layout), sprites{}
+		return k.DialogTreeScrolled(c.Model, c.Layout, c.ScrollOffset), sprites{}
 
 	case p.economyController != nil && p.economyController.Screen == mobileui.EconomyShop:
 		c := p.economyController
@@ -104,12 +126,24 @@ func (p *mobilePresentation) tree(k uimobile.Kit) (widget.Widget, sprites) {
 		if c.Tab == mobileui.ShopSellTab {
 			items = c.Shop.SellItems
 		}
-		return k.ShopTree(c.Shop, c.Layout, c.Tab, c.Quantity),
-			sprites{items: uimobile.ShopIconRects(items, c.Layout)}
+		art := uimobile.ShopIconRects(items, c.Layout)
+		art = append(art, uimobile.ShopCartIconRects(c.Shop.Cart, c.Layout)...)
+		quantity := c.Quantity
+		if quantity.Open {
+			// The quantity modal is drawn after live item art in drawWidgets so
+			// it can stay topmost without hiding the underlying shop sprites.
+			quantity = mobileui.EconomyQuantityState{}
+		}
+		return k.ShopTree(c.Shop, c.Layout, c.Tab, quantity),
+			sprites{items: art}
 
 	case p.economyController != nil && p.economyController.Screen == mobileui.EconomyStorage:
 		c := p.economyController
-		return k.StorageTree(c.Storage, c.Layout, c.Quantity),
+		quantity := c.Quantity
+		if quantity.Open {
+			quantity = mobileui.EconomyQuantityState{}
+		}
+		return k.StorageTree(c.Storage, c.Layout, quantity),
 			sprites{items: uimobile.StorageIconRects(c.Storage, c.Layout)}
 
 	case p.characterSkills != nil && p.navigation.Screen == mobileui.ScreenCharacter:
@@ -146,7 +180,7 @@ func (p *mobilePresentation) tree(k uimobile.Kit) (widget.Widget, sprites) {
 	case p.inventory == nil || p.inventory.State.Screen == mobileui.ScreenWorldHUD:
 		skills, loot := uimobile.HUDIconRects(p.hudModel, p.hud)
 		return k.HUDTree(p.hudModel, p.hud, p.navigation),
-			sprites{items: loot, skills: skills}
+			sprites{items: loot, skills: skills, statuses: uimobile.HUDStatusIconRects(p.hudModel, p.hud)}
 	}
 	return nil, sprites{}
 }
@@ -179,17 +213,40 @@ func (p *mobilePresentation) widgetStateKey() string {
 	if p.dialogController != nil {
 		dialog = p.dialogController.Model.Open
 	}
-	return fmt.Sprintf("%d|%#v|%t|%t|%t|%t|%t|%d|%d", phase, p.navigation, trade, vending, profile, chat, dialog, func() mobileui.EconomyScreen {
-		if p.economyController != nil {
-			return p.economyController.Screen
-		}
-		return mobileui.EconomyClosed
-	}(), func() mobileui.Screen {
-		if p.inventory != nil {
-			return p.inventory.State.Screen
-		}
-		return mobileui.ScreenWorldHUD
-	}())
+	inventoryScreen := mobileui.ScreenWorldHUD
+	inventoryOffset := float32(0)
+	if p.inventory != nil {
+		inventoryScreen = p.inventory.State.Screen
+		inventoryOffset = p.inventory.State.Scroll.Offset
+	}
+	economyScreen := mobileui.EconomyClosed
+	economyTab := mobileui.ShopBuyTab
+	economyOffset := float32(0)
+	economyQuantityOpen := false
+	economyQuantityAction := mobileui.EconomyQuantityAction(0)
+	economyQuantityValue := 0
+	if p.economyController != nil {
+		economyScreen = p.economyController.Screen
+		economyTab = p.economyController.Tab
+		economyOffset = p.economyController.Scroll.Offset
+		economyQuantityOpen = p.economyController.Quantity.Open
+		economyQuantityAction = p.economyController.Quantity.Action
+		economyQuantityValue = p.economyController.Quantity.Value
+	}
+	characterOffset, skillOffset := float32(0), float32(0)
+	skillSelected, selectedSkill := false, -1
+	characterSkillsScreen := mobileui.ScreenWorldHUD
+	if p.characterSkills != nil {
+		characterSkillsScreen = p.characterSkills.Screen
+		characterOffset = p.characterSkills.CharacterOffset
+		skillOffset = p.characterSkills.SkillOffset
+		skillSelected = p.characterSkills.Skills.Selection.HasSelection
+		selectedSkill = p.characterSkills.Skills.Selection.SelectedIndex
+	}
+	return fmt.Sprintf("%d|%#v|%t|%t|%t|%t|%t|%d|%d|%.2f|%t|%d|%d|%d|%.2f|%d|%.2f|%.2f|%t|%d",
+		phase, p.navigation, trade, vending, profile, chat, dialog,
+		economyScreen, economyTab, economyOffset, economyQuantityOpen, economyQuantityAction, economyQuantityValue,
+		inventoryScreen, inventoryOffset, characterSkillsScreen, characterOffset, skillOffset, skillSelected, selectedSkill)
 }
 
 // drawWidgets renders the current screen through the widget layer. It reports
@@ -209,11 +266,22 @@ func (m *mobileWidgets) drawWidgets(p *mobilePresentation, frame *render.Frame) 
 
 	m.win.width, m.win.height = w, h
 	key := p.widgetStateKey()
-	if key != m.key || m.w != w || m.h != h {
+	keyChanged := key != m.key || m.w != w || m.h != h
+	if keyChanged {
 		m.dirty = true
 	}
 	drawn := false
-	if m.dirty || m.baked == nil {
+	shouldRaster := m.dirty || m.baked == nil
+	if shouldRaster && !keyChanged && m.baked != nil && p.widgetHUDActive() && time.Since(m.lastRaster) < 100*time.Millisecond {
+		// The world HUD contains fast-changing values (cooldowns, HP/SP, target
+		// state), but rasterizing and uploading a full-screen RGBA texture for
+		// every simulation tick is disproportionately expensive on mobile GPUs.
+		// Cap retained HUD refresh to 10 Hz while world rendering, input, and
+		// network/game updates continue at their normal cadence. Navigation and
+		// size changes bypass this throttle so taps still produce immediate UI.
+		shouldRaster = false
+	}
+	if shouldRaster {
 		m.ui.SetRoot(tree)
 		// SetRoot only replaces the retained tree. Frame performs the framework
 		// layout/update pass that gives the absolute Canvas and its children
@@ -227,6 +295,7 @@ func (m *mobileWidgets) drawWidgets(p *mobilePresentation, frame *render.Frame) 
 		}
 		if rasterDrawn {
 			m.baked, m.w, m.h = image, w, h
+			m.lastRaster = time.Now()
 			drawn = true
 		}
 		m.key = key
@@ -242,10 +311,17 @@ func (m *mobileWidgets) drawWidgets(p *mobilePresentation, frame *render.Frame) 
 	var opts render.DrawImageOptions
 	opts.Filter = render.FilterNearest
 	frame.DrawImage(m.baked, &opts)
-	if p.widgetHUDActive() && p.settings.Display.ShowMinimap && p.hud.Minimap.W > 0 {
+	if p.navigation.Screen == mobileui.ScreenMap && p.mapController != nil && p.mapController.Layout.MapViewport.W > 0 {
+		v := p.mapController.Layout.MapViewport
+		mapRect := mobileui.Rect{X: v.X + 12, Y: v.Y + 12, W: v.W - 24, H: v.H - 24}
+		p.game.DrawMobileMinimap(frame, mapRect)
+	}
+	if p.widgetHUDActive() && !p.navigation.MenuOpen && p.settings.Display.ShowMinimap && p.hud.Minimap.W > 0 {
 		mapRect := mobileui.Rect{X: p.hud.Minimap.X + 10, Y: p.hud.Minimap.Y + 34, W: p.hud.Minimap.W - 20, H: p.hud.Minimap.H - 70}
 		render.DrawRect(frame, float64(mapRect.X), float64(mapRect.Y), float64(mapRect.W), float64(mapRect.H), mobileColors().mapBackground)
-		p.drawMinimapTerrain(frame, mapRect)
+		if !p.game.DrawMobileMinimap(frame, mapRect) {
+			p.drawMinimapTerrain(frame, mapRect)
+		}
 	}
 
 	// Real art on top, from the authoritative resource path.
@@ -255,6 +331,16 @@ func (m *mobileWidgets) drawWidgets(p *mobilePresentation, frame *render.Frame) 
 			continue
 		}
 		p.game.DrawMobileInventoryItemIcon(frame, placement.Item, int(placement.Rect.X), int(placement.Rect.Y), side)
+		if placement.Dimmed && placement.OverlayRect.W > 0 && placement.OverlayRect.H > 0 {
+			drawMobileShortcutDim(frame, placement.OverlayRect)
+		}
+		if placement.ShortcutBadge != "" && placement.OverlayRect.W > 0 {
+			drawMobileShortcutBadge(frame, placement.ShortcutBadge, placement.OverlayRect, true, p.mobileTextScale())
+		} else if placement.ShowQuantity && placement.Item.Quantity > 1 {
+			drawMobileTextFit(frame, fmt.Sprintf("x%d", placement.Item.Quantity),
+				placement.Rect.X, placement.Rect.Bottom()-18, placement.Rect.W,
+				mobileColors().title, p.mobileTextScale()*0.58)
+		}
 	}
 	if art.previewValid {
 		p.game.DrawMobileProfilePreview(frame, art.previewOf,
@@ -266,6 +352,30 @@ func (m *mobileWidgets) drawWidgets(p *mobilePresentation, frame *render.Frame) 
 			continue
 		}
 		p.game.DrawMobileSkillIcon(frame, placement.Skill, int(placement.Rect.X), int(placement.Rect.Y), side)
+		if placement.Dimmed && placement.OverlayRect.W > 0 && placement.OverlayRect.H > 0 {
+			drawMobileShortcutDim(frame, placement.OverlayRect)
+		}
+		if placement.ShortcutBadge != "" && placement.OverlayRect.W > 0 {
+			drawMobileShortcutBadge(frame, placement.ShortcutBadge, placement.OverlayRect, false, p.mobileTextScale())
+		}
+		if placement.CooldownText != "" && placement.OverlayRect.W > 0 {
+			drawMobileTextCentered(frame, placement.CooldownText, placement.OverlayRect,
+				color.RGBA{R: 255, G: 255, B: 255, A: 255}, p.mobileTextScale()*0.78)
+		}
+	}
+	for _, placement := range art.statuses {
+		side := int(min32(placement.Rect.W, placement.Rect.H))
+		if side < 6 {
+			continue
+		}
+		p.game.DrawMobileStatusIcon(frame, placement.Status, int(placement.Rect.X), int(placement.Rect.Y), side)
+	}
+	if p.economyController != nil && p.economyController.Quantity.Open &&
+		(p.economyController.Screen == mobileui.EconomyShop || p.economyController.Screen == mobileui.EconomyStorage) {
+		// Economy item sprites are live art composited over the retained raster.
+		// Draw the modal last so the shop remains visible beneath the scrim
+		// while no sprite can bleed through the modal itself.
+		p.drawEconomyQuantity(frame)
 	}
 	return true
 }
@@ -298,6 +408,69 @@ func vendingSelection(state mobileui.VendingSelectionState) int {
 		return -1
 	}
 	return state.SelectedIndex
+}
+
+func drawMobileShortcutDim(frame *render.Frame, rect mobileui.Rect) {
+	if frame == nil || rect.W <= 0 || rect.H <= 0 {
+		return
+	}
+	render.DrawRect(frame, float64(rect.X+2), float64(rect.Y+2), float64(rect.W-4), float64(rect.H-4),
+		color.RGBA{R: 20, G: 32, B: 48, A: 132})
+}
+
+func drawMobileShortcutBadge(frame *render.Frame, text string, rect mobileui.Rect, right bool, textScale float64) {
+	if frame == nil || text == "" || rect.W <= 0 || rect.H <= 0 {
+		return
+	}
+	w, h := render.BitmapTextSize(text)
+	if w <= 0 || h <= 0 {
+		return
+	}
+
+	// Shortcut annotations need to survive bright skill/item art and phone
+	// downscaling. Size them from the slot itself instead of the global text
+	// scale, with a small floor so 52-64px slots remain readable.
+	targetTextH := rect.H * 0.24
+	if targetTextH < 11 {
+		targetTextH = 11
+	}
+	if targetTextH > 16 {
+		targetTextH = 16
+	}
+	scale := float64(targetTextH) / float64(h)
+	minScale := textScale * 0.82
+	if scale < minScale {
+		scale = minScale
+	}
+
+	textW := float32(w) * float32(scale)
+	textH := float32(h) * float32(scale)
+	maxTextW := rect.W - 12
+	if textW > maxTextW && w > 0 {
+		scale *= float64(maxTextW / textW)
+		textW = maxTextW
+		textH = float32(h) * float32(scale)
+	}
+
+	padX := float32(4)
+	padY := float32(2)
+	badgeW := textW + 2*padX
+	badgeH := textH + 2*padY
+	x := rect.X + 2
+	y := rect.Y + 2
+	if right {
+		x = rect.Right() - badgeW - 2
+		y = rect.Bottom() - badgeH - 2
+	}
+
+	badge := mobileui.Rect{X: x, Y: y, W: badgeW, H: badgeH}
+	render.DrawRect(frame, float64(badge.X), float64(badge.Y), float64(badge.W), float64(badge.H),
+		color.RGBA{R: 16, G: 22, B: 30, A: 225})
+
+	textX := badge.X + padX
+	textY := badge.Y + padY
+	drawMobileText(frame, text, textX+1, textY+1, color.RGBA{R: 0, G: 0, B: 0, A: 255}, scale)
+	drawMobileText(frame, text, textX, textY, color.RGBA{R: 255, G: 255, B: 255, A: 255}, scale)
 }
 
 func min32(a, b float32) float32 {

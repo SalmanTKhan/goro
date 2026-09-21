@@ -13,6 +13,9 @@ func Fixture(name string) MobileHUDModel {
 		m.Skills = append(m.Skills, SkillSlotModel{Index: i, SkillID: uint16(100 + i), Name: fmt.Sprintf("Skill %d", i+1), Level: i%3 + 1, MaxLevel: 5, IconKey: fmt.Sprintf("skill-%d", i+1), Usable: true})
 	}
 	switch name {
+	case "progression":
+		m.Player.StatPoints = 7
+		m.Player.SkillPoints = 3
 	case "monster":
 		m.Target = TargetHUDModel{Visible: true, ID: 9001, Name: "Poring", HP: 38, MaxHP: 120, Relation: TargetHostile}
 		m.Skills[1].TargetMode = input.SkillTargetActor

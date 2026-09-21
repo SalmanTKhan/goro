@@ -25,11 +25,14 @@ func (k Kit) HUDTree(
 	c := NewCanvas(layout.Safe.W+2*layout.Safe.X, layout.Safe.H+2*layout.Safe.Y)
 
 	k.placePlayerPanel(c, model.Player, layout.PlayerPanel)
+	k.placeProgressionActions(c, model.Player, layout)
 	k.placeTargetPanel(c, model.Target, layout.TargetPanel)
-	k.placeStatusEffects(c, model.Statuses, layout.StatusArea)
+	k.placeStatusEffects(c, model.Statuses, layout.StatusSlots)
 	k.placeMinimap(c, model.Minimap, layout.Minimap)
 	k.placeLoot(c, model.Loot, layout)
-	k.placeSkillBar(c, model.Skills, layout, nav)
+	k.placeSkillBar(c, model, layout, nav)
+	k.placePrimaryAction(c, model.Target, layout.PrimaryAction)
+	k.placeWorldUtilities(c, model, layout, nav)
 	k.placeChatBar(c, layout)
 	k.placeCombatBanner(c, layout, nav)
 	k.placeMenu(c, layout, nav)
@@ -49,8 +52,14 @@ func (k Kit) placePlayerPanel(c *Canvas, player mobileui.PlayerHUDModel, area mo
 		return
 	}
 
-	// Name and level share the first of three rows; HP and SP take the rest.
-	rowH := inner.H / 3
+	// Name / HP / SP remain the primary rows. Two thin strips at the bottom
+	// expose Base EXP and Job EXP continuously, matching the legacy client's
+	// progression feedback without increasing the card footprint.
+	expH := float32(5)
+	expGap := float32(2)
+	expBlockH := 2*expH + expGap
+	contentH := max32(0, inner.H-expBlockH-4)
+	rowH := contentH / 3
 	levelW := inner.W * 0.34
 	c.Place(k.Content(player.Name, RoleValue),
 		mobileui.Rect{X: inner.X, Y: inner.Y, W: inner.W - levelW, H: rowH})
@@ -61,10 +70,35 @@ func (k Kit) placePlayerPanel(c *Canvas, player mobileui.PlayerHUDModel, area mo
 		BarHP, int64(player.HP), int64(player.MaxHP))
 	k.placeCompactMeter(c, mobileui.Rect{X: inner.X, Y: inner.Y + 2*rowH, W: inner.W, H: rowH},
 		BarSP, int64(player.SP), int64(player.MaxSP))
+
+	expY := inner.Y + contentH + 4
+	c.Place(k.Bar(BarBaseEXP, fraction64(player.BaseExp, player.NextBaseExp)),
+		mobileui.Rect{X: inner.X, Y: expY, W: inner.W, H: expH})
+	c.Place(k.Bar(BarJobEXP, fraction64(player.JobExp, player.NextJobExp)),
+		mobileui.Rect{X: inner.X, Y: expY + expH + expGap, W: inner.W, H: expH})
 }
 
 func levelLine(player mobileui.PlayerHUDModel) string {
 	return "Lv " + strconv.Itoa(player.BaseLevel) + "/" + strconv.Itoa(player.JobLevel)
+}
+
+func fraction64(value, max int64) float32 {
+	if max <= 0 || value <= 0 {
+		return 0
+	}
+	if value >= max {
+		return 1
+	}
+	return float32(value) / float32(max)
+}
+
+func (k Kit) placeProgressionActions(c *Canvas, _ mobileui.PlayerHUDModel, layout mobileui.HUDLayout) {
+	if layout.LevelUpAction.W > 0 {
+		c.Place(k.Button("LV+", ButtonPressed), layout.LevelUpAction)
+	}
+	if layout.SkillUpAction.W > 0 {
+		c.Place(k.Button("SK+", ButtonPressed), layout.SkillUpAction)
+	}
 }
 
 // placeCompactMeter is the HUD's meter: a bar with its numbers in a column
@@ -101,25 +135,64 @@ func (k Kit) placeTargetPanel(c *Canvas, target mobileui.TargetHUDModel, area mo
 		return
 	}
 	half := inner.H / 2
-	c.Place(k.Content(target.Name, RoleValue), mobileui.Rect{X: inner.X, Y: inner.Y, W: inner.W, H: half})
-	k.placeCompactMeter(c, mobileui.Rect{X: inner.X, Y: inner.Y + half, W: inner.W, H: half},
-		BarHP, int64(target.HP), int64(target.MaxHP))
+	relationW := min32(104, inner.W*0.28)
+	nameW := max32(0, inner.W-relationW-k.Theme.Metrics.TableGap)
+	c.Place(k.Content(target.Name, RoleValue), mobileui.Rect{X: inner.X, Y: inner.Y, W: nameW, H: half})
+	c.Place(k.RightAligned(targetRelationLabel(target.Relation), RoleMuted),
+		mobileui.Rect{X: inner.X + nameW + k.Theme.Metrics.TableGap, Y: inner.Y, W: relationW, H: half})
+	hpRow := mobileui.Rect{X: inner.X, Y: inner.Y + half, W: inner.W, H: half}
+	if target.MaxHP > 0 {
+		k.placeCompactMeter(c, hpRow, BarHP, int64(target.HP), int64(target.MaxHP))
+	} else {
+		// Online actors do not always have a life packet cached yet. Do not
+		// present unknown health as a real empty 0/0 gauge.
+		c.Place(k.Content("HP --", RoleMuted), hpRow)
+	}
+}
+
+func targetRelationLabel(relation mobileui.TargetRelation) string {
+	switch relation {
+	case mobileui.TargetHostile:
+		return "ENEMY"
+	case mobileui.TargetNPC:
+		return "NPC"
+	case mobileui.TargetFriendly:
+		return "ALLY"
+	default:
+		return "TARGET"
+	}
+}
+
+func primaryActionLabel(target mobileui.TargetHUDModel) string {
+	switch target.Relation {
+	case mobileui.TargetHostile:
+		return "Attack"
+	case mobileui.TargetNPC:
+		return "Talk"
+	default:
+		return "Target"
+	}
+}
+
+func (k Kit) placePrimaryAction(c *Canvas, target mobileui.TargetHUDModel, area mobileui.Rect) {
+	if !target.Visible || target.ID == 0 || area.W <= 0 || area.H <= 0 {
+		return
+	}
+	c.Place(k.Button(primaryActionLabel(target), ButtonPressed), area)
 }
 
 // placeStatusEffects lays buffs and debuffs out as a row of small squares.
-func (k Kit) placeStatusEffects(c *Canvas, statuses []mobileui.StatusEffectModel, area mobileui.Rect) {
-	if len(statuses) == 0 || area.W <= 0 || area.H <= 0 {
+// Retail artwork is composited by the Android host after this retained HUD
+// raster, using the exact same StatusSlots geometry.
+func (k Kit) placeStatusEffects(c *Canvas, statuses []mobileui.StatusEffectModel, slots []mobileui.Rect) {
+	if len(statuses) == 0 || len(slots) == 0 {
 		return
 	}
-	side := min32(area.H, area.W)
-	gap := k.Theme.Metrics.TableGap * 2
-	x := area.X
-	for range statuses {
-		if x+side > area.Right() {
-			return
+	for i, slot := range slots {
+		if i >= len(statuses) || slot.W <= 0 || slot.H <= 0 {
+			break
 		}
-		c.Place(k.Slot(true, false), mobileui.Rect{X: x, Y: area.Y, W: side, H: side})
-		x += side + gap
+		c.Place(k.Slot(true, false), slot)
 	}
 }
 
@@ -170,7 +243,7 @@ func lootLabel(item mobileui.LootItemModel) string {
 // placeSkillBar draws the hotbar plus its paging controls.
 func (k Kit) placeSkillBar(
 	c *Canvas,
-	skills []mobileui.SkillSlotModel,
+	model mobileui.MobileHUDModel,
 	layout mobileui.HUDLayout,
 	nav mobileui.Navigation,
 ) {
@@ -182,23 +255,21 @@ func (k Kit) placeSkillBar(
 			continue
 		}
 		index := layout.SkillStart + i
-		if index >= len(skills) {
-			// An empty hotbar position still reads as a slot.
+		shortcut, ok := mobileui.ShortcutAt(model, index)
+		if !ok {
 			c.Place(k.Slot(false, false), slot)
 			continue
 		}
-		skill := skills[index]
-		targeting := nav.Targeting.Mode != 0 && nav.Targeting.SkillID == skill.SkillID
-		c.Place(k.Slot(true, targeting), slot)
-
-		// Level sits along the bottom of the slot, out of the sprite's way; a
-		// skill that cannot be used right now is shown muted rather than hidden.
-		role := RoleMuted
-		if !skill.Usable {
-			role = RoleLabel
+		switch shortcut.Kind {
+		case mobileui.ShortcutItem:
+			c.Place(k.Slot(true, false), slot)
+		case mobileui.ShortcutSkill:
+			skill := shortcut.Skill
+			targeting := nav.Targeting.Mode != 0 && nav.Targeting.SkillID == skill.SkillID
+			c.Place(k.Slot(true, targeting), slot)
+		default:
+			c.Place(k.Slot(false, false), slot)
 		}
-		c.Place(k.Centered("Lv"+strconv.Itoa(skill.Level), role),
-			quantityBadgeRect(slot, k.Theme.Metrics.TableCellPadX))
 	}
 	if layout.SkillPagePrev.W > 0 {
 		c.Place(k.Button("‹", ButtonNormal), layout.SkillPagePrev)
@@ -208,13 +279,51 @@ func (k Kit) placeSkillBar(
 	}
 }
 
+func (k Kit) placeWorldUtilities(c *Canvas, model mobileui.MobileHUDModel, layout mobileui.HUDLayout, nav mobileui.Navigation) {
+	if layout.SitAction.W > 0 {
+		label := "Sit"
+		if model.Player.Sitting {
+			label = "Stand"
+		}
+		c.Place(k.Button(label, ButtonNormal), layout.SitAction)
+	}
+	if layout.LootAction.W > 0 {
+		state := ButtonDisabled
+		if len(model.Loot) > 0 {
+			state = ButtonNormal
+		}
+		c.Place(k.Button("Loot", state), layout.LootAction)
+	}
+	if layout.EmoteAction.W > 0 {
+		state := buttonStateForOpen(nav.EmoteOpen)
+		if len(model.Emotes) == 0 {
+			state = ButtonDisabled
+		}
+		c.Place(k.Button("Emote", state), layout.EmoteAction)
+	}
+	if !nav.EmoteOpen || layout.EmotePanel.W <= 0 {
+		return
+	}
+	c.Place(k.Panel(), layout.EmotePanel)
+	for i, row := range layout.EmoteRows {
+		if i >= len(model.Emotes) {
+			break
+		}
+		c.Place(k.Button(model.Emotes[i].Label, ButtonNormal), row)
+	}
+}
+
 func (k Kit) placeChatBar(c *Canvas, layout mobileui.HUDLayout) {
 	if layout.ChatBar.W <= 0 || layout.ChatBar.H <= 0 {
 		return
 	}
 	c.Place(k.Panel(), layout.ChatBar)
 	if layout.ChatButton.W > 0 {
-		c.Place(k.Button("Open", ButtonNormal), layout.ChatButton)
+		label := "Open"
+		if layout.ChatButton.W >= layout.ChatBar.W-1 {
+			label = "Chat"
+		}
+		c.Place(k.Button(label, ButtonNormal), layout.ChatButton)
 	}
 	// The layout reserves a narrow "Chat" caption beside the prompt, sized for
 	// the old bitmap text; at mobile text size the two overlap. The Open button
@@ -279,24 +388,71 @@ func buttonStateForOpen(active bool) ButtonState {
 }
 
 // HUDIconRects reports where the host must draw skill and loot sprites.
+type StatusIconPlacement struct {
+	Status mobileui.StatusEffectModel
+	Rect   mobileui.Rect
+}
+
+func HUDStatusIconRects(model mobileui.MobileHUDModel, layout mobileui.HUDLayout) []StatusIconPlacement {
+	out := make([]StatusIconPlacement, 0, len(layout.StatusSlots))
+	for i, rect := range layout.StatusSlots {
+		if i >= len(model.Statuses) || rect.W <= 0 || rect.H <= 0 || model.Statuses[i].IconKey == "" {
+			continue
+		}
+		out = append(out, StatusIconPlacement{Status: model.Statuses[i], Rect: rect})
+	}
+	return out
+}
+
 func HUDIconRects(
 	model mobileui.MobileHUDModel,
 	layout mobileui.HUDLayout,
 ) (skills []SkillIconPlacement, loot []IconPlacement) {
 	for i, slot := range layout.SkillSlots {
 		index := layout.SkillStart + i
-		if index >= len(model.Skills) || slot.W <= 0 {
+		shortcut, ok := mobileui.ShortcutAt(model, index)
+		if !ok || slot.W <= 0 {
 			continue
 		}
-		skills = append(skills, SkillIconPlacement{
-			Skill: mobileui.MobileSkillModel{
-				SkillID: model.Skills[index].SkillID,
-				Name:    model.Skills[index].Name,
-				Level:   model.Skills[index].Level,
-				IconKey: model.Skills[index].IconKey,
-			},
-			Rect: slot,
-		})
+		switch shortcut.Kind {
+		case mobileui.ShortcutSkill:
+			skill := shortcut.Skill
+			badge := ""
+			if skill.Level > 0 {
+				badge = "Lv" + strconv.Itoa(skill.Level)
+			}
+			cooldown := ""
+			if skill.CooldownRemaining > 0 {
+				seconds := int(skill.CooldownRemaining.Seconds() + 0.99)
+				cooldown = strconv.Itoa(seconds) + "s"
+			}
+			skills = append(skills, SkillIconPlacement{
+				Skill: mobileui.MobileSkillModel{
+					SkillID: skill.SkillID,
+					Name:    skill.Name,
+					Level:   skill.Level,
+					IconKey: skill.IconKey,
+				},
+				Rect:          slot,
+				OverlayRect:   slot,
+				ShortcutBadge: badge,
+				Dimmed:        !skill.Usable || skill.CooldownRemaining > 0,
+				CooldownText:  cooldown,
+			})
+		case mobileui.ShortcutItem:
+			inset := slot.W * 0.08
+			badge := ""
+			if shortcut.Item.Quantity > 1 {
+				badge = strconv.Itoa(shortcut.Item.Quantity)
+			}
+			loot = append(loot, IconPlacement{
+				Item: shortcut.Item,
+				Rect: mobileui.Rect{X: slot.X + inset, Y: slot.Y + inset, W: slot.W - 2*inset, H: slot.H - 2*inset},
+				OverlayRect:   slot,
+				ShortcutBadge: badge,
+				Dimmed:        !shortcut.Item.Usable || shortcut.Item.Index == 0 || shortcut.Item.Quantity <= 0,
+			})
+		}
 	}
 	for i, row := range layout.LootRows {
 		if i >= len(model.Loot) || row.W <= 0 {

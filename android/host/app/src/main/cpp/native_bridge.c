@@ -15,6 +15,8 @@ extern void GoroAndroidTextInput(char *text);
 
 #define TAG "GoroAndroidHost"
 
+static ANativeWindow *g_surface_window = NULL;
+
 JNIEXPORT void JNICALL Java_com_kivutar_goro_host_MainActivity_nativeSurfaceCreated(
     JNIEnv *env, jobject self, jobject surface) {
     (void)self;
@@ -23,9 +25,17 @@ JNIEXPORT void JNICALL Java_com_kivutar_goro_host_MainActivity_nativeSurfaceCrea
         __android_log_print(ANDROID_LOG_ERROR, TAG, "ANativeWindow_fromSurface returned null");
         return;
     }
+    ANativeWindow *previous_window = g_surface_window;
+    g_surface_window = window;
     __android_log_print(ANDROID_LOG_INFO, TAG, "surface created width=%d height=%d; entering Go bridge",
                         ANativeWindow_getWidth(window), ANativeWindow_getHeight(window));
     GoroAndroidSurfaceCreated((uintptr_t)window, ANativeWindow_getWidth(window), ANativeWindow_getHeight(window));
+    // GoroAndroidSurfaceCreated is synchronous: by the time it returns, Go has
+    // released the previous WGPU surface and the replacement surface owns the
+    // newly acquired window reference below.
+    if (previous_window != NULL) {
+        ANativeWindow_release(previous_window);
+    }
     __android_log_print(ANDROID_LOG_INFO, TAG, "surface created; Go bridge returned");
 }
 
@@ -47,6 +57,13 @@ JNIEXPORT void JNICALL Java_com_kivutar_goro_host_MainActivity_nativeSurfaceDest
     (void)env; (void)self;
     __android_log_print(ANDROID_LOG_INFO, TAG, "surface destroyed; entering Go bridge");
     GoroAndroidSurfaceDestroyed();
+    // The Go command is synchronous, so the WGPU surface no longer references
+    // this ANativeWindow when control returns here.
+    ANativeWindow *window = g_surface_window;
+    g_surface_window = NULL;
+    if (window != NULL) {
+        ANativeWindow_release(window);
+    }
     __android_log_print(ANDROID_LOG_INFO, TAG, "surface destroyed; Go released WGPU surface");
 }
 
@@ -82,6 +99,11 @@ JNIEXPORT void JNICALL Java_com_kivutar_goro_host_MainActivity_nativeShutdown(
     JNIEnv *env, jobject self) {
     (void)env; (void)self;
     GoroAndroidShutdown();
+    ANativeWindow *window = g_surface_window;
+    g_surface_window = NULL;
+    if (window != NULL) {
+        ANativeWindow_release(window);
+    }
 }
 
 JNIEXPORT void JNICALL Java_com_kivutar_goro_host_MainActivity_nativePause(

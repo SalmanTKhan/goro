@@ -56,6 +56,15 @@ func (f *Frame) BeginFrame() {
 	if f == nil {
 		return
 	}
+	// Screen transforms are command-recording state, not persistent frame
+	// configuration. A presentation layer (for example Android's fitted desktop
+	// UI) may change them late in one frame; carrying that transform into the
+	// next frame would incorrectly move world-space 2D overlays such as actor
+	// gauges and target markers.
+	f.screenScaleX = 1
+	f.screenScaleY = 1
+	f.screenOffsetX = 0
+	f.screenOffsetY = 0
 	f.commands = f.commands[:0]
 	f.worldCommands = f.worldCommands[:0]
 	f.worldMeshes = f.worldMeshes[:0]
