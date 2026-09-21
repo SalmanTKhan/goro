@@ -27,7 +27,6 @@ const (
 	inventoryBagTabW    = 32
 	inventoryBagTabH    = 44
 	inventoryBagCell    = 32
-	inventoryBagIcon    = 24
 	inventoryBagCols    = 8
 	inventoryBagRows    = 5
 	inventoryBagTabOver = 1

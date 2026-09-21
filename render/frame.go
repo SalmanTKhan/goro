@@ -19,7 +19,6 @@ type Frame struct {
 	worldCommands   []WorldCommand
 	worldMeshes     []WorldMeshCommand
 	worldBillboards []WorldBillboardCommand
-	uiRects         []UIRectCommand
 	uiTextBoxes     []UITextBoxCommand
 	uiTextLabels    []UITextLabelCommand
 	uiActorLabels   []UIActorLabelCommand
@@ -58,7 +57,6 @@ func (f *Frame) BeginFrame() {
 	f.worldCommands = f.worldCommands[:0]
 	f.worldMeshes = f.worldMeshes[:0]
 	f.worldBillboards = f.worldBillboards[:0]
-	f.uiRects = f.uiRects[:0]
 	f.uiTextBoxes = f.uiTextBoxes[:0]
 	f.uiTextLabels = f.uiTextLabels[:0]
 	f.uiActorLabels = f.uiActorLabels[:0]
@@ -69,7 +67,6 @@ func (f *Frame) clearUIOverlayCommands() {
 	if f == nil {
 		return
 	}
-	f.uiRects = f.uiRects[:0]
 	f.uiTextBoxes = f.uiTextBoxes[:0]
 	f.uiTextLabels = f.uiTextLabels[:0]
 	f.uiActorLabels = f.uiActorLabels[:0]
