@@ -325,7 +325,7 @@ func drawAndroidFPSMeter(frame *render.Frame, text string, x, y float32, centere
 	}
 	boxW := textW + 2*padX
 	boxH := textH + 2*padY
-	render.DrawRect(frame, float64(x), float64(y), float64(boxW), float64(boxH), mobileColors().panel)
+	render.DrawRect(frame, float64(x), float64(y), float64(boxW), float64(boxH), mobileColors().mapBackground)
 	drawMobileText(frame, text, x+padX, y+padY, mobileColors().title, scale)
 }
 
