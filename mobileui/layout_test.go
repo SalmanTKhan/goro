@@ -304,3 +304,47 @@ func TestProgressionAlertsAppearOnlyWithSpendablePoints(t *testing.T) {
 		}
 	}
 }
+
+
+func TestWidePortraitHUDUsesIndependentTopRails(t *testing.T) {
+	viewport := Viewport{Width: 840, Height: 2289, SafeTop: 48, SafeBottom: 96}
+	model := Fixture("loot-basic")
+	model.Target = Fixture("monster").Target
+	layout := LayoutHUD(viewport, DefaultTokens(), model, Navigation{})
+
+	if layout.TargetPanel.W <= 0 || layout.Minimap.W <= 0 {
+		t.Fatalf("portrait top rails missing target/minimap: target=%+v minimap=%+v", layout.TargetPanel, layout.Minimap)
+	}
+	if layout.TargetPanel.Intersects(layout.Minimap) {
+		t.Fatalf("portrait target overlaps minimap: target=%+v minimap=%+v", layout.TargetPanel, layout.Minimap)
+	}
+	if layout.TargetPanel.Y >= layout.Minimap.Bottom() {
+		t.Fatalf("portrait target still waits for minimap bottom: target=%+v minimap=%+v", layout.TargetPanel, layout.Minimap)
+	}
+	if layout.LootPanel.W <= 0 {
+		t.Fatalf("portrait loot rail missing: %+v", layout.LootPanel)
+	}
+	if layout.LootPanel.Intersects(layout.Minimap) {
+		t.Fatalf("portrait loot overlaps minimap: loot=%+v minimap=%+v", layout.LootPanel, layout.Minimap)
+	}
+	if layout.LootPanel.Y >= layout.Minimap.Bottom() {
+		t.Fatalf("portrait loot still waits for minimap bottom: loot=%+v minimap=%+v", layout.LootPanel, layout.Minimap)
+	}
+	if layout.TargetPanel.X != layout.PlayerPanel.X || layout.LootPanel.X != layout.PlayerPanel.X {
+		t.Fatalf("portrait left rail lost alignment: player=%+v target=%+v loot=%+v", layout.PlayerPanel, layout.TargetPanel, layout.LootPanel)
+	}
+}
+
+func TestNarrowPortraitHUDFallsBackToStackedTopLayout(t *testing.T) {
+	viewport := Viewport{Width: 390, Height: 844, SafeTop: 24, SafeBottom: 24}
+	layout := LayoutHUD(viewport, DefaultTokens(), Fixture("monster"), Navigation{})
+	if layout.TargetPanel.W <= 0 || layout.Minimap.W <= 0 {
+		t.Fatalf("narrow portrait missing target/minimap: target=%+v minimap=%+v", layout.TargetPanel, layout.Minimap)
+	}
+	if layout.TargetPanel.Intersects(layout.Minimap) {
+		t.Fatalf("narrow portrait fallback overlaps: target=%+v minimap=%+v", layout.TargetPanel, layout.Minimap)
+	}
+	if layout.TargetPanel.Y < layout.Minimap.Bottom() {
+		t.Fatalf("narrow portrait should stack below minimap: target=%+v minimap=%+v", layout.TargetPanel, layout.Minimap)
+	}
+}
