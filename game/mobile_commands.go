@@ -40,6 +40,27 @@ func (m *WorldMode) PickMobileTarget(ctx client.Context, position input.WorldPos
 	return input.PickedTarget{}, false
 }
 
+// PickMobileGroundTarget resolves only the terrain cell under a touch.
+//
+// Ground-target skills must be able to select the cell occupied by an actor or
+// floor item. PickMobileTarget intentionally prioritizes interactable scene
+// objects for normal world taps, so using it while SELECT AREA is active makes
+// an actor mask the terrain underneath it.
+func (m *WorldMode) PickMobileGroundTarget(ctx client.Context, position input.WorldPosition) (input.PickedTarget, bool) {
+	if m == nil || ctx.World == nil {
+		return input.PickedTarget{}, false
+	}
+	width, height := ctx.ScreenSize()
+	projection := m.sceneProjection(ctx, width, height, time.Now())
+	if x, y, ok := clickedWalkTarget(ctx, projection, int(position.X), int(position.Y)); ok {
+		return input.PickedTarget{
+			Kind:     input.TargetGround,
+			Position: input.WorldPosition{X: float64(x), Y: float64(y)},
+		}, true
+	}
+	return input.PickedTarget{}, false
+}
+
 // InspectMobileTarget resolves the same display-name and life-bar data used
 // by the desktop hover label, but returns a renderer-neutral mobile model.
 func (m *WorldMode) InspectMobileTarget(ctx client.Context, actorID uint32) (mobileui.TargetHUDModel, bool) {
