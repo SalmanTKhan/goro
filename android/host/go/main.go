@@ -1144,6 +1144,9 @@ func (h *host) renderLoop() {
 				}
 			case commandPause:
 				appPaused = true
+				// Immediate-mode rendering uses a fast host ticker while active;
+				// backgrounded Android sessions should return to a low wake rate.
+				ticker.Reset(16 * time.Millisecond)
 				state = input.NewState()
 				if mobile != nil {
 					mobile.CancelTouch()
@@ -1159,6 +1162,11 @@ func (h *host) renderLoop() {
 				}
 				androidLog("stage=lifecycle paused")
 			case commandResume:
+				if surfaceVSync {
+					ticker.Reset(16 * time.Millisecond)
+				} else {
+					ticker.Reset(time.Millisecond)
+				}
 				if offlineGame != nil && offlineGame.Offline() != nil {
 					offlineGame.Offline().Resume()
 					offlineGame.ResumeAudio()
