@@ -471,6 +471,9 @@ func (h *host) renderLoop() {
 	var peakRSS int64
 	var runtimeMetricsPath string
 	var surfaceVSync = true
+	var fpsStarted time.Time
+	var fpsFrames int
+	var fpsText string
 	// Pause the frame/update loop for every session type while Android is
 	// backgrounded. The session object and connection remain intact, while no
 	// frame can acquire/present against a Surface Android may have invalidated.
@@ -502,6 +505,154 @@ func (h *host) renderLoop() {
 		return nil
 	}
 	startMap := resourceStartMap(currentResourceRoot())
+
+	// Mobile/desktop presentation is a render-host concern. The Game and its
+	// network/session remain alive while this host swaps only the UI bridge and
+	// touch adapter.
+	var bindGameSettings func(*app.Game)
+	var handleMobileModeChange func(bool) bool
+	var activatePresentation func(input.MobilePresentationMode)
+
+	bindGameSettings = func(game *app.Game) {
+		if game == nil {
+			return
+		}
+		game.SetMobileSettingsChanged(func(settings input.MobileSettings) {
+			settings = settings.Normalized()
+			mobileSettings = settings
+			if mobileInput != nil {
+				mobileInput.SetControls(settings.Controls)
+			}
+			// Keep the host's template config in lockstep so an explicit
+			// online/offline authority switch inherits all current settings.
+			mobileConfig.UI = settings.UI
+			mobileConfig.Mobile = settings.Controls
+			mobileConfig.MobileDisplay = settings.Display
+			mobileConfig.Render.VSync = settings.Display.VSync
+			mobileConfig.Render.FPS = settings.Display.FPS
+			mobileConfig.Render.NoUI = settings.Display.Presentation != input.MobilePresentationDesktop
+			mobileConfig.Audio.BGM = settings.Audio.BGMEnabled
+			mobileConfig.Audio.BGMVolume = settings.Audio.BGMVolume
+			mobileConfig.Audio.SFXVolume = settings.Audio.SFXVolume
+			mobileConfig.Gameplay.NoShift = settings.Gameplay.NoShift
+			mobileConfig.Gameplay.NoCtrl = settings.Gameplay.NoCtrl
+			mobileConfig.Gameplay.LessEffects = settings.Gameplay.LessEffects
+			mobileConfig.Gameplay.SnapTargets = settings.Gameplay.SnapTargets
+			mobileConfig.Gameplay.SnapItems = settings.Gameplay.SnapItems
+
+			path, saveErr := config.SaveMobileSettings(settings)
+			if saveErr != nil {
+				androidLog(fmt.Sprintf("stage=mobile-settings save-error=%v", saveErr))
+				return
+			}
+			androidLog(fmt.Sprintf(
+				"stage=mobile-settings applied path=%s presentation=%s vsync=%t fps=%t movement=%s camera=%.2f zoom=%.2f minimap=%t",
+				path, settings.Display.Presentation, settings.Display.VSync, settings.Display.FPS,
+				settings.Controls.MovementMode.String(), settings.Controls.CameraSensitivity,
+				settings.Controls.ZoomSensitivity, settings.Display.ShowMinimap,
+			))
+		})
+	}
+
+	handleMobileModeChange = func(online bool) bool {
+		if offlineGame == nil || online == offlineGame.Online() {
+			return true
+		}
+		if offlineGame.Offline() != nil {
+			savePath := filepath.Join(currentResourceRoot(), "offline-save.json")
+			if saveErr := offlineGame.SaveOfflineState(savePath); saveErr != nil {
+				androidLog(fmt.Sprintf("stage=mobile-mode save-error=%v", saveErr))
+			}
+		} else if offlineGame.Online() {
+			offlineGame.Disconnect()
+		}
+
+		cfg := mobileConfig
+		if online {
+			cfg.MobileSession.Mode = config.SessionModeOnline
+			cfg.Login.AutoLogin = false
+		} else {
+			cfg.MobileSession.Mode = config.SessionModeOffline
+		}
+		cfg.Render.NoUI = mobileSettings.Display.Presentation != input.MobilePresentationDesktop
+		cfg.Render.VSync = mobileSettings.Display.VSync
+		cfg.Render.FPS = mobileSettings.Display.FPS
+
+		var next *app.Game
+		var modeErr error
+		if online {
+			next, modeErr = app.New(cfg)
+		} else {
+			next, modeErr = app.NewOfflineAtMap(cfg, startMap)
+		}
+		if modeErr != nil {
+			androidLog(fmt.Sprintf("stage=mobile-mode target=%s error=%v", cfg.MobileSession.Mode, modeErr))
+			return false
+		}
+		if next.Offline() != nil {
+			savePath := filepath.Join(currentResourceRoot(), "offline-save.json")
+			if loadErr := next.LoadOfflineState(savePath); loadErr != nil && !os.IsNotExist(loadErr) {
+				androidLog(fmt.Sprintf("stage=mobile-mode load-error=%v", loadErr))
+			}
+		}
+		mobileConfig = cfg
+		offlineGame = next
+		bindGameSettings(next)
+		if mobile != nil {
+			mobile.SetGame(next)
+		}
+		androidLog(fmt.Sprintf("stage=mobile-mode active=%s server=%s:%d", cfg.MobileSession.Mode, cfg.MobileSession.Server.Host, cfg.MobileSession.Server.ZonePort))
+		return true
+	}
+
+	activatePresentation = func(mode input.MobilePresentationMode) {
+		if offlineGame == nil {
+			return
+		}
+		if mode == input.MobilePresentationDesktop {
+			if desktop != nil {
+				return
+			}
+			if mobile != nil {
+				mobile.CancelTouch()
+				mobile = nil
+			}
+			desktop = newDesktopPresentation(offlineGame, width, height)
+			desktop.SetSafeInsets(safeLeft, safeTop, safeRight, safeBottom)
+			mobileInput = input.NewMobileInputAdapterWithControls(
+				mobileSettings.Controls,
+				gameWorldPicker{game: offlineGame},
+				desktop,
+				mobileCommandSink{game: offlineGame},
+			)
+			atomic.StoreUint32(&androidTextInputActive, 0)
+			androidLog("stage=ui-presentation active=desktop")
+			return
+		}
+
+		if mobile != nil {
+			return
+		}
+		if desktop != nil {
+			desktop = nil
+			// Detach the desktop window tree from the game manager. Mobile owns
+			// its own retained surfaces and character-window bridge.
+			offlineGame.SetUIApp(nil)
+		}
+		mobile = newMobilePresentation(offlineGame, width, height)
+		mobile.SetSafeInsets(safeLeft, safeTop, safeRight, safeBottom)
+		mobile.SetSettings(mobileSettings)
+		mobile.SetModeChanged(handleMobileModeChange)
+		mobileInput = input.NewMobileInputAdapterWithControls(
+			mobileSettings.Controls,
+			mobileWorldPicker{presentation: mobile},
+			mobile,
+			mobileCommandSink{game: offlineGame, presentation: mobile},
+		)
+		atomic.StoreUint32(&androidTextInputActive, 0)
+		androidLog("stage=ui-presentation active=mobile")
+	}
+
 	ticker := time.NewTicker(16 * time.Millisecond)
 	defer ticker.Stop()
 
