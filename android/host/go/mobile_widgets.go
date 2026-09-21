@@ -422,27 +422,55 @@ func drawMobileShortcutBadge(frame *render.Frame, text string, rect mobileui.Rec
 	if frame == nil || text == "" || rect.W <= 0 || rect.H <= 0 {
 		return
 	}
-	scale := textScale * 0.56
 	w, h := render.BitmapTextSize(text)
 	if w <= 0 || h <= 0 {
 		return
 	}
+
+	// Shortcut annotations need to survive bright skill/item art and phone
+	// downscaling. Size them from the slot itself instead of the global text
+	// scale, with a small floor so 52-64px slots remain readable.
+	targetTextH := rect.H * 0.24
+	if targetTextH < 11 {
+		targetTextH = 11
+	}
+	if targetTextH > 16 {
+		targetTextH = 16
+	}
+	scale := float64(targetTextH) / float64(h)
+	minScale := textScale * 0.82
+	if scale < minScale {
+		scale = minScale
+	}
+
 	textW := float32(w) * float32(scale)
 	textH := float32(h) * float32(scale)
-	maxW := rect.W - 8
-	if textW > maxW && w > 0 {
-		scale *= float64(maxW / textW)
-		textW = maxW
+	maxTextW := rect.W - 12
+	if textW > maxTextW && w > 0 {
+		scale *= float64(maxTextW / textW)
+		textW = maxTextW
 		textH = float32(h) * float32(scale)
 	}
-	x := rect.X + 4
-	y := rect.Y + 3
+
+	padX := float32(4)
+	padY := float32(2)
+	badgeW := textW + 2*padX
+	badgeH := textH + 2*padY
+	x := rect.X + 2
+	y := rect.Y + 2
 	if right {
-		x = rect.Right() - textW - 4
-		y = rect.Bottom() - textH - 3
+		x = rect.Right() - badgeW - 2
+		y = rect.Bottom() - badgeH - 2
 	}
-	drawMobileText(frame, text, x+1, y+1, color.RGBA{R: 0, G: 0, B: 0, A: 210}, scale)
-	drawMobileText(frame, text, x, y, mobileColors().title, scale)
+
+	badge := mobileui.Rect{X: x, Y: y, W: badgeW, H: badgeH}
+	render.DrawRect(frame, float64(badge.X), float64(badge.Y), float64(badge.W), float64(badge.H),
+		color.RGBA{R: 16, G: 22, B: 30, A: 225})
+
+	textX := badge.X + padX
+	textY := badge.Y + padY
+	drawMobileText(frame, text, textX+1, textY+1, color.RGBA{R: 0, G: 0, B: 0, A: 255}, scale)
+	drawMobileText(frame, text, textX, textY, color.RGBA{R: 255, G: 255, B: 255, A: 255}, scale)
 }
 
 func min32(a, b float32) float32 {
