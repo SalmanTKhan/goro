@@ -220,7 +220,12 @@ func LoadUserMobileSettings() (input.MobileSettings, error) {
 			BGMVolume:  cfg.Audio.BGMVolume,
 			SFXVolume:  cfg.Audio.SFXVolume,
 		},
-		Display:  cfg.MobileDisplay,
+		Display: input.MobileDisplaySettings{
+			ShowMinimap:  cfg.MobileDisplay.ShowMinimap,
+			VSync:        cfg.Render.VSync,
+			FPS:          cfg.Render.FPS,
+			Presentation: cfg.MobileDisplay.Presentation,
+		},
 		Gameplay: input.MobileGameplaySettings{NoShift: cfg.Gameplay.NoShift, NoCtrl: cfg.Gameplay.NoCtrl, LessEffects: cfg.Gameplay.LessEffects, SnapTargets: cfg.Gameplay.SnapTargets, SnapItems: cfg.Gameplay.SnapItems},
 	}.Normalized(), nil
 }
@@ -473,6 +478,10 @@ func SaveMobileSettings(settings input.MobileSettings) (string, error) {
 			"show_target_names":  formatINIValueBool(settings.Controls.ShowTargetNames),
 			"show_minimap":       formatINIValueBool(settings.Display.ShowMinimap),
 			"presentation":       string(settings.Display.Presentation),
+		},
+		"render": {
+			"vsync": formatINIValueBool(settings.Display.VSync),
+			"fps":   formatINIValueBool(settings.Display.FPS),
 		},
 		"audio": {
 			"bgm":        formatINIValueBool(settings.Audio.BGMEnabled),
