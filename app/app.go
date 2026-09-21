@@ -382,6 +382,15 @@ func (g *Game) PickMobileTarget(position input.WorldPosition) (input.PickedTarge
 	return g.modes.PickMobileTarget(g.modeContext(), position)
 }
 
+// PickMobileGroundTarget resolves terrain independently of actors/items. It is
+// used only while a ground-target skill owns the touch stream.
+func (g *Game) PickMobileGroundTarget(position input.WorldPosition) (input.PickedTarget, bool) {
+	if g == nil || g.modes == nil {
+		return input.PickedTarget{}, false
+	}
+	return g.modes.PickMobileGroundTarget(g.modeContext(), position)
+}
+
 func (g *Game) MobileHUDModel() mobileui.MobileHUDModel {
 	if g == nil || g.session == nil {
 		return mobileui.MobileHUDModel{}
