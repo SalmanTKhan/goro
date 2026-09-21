@@ -2607,15 +2607,41 @@ func (p *mobilePresentation) drawSurface(frame *render.Frame, controller *mobile
 		if !ok {
 			continue
 		}
+		labelH := mobileui.SurfaceRowLabelHeight()
 		if item.Kind == mobileui.SurfaceItemSection {
-			drawMobileText(frame, item.Label, row.X+12, row.Y+34, colors.accent, textScale*0.68)
+			drawMobileText(frame, item.Label, row.X+12, row.Y+28, colors.accent, textScale*0.68)
+			if item.Detail != "" && row.H > labelH {
+				drawMobileWrappedTextLimited(
+					frame, item.Detail,
+					row.X+12, row.Y+labelH+4,
+					int(maxf32(20, (row.W-24)/float32(11*textScale))),
+					int(22*textScale), 1,
+					colors.muted, textScale*0.62,
+				)
+			}
 			render.DrawLine(frame, float64(row.X), float64(row.Bottom()-2), float64(row.Right()), float64(row.Bottom()-2), colors.border)
 			continue
 		}
+
 		selected := controller.State.SelectedID == item.ID
-		drawMobileButton(frame, row, strings.ToUpper(trimText(item.Label, 28)), colors, textScale*0.80, selected)
+		// Paint the desktop-like row chrome first, then lay out the label/value
+		// line and explanatory text explicitly. drawMobileButton's centered
+		// label would otherwise waste the detail space the layout reserves.
+		drawMobileButton(frame, row, "", colors, textScale*0.80, selected)
+		valueW := float32(148)
+		labelW := maxf32(40, row.W-36-valueW)
+		drawMobileTextFit(frame, trimText(item.Label, 34), row.X+12, row.Y+20, labelW, colors.text, textScale*0.76)
 		if item.Value != "" {
-			drawMobileTextFit(frame, item.Value, row.Right()-148, row.Y+20, 136, colors.muted, textScale*0.70)
+			drawMobileTextFit(frame, item.Value, row.Right()-valueW, row.Y+20, valueW-12, colors.muted, textScale*0.70)
+		}
+		if item.Detail != "" && row.H > labelH {
+			drawMobileWrappedTextLimited(
+				frame, item.Detail,
+				row.X+12, row.Y+labelH+4,
+				int(maxf32(20, (row.W-24)/float32(11*textScale))),
+				int(22*textScale), 2,
+				colors.muted, textScale*0.62,
+			)
 		}
 	}
 	if controller.Model.Notice != "" {
