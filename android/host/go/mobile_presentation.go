@@ -1892,7 +1892,11 @@ func (p *mobilePresentation) drawHUD(frame *render.Frame) {
 		drawMobileHeader(frame, l.TargetPanel, "TARGET", colors, textScale)
 		drawMobileTextFit(frame, trimText(p.hudModel.Target.Name, 18), l.TargetPanel.X+12, l.TargetPanel.Y+39, l.TargetPanel.W*0.60, colors.text, textScale*0.96)
 		drawMobileTextFit(frame, targetRelationText(p.hudModel.Target.Relation), l.TargetPanel.X+l.TargetPanel.W*0.64, l.TargetPanel.Y+40, l.TargetPanel.W*0.32, colors.muted, textScale*0.78)
-		drawMobileBar(frame, "HP", l.TargetPanel.X+12, l.TargetPanel.Y+72, l.TargetPanel.W-24, 22, p.hudModel.Target.HP, p.hudModel.Target.MaxHP, colors.target, colors, textScale)
+		if p.hudModel.Target.MaxHP > 0 {
+			drawMobileBar(frame, "HP", l.TargetPanel.X+12, l.TargetPanel.Y+72, l.TargetPanel.W-24, 22, p.hudModel.Target.HP, p.hudModel.Target.MaxHP, colors.target, colors, textScale)
+		} else {
+			drawMobileText(frame, "HP --", l.TargetPanel.X+12, l.TargetPanel.Y+78, colors.muted, textScale*0.78)
+		}
 	}
 	if l.LootPanel.W > 0 && len(p.hudModel.Loot) > 0 {
 		drawMobilePanel(frame, l.LootPanel)
