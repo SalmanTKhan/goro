@@ -1,6 +1,8 @@
 package game
 
 import (
+	"encoding/binary"
+	"fmt"
 	"testing"
 	"time"
 
@@ -122,5 +124,34 @@ func TestInventoryAndStatsRefreshWhileChatConsumesInput(t *testing.T) {
 	}
 	if mode.ui.inventoryBag.IsOpen() || mode.ui.statsWindow.IsOpen() {
 		t.Fatal("server update reopened a closed window")
+	}
+}
+
+func TestRapidPickupPacketsPreserveEveryChatAmount(t *testing.T) {
+	ctx := client.Context{Session: &session.Session{Inventory: session.Inventory{
+		Items: []session.InventoryItem{{Index: 7, ItemID: 909, Type: 3, Amount: 20, Identified: true}},
+	}}}
+	mode := NewWorldMode()
+	amounts := []uint16{1, 1, 3, 3, 4}
+	for _, amount := range amounts {
+		data := make([]byte, 23)
+		binary.LittleEndian.PutUint16(data, 0x00A0)
+		binary.LittleEndian.PutUint16(data[2:], 7)
+		binary.LittleEndian.PutUint16(data[4:], amount)
+		binary.LittleEndian.PutUint16(data[6:], 909)
+		data[8], data[21] = 1, 3
+		mode.handleNetworkPacket(ctx, network.Packet{ID: 0x00A0, Data: data}, time.Now())
+	}
+	messages := mode.ui.console.Messages()
+	if len(messages) != len(amounts) {
+		t.Fatalf("messages = %+v, want one per pickup (%d)", messages, len(amounts))
+	}
+	for i, amount := range amounts {
+		if want := fmt.Sprintf("You got item 909 %d.", amount); messages[i].Text != want {
+			t.Fatalf("message %d = %q, want %q", i, messages[i].Text, want)
+		}
+	}
+	if got := ctx.Session.Inventory.Items[0].Amount; got != 32 {
+		t.Fatalf("inventory amount = %d, want 32", got)
 	}
 }
