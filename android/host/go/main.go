@@ -812,6 +812,9 @@ func (h *host) renderLoop() {
 		cpuFrameTotal = 0
 		phaseWindow.Reset()
 		peakRSS = 0
+		fpsStarted = time.Time{}
+		fpsFrames = 0
+		fpsText = ""
 
 		// A replacement Android ANativeWindow is a new presentation target. With
 		// gogpu/wgpu the adapter selected for the previous surface may report no
@@ -1361,6 +1364,42 @@ func (h *host) renderLoop() {
 						desktop.Draw(frameBuffer)
 						offlineGame.DrawUIOverlay(frameBuffer)
 						offlineGame.DrawOverlay(frameBuffer)
+					}
+
+					if offlineGame.RuntimeFPS() {
+						now := time.Now()
+						if fpsStarted.IsZero() {
+							fpsStarted = now
+							fpsFrames = 0
+							fpsText = "FPS --"
+						}
+						fpsFrames++
+						if elapsed := now.Sub(fpsStarted); elapsed >= time.Second {
+							seconds := elapsed.Seconds()
+							fps := float64(fpsFrames) / seconds
+							frameMS := seconds * 1000 / float64(fpsFrames)
+							fpsText = fmt.Sprintf("FPS %.1f  %.2f ms", fps, frameMS)
+							fpsStarted = now
+							fpsFrames = 0
+						}
+						fpsX, fpsY := float32(safeLeft+8), float32(safeTop+8)
+						centered := false
+						if mobile != nil {
+							// The mobile HUD owns the upper-left player panel and
+							// upper-right minimap. Center the meter instead, moving
+							// it below an active target panel when necessary.
+							fpsX = float32(width) / 2
+							centered = true
+							if mobile.hudModel.Target.Visible && mobile.hud.TargetPanel.H > 0 {
+								uiScale := mobile.settings.UI.Normalized().Scale
+								fpsY = mobile.hud.TargetPanel.Bottom()*uiScale + 6
+							}
+						}
+						drawAndroidFPSMeter(frameBuffer, fpsText, fpsX, fpsY, centered)
+					} else {
+						fpsStarted = time.Time{}
+						fpsFrames = 0
+						fpsText = ""
 					}
 					phases.presentation = time.Since(phaseStarted)
 					offlineGame.FrameSubmitted()
