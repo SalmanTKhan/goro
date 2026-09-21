@@ -677,6 +677,7 @@ func (m *WorldMode) Update(ctx client.Context) (Mode, error) {
 	m.updateMail(ctx, now)
 	progressBlocksActions := m.updateServerProgress(ctx, now)
 	if !ctx.Config.Headless {
+		m.ui.inventoryBag.UpdatePresentation(ctx, &m.ui.itemWindows)
 		m.ui.statsWindow.UpdatePresentation(ctx)
 		m.ui.statusIcons.Update(ctx, now)
 		m.ui.pvpCounter.Update(ctx)

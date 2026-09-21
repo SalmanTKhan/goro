@@ -10,7 +10,7 @@ import (
 )
 
 func TestLivePresentationDefersRebuildUntilWindowDragEnds(t *testing.T) {
-	for _, kind := range []string{"stats"} {
+	for _, kind := range []string{"inventory", "stats"} {
 		t.Run(kind, func(t *testing.T) {
 			app := &windowDragTestApp{}
 			ctx := client.Context{
@@ -24,13 +24,21 @@ func TestLivePresentationDefersRebuildUntilWindowDragEnds(t *testing.T) {
 			var refresh func()
 			var update func() bool
 			var snapshotCurrent func() bool
-			stats := &StatsWindow{}
-			stats.OpenWindow(ctx)
-			window = &stats.Window
-			refresh = func() { stats.UpdatePresentation(ctx) }
-			update = func() bool { return stats.Update(ctx) }
-			snapshotCurrent = func() bool { return stats.snapshot == statsWindowSnapshot(ctx.Session) }
-
+			if kind == "inventory" {
+				bag := &InventoryBagWindow{}
+				bag.Toggle(ctx)
+				window = &bag.Window
+				refresh = func() { bag.UpdatePresentation(ctx, nil) }
+				update = func() bool { return bag.Update(ctx, nil, nil, nil, nil, nil, nil) }
+				snapshotCurrent = func() bool { return bag.snapshot == bag.inventorySnapshot(ctx.Session) }
+			} else {
+				stats := &StatsWindow{}
+				stats.OpenWindow(ctx)
+				window = &stats.Window
+				refresh = func() { stats.UpdatePresentation(ctx) }
+				update = func() bool { return stats.Update(ctx) }
+				snapshotCurrent = func() bool { return stats.snapshot == statsWindowSnapshot(ctx.Session) }
+			}
 			window.OpenAt(10, 20, window.content)
 			window.Publish(ctx)
 			before := window.content

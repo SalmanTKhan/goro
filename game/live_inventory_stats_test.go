@@ -4,8 +4,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gogpu/gpucontext"
+	"github.com/gogpu/ui/geometry"
+	"github.com/gogpu/ui/uitest"
+	"github.com/gogpu/ui/widget"
 	"github.com/kivutar/goro/client"
+	"github.com/kivutar/goro/input"
+	"github.com/kivutar/goro/network"
 	"github.com/kivutar/goro/session"
+	worldstate "github.com/kivutar/goro/world"
 )
 
 func TestDerivedStatParameterPackets(t *testing.T) {
@@ -43,5 +50,77 @@ func TestDerivedStatParameterPackets(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestInventoryAndStatsRefreshWhileChatConsumesInput(t *testing.T) {
+	ctx := client.Context{
+		Session: &session.Session{Vitals: session.Vitals{HP: 100}, Inventory: session.Inventory{
+			Items: []session.InventoryItem{{Index: 7, ItemID: 909, Type: 3, Amount: 5, Identified: true}},
+		}},
+		World: worldstate.New(), Input: input.NewState(),
+		Network:   &network.Client{},
+		UIManager: &worldModeTestUIManager{}, ScreenW: 1280, ScreenH: 720,
+	}
+	mode := NewWorldMode()
+	mode.ui.inventoryBag.Toggle(ctx)
+	mode.ui.inventoryBag.Update(ctx, nil, nil, nil, nil, nil, &mode.ui.itemWindows)
+	mode.ui.statsWindow.OpenWindow(ctx)
+	mode.ui.console.UpdatePresentation(ctx)
+	mode.ui.console.PrepareTextInput(ctx, gpucontext.KeyA)
+	if !mode.ui.console.UpdateInput(ctx) {
+		t.Fatal("chat should consume input during this test")
+	}
+	content := func(root widget.Widget) widget.Widget {
+		// Damaged overlays expose their new children after a render step.
+		wctx := widget.NewContext()
+		root.Layout(wctx, geometry.Loose(geometry.Sz(1280, 720)))
+		root.Draw(wctx, &uitest.MockCanvas{})
+		return root.Children()[0]
+	}
+
+	for _, amount := range []uint16{2, 3} {
+		bagBefore := content(mode.ui.inventoryBag.Widget())
+		statsBefore := content(mode.ui.statsWindow.Widget())
+		data := []byte{0xaf, 0, 7, 0, byte(amount), 0}
+		mode.deferredPackets = []network.Packet{
+			{ID: 0x00AF, Data: data},
+			testParameterChangePacket(41, uint32(amount)+10),
+		}
+		if next, err := mode.Update(ctx); err != nil || next != nil {
+			t.Fatalf("world update: next=%T err=%v", next, err)
+		}
+		if content(mode.ui.inventoryBag.Widget()) == bagBefore {
+			t.Fatal("drop acknowledgement left stale inventory widgets while chat was focused")
+		}
+		if content(mode.ui.statsWindow.Widget()) == statsBefore {
+			t.Fatal("parameter update left stale status widgets while chat was focused")
+		}
+		if !mode.ui.console.Active() {
+			t.Fatal("refresh stole chat focus")
+		}
+		if amount == 2 && (len(ctx.Session.Inventory.Items) != 1 || ctx.Session.Inventory.Items[0].Amount != 3) {
+			t.Fatalf("partial drop inventory = %+v", ctx.Session.Inventory.Items)
+		}
+	}
+	if len(ctx.Session.Inventory.Items) != 0 {
+		t.Fatalf("full drop inventory = %+v, want empty", ctx.Session.Inventory.Items)
+	}
+	bagBefore := content(mode.ui.inventoryBag.Widget())
+	statsBefore := content(mode.ui.statsWindow.Widget())
+	if _, err := mode.Update(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if content(mode.ui.inventoryBag.Widget()) != bagBefore || content(mode.ui.statsWindow.Widget()) != statsBefore {
+		t.Fatal("idle update rebuilt unchanged inventory or status widgets")
+	}
+	mode.ui.inventoryBag.Close()
+	mode.ui.statsWindow.Close()
+	mode.deferredPackets = []network.Packet{testParameterChangePacket(45, 5)}
+	if _, err := mode.Update(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if mode.ui.inventoryBag.IsOpen() || mode.ui.statsWindow.IsOpen() {
+		t.Fatal("server update reopened a closed window")
 	}
 }

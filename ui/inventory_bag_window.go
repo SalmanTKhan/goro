@@ -101,20 +101,13 @@ func (w *InventoryBagWindow) Toggle(ctx Context) {
 }
 
 func (w *InventoryBagWindow) Update(ctx Context, shortcuts *ShortcutBar, storage *StorageWindow, cart *CartWindow, trade *TradeWindow, equipment *EquipmentWindow, itemInfo *ItemWindows, dropTargets ...InventoryDropTarget) bool {
-	w.EnsureWindow(inventoryBagWidth, inventoryBagHeight)
+	w.UpdatePresentation(ctx, itemInfo)
 	if !w.IsOpen() || ctx.Input == nil {
 		w.hideTooltip()
 		return false
 	}
 	if w.UpdateDrag(ctx, shortcuts, storage, cart, trade, equipment, dropTargets...) {
 		return true
-	}
-	w.ClampScroll(ctx.Session)
-	snapshot := w.inventorySnapshot(ctx.Session)
-	if snapshot != w.snapshot || itemInfo != w.itemInfo {
-		w.snapshot = snapshot
-		w.itemInfo = itemInfo
-		w.SetContent(w.widgetTree(ctx, itemInfo))
 	}
 	consumed := w.Window.Update(ctx)
 	if !w.IsOpen() {
@@ -124,6 +117,25 @@ func (w *InventoryBagWindow) Update(ctx Context, shortcuts *ShortcutBar, storage
 	}
 	w.Publish(ctx)
 	return consumed
+}
+
+// UpdatePresentation follows server changes even when another window consumes input.
+func (w *InventoryBagWindow) UpdatePresentation(ctx Context, itemInfo *ItemWindows) {
+	w.EnsureWindow(inventoryBagWidth, inventoryBagHeight)
+	// SetContent releases the window's drag capture. Leave the snapshot stale
+	// until the drag ends so the next presentation update applies all changes.
+	if !w.IsOpen() || w.dragging {
+		return
+	}
+	w.ClampScroll(ctx.Session)
+	snapshot := w.inventorySnapshot(ctx.Session)
+	if snapshot != w.snapshot || itemInfo != w.itemInfo {
+		w.hideTooltip()
+		w.snapshot = snapshot
+		w.itemInfo = itemInfo
+		w.SetContent(w.widgetTree(ctx, itemInfo))
+		w.Publish(ctx)
+	}
 }
 
 type InventoryDropTarget interface {
