@@ -51,14 +51,33 @@ func TestSurfaceSelectionDetailBackAndScroll(t *testing.T) {
 func TestSurfaceDisabledCameraRotationRemainsPresentationOnly(t *testing.T) {
 	model := SettingsSurface()
 	c := NewSurfaceController(model, Viewport{Width: 1920, Height: 1080}, nil)
+
+	// Camera rotation intentionally lives in the touch-controls section, which
+	// can be below the initial viewport as settings sections evolve. Scroll to
+	// its semantic content offset instead of assuming model index == visible row.
+	offset := float32(0)
+	found := false
+	for _, item := range model.Items {
+		if item.ID == "camera-rotation" {
+			found = true
+			break
+		}
+		offset += SurfaceRowHeight(item) + surfaceRowGap
+	}
+	if !found {
+		t.Fatal("camera rotation setting missing")
+	}
+	c.ScrollBy(offset)
+
 	var cameraRotation Rect
-	for i, item := range model.Items {
-		if item.ID == "camera-rotation" && i < len(c.Layout.Rows) {
+	for i, id := range c.Layout.RowIDs {
+		if id == "camera-rotation" && i < len(c.Layout.Rows) {
 			cameraRotation = c.Layout.Rows[i]
+			break
 		}
 	}
 	if cameraRotation.W == 0 {
-		t.Fatal("camera rotation row not laid out")
+		t.Fatalf("camera rotation row not laid out after scroll: offset=%v scroll=%+v ids=%v", offset, c.Scroll, c.Layout.RowIDs)
 	}
 	if !c.Tap(cameraRotation.X+2, cameraRotation.Y+2) || c.State.SelectedID != "camera-rotation" {
 		t.Fatalf("disabled item did not expose its explanation: state=%+v", c.State)
