@@ -122,3 +122,34 @@ func sameIndexSet(a, b []uint16) bool {
 	}
 	return true
 }
+
+
+func TestScrolledSurfaceRendersSemanticVisibleRows(t *testing.T) {
+	k := testKit()
+	vp := mobileui.Viewport{Width: 1080, Height: 1600, SafeTop: 48, SafeBottom: 36}
+	model := mobileui.SettingsSurface()
+	state := mobileui.SurfaceInteractionState{}
+
+	base := mobileui.LayoutSurface(vp, model, state, 0)
+	scroll := mobileui.SurfaceScrollExtentForItems(base, model.Items, len(model.Items), 0)
+	scroll.SetOffset(800)
+	layout := mobileui.LayoutSurface(vp, model, state, scroll.Offset)
+	if len(layout.RowIDs) == 0 {
+		t.Fatal("scrolled settings surface has no visible rows")
+	}
+	if layout.RowIDs[0] == model.Items[0].ID {
+		t.Fatalf("test did not move beyond the first model row: offset=%v ids=%v", scroll.Offset, layout.RowIDs)
+	}
+
+	first, ok := surfaceModelItemByID(model, layout.RowIDs[0])
+	if !ok {
+		t.Fatalf("first visible row id %q is not in model", layout.RowIDs[0])
+	}
+	drawn := drawnLines(layoutAndDraw(t, k.SurfaceTree(model, layout, state)))
+	if !containsLine(drawn, first.Label) {
+		t.Fatalf("visible semantic row %q was not rendered: lines=%v ids=%v", first.Label, drawn, layout.RowIDs)
+	}
+	if containsLine(drawn, model.Items[0].Label) {
+		t.Fatalf("scrolled-away first model row %q was rendered: lines=%v ids=%v", model.Items[0].Label, drawn, layout.RowIDs)
+	}
+}
