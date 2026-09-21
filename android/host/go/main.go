@@ -743,7 +743,12 @@ func (h *host) renderLoop() {
 						BGMVolume:  cfg.Audio.BGMVolume,
 						SFXVolume:  cfg.Audio.SFXVolume,
 					},
-					Display: input.MobileDisplaySettings{ShowMinimap: cfg.MobileDisplay.ShowMinimap, Presentation: cfg.MobileDisplay.Presentation},
+					Display: input.MobileDisplaySettings{
+						ShowMinimap: cfg.MobileDisplay.ShowMinimap,
+						VSync: cfg.Render.VSync,
+						FPS: cfg.Render.FPS,
+						Presentation: cfg.MobileDisplay.Presentation,
+					},
 					Gameplay: input.MobileGameplaySettings{
 						NoShift: cfg.Gameplay.NoShift, NoCtrl: cfg.Gameplay.NoCtrl,
 						LessEffects: cfg.Gameplay.LessEffects, SnapTargets: cfg.Gameplay.SnapTargets,
