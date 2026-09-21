@@ -20,7 +20,12 @@ func (g *Game) MobileSettings() input.MobileSettings {
 			BGMVolume:  g.cfg.Audio.BGMVolume,
 			SFXVolume:  g.cfg.Audio.SFXVolume,
 		},
-		Display: input.MobileDisplaySettings{ShowMinimap: g.cfg.MobileDisplay.ShowMinimap, Presentation: g.cfg.MobileDisplay.Presentation},
+		Display: input.MobileDisplaySettings{
+			ShowMinimap:  g.cfg.MobileDisplay.ShowMinimap,
+			VSync:        g.cfg.Render.VSync,
+			FPS:          g.cfg.Render.FPS,
+			Presentation: g.cfg.MobileDisplay.Presentation,
+		},
 		Gameplay: input.MobileGameplaySettings{
 			NoShift:     g.cfg.Gameplay.NoShift,
 			NoCtrl:      g.cfg.Gameplay.NoCtrl,
@@ -64,6 +69,9 @@ func (g *Game) ApplyMobileSettings(settings input.MobileSettings) bool {
 	g.ApplyUISettings(settings.UI)
 	g.cfg.Mobile = settings.Controls
 	g.cfg.MobileDisplay = settings.Display
+	g.cfg.Render.VSync = settings.Display.VSync
+	g.cfg.Render.FPS = settings.Display.FPS
+	g.cfg.Render.NoUI = settings.Display.Presentation != input.MobilePresentationDesktop
 	g.cfg.Audio.BGM = settings.Audio.BGMEnabled
 	g.cfg.Audio.BGMVolume = settings.Audio.BGMVolume
 	g.cfg.Audio.SFXVolume = settings.Audio.SFXVolume
@@ -73,6 +81,7 @@ func (g *Game) ApplyMobileSettings(settings input.MobileSettings) bool {
 	g.cfg.Gameplay.SnapTargets = settings.Gameplay.SnapTargets
 	g.cfg.Gameplay.SnapItems = settings.Gameplay.SnapItems
 	if g.runtime != nil {
+		g.runtime.SetVSync(g.cfg.Render.VSync)
 		g.runtime.SetFPS(g.cfg.Render.FPS)
 	}
 	if g.audio != nil {
