@@ -98,7 +98,7 @@ func (w *SettingsWindow) contentTree(ctx client.Context) widget.Widget {
 
 		rotheme.Checkbox(
 			checkbox.Checked(ctx.MobileSettingsHost != nil && ctx.MobileSettingsHost.MobileSettings().Display.Presentation == input.MobilePresentationDesktop),
-			checkbox.LabelOpt("Desktop UI on mobile (Restart)"),
+			checkbox.LabelOpt("Desktop UI on mobile"),
 			checkbox.OnToggle(func(enabled bool) {
 				if ctx.MobileSettingsHost != nil {
 					settings := ctx.MobileSettingsHost.MobileSettings()
@@ -115,7 +115,7 @@ func (w *SettingsWindow) contentTree(ctx client.Context) widget.Widget {
 
 		rotheme.Checkbox(
 			checkbox.Checked(settingsRuntimeVSync(ctx)),
-			checkbox.LabelOpt("VSync (Restart)"),
+			checkbox.LabelOpt("VSync"),
 			checkbox.OnToggle(func(enabled bool) {
 				if ctx.Runtime != nil {
 					ctx.Runtime.SetVSync(enabled)
