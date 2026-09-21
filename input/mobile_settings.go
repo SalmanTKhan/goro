@@ -13,6 +13,8 @@ type MobileAudioSettings struct {
 // MobileControls because it belongs to touch inspection.
 type MobileDisplaySettings struct {
 	ShowMinimap  bool
+	VSync        bool
+	FPS          bool
 	Presentation MobilePresentationMode
 }
 
@@ -57,7 +59,7 @@ func DefaultMobileSettings() MobileSettings {
 			BGMVolume:  0.55,
 			SFXVolume:  0.55,
 		},
-		Display: MobileDisplaySettings{ShowMinimap: true, Presentation: MobilePresentationMobileUI},
+		Display: MobileDisplaySettings{ShowMinimap: true, VSync: true, Presentation: MobilePresentationMobileUI},
 		Gameplay: MobileGameplaySettings{
 			NoCtrl: true,
 		},
