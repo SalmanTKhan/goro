@@ -140,8 +140,14 @@ func (k Kit) placeTargetPanel(c *Canvas, target mobileui.TargetHUDModel, area mo
 	c.Place(k.Content(target.Name, RoleValue), mobileui.Rect{X: inner.X, Y: inner.Y, W: nameW, H: half})
 	c.Place(k.RightAligned(targetRelationLabel(target.Relation), RoleMuted),
 		mobileui.Rect{X: inner.X + nameW + k.Theme.Metrics.TableGap, Y: inner.Y, W: relationW, H: half})
-	k.placeCompactMeter(c, mobileui.Rect{X: inner.X, Y: inner.Y + half, W: inner.W, H: half},
-		BarHP, int64(target.HP), int64(target.MaxHP))
+	hpRow := mobileui.Rect{X: inner.X, Y: inner.Y + half, W: inner.W, H: half}
+	if target.MaxHP > 0 {
+		k.placeCompactMeter(c, hpRow, BarHP, int64(target.HP), int64(target.MaxHP))
+	} else {
+		// Online actors do not always have a life packet cached yet. Do not
+		// present unknown health as a real empty 0/0 gauge.
+		c.Place(k.Content("HP --", RoleMuted), hpRow)
+	}
 }
 
 func targetRelationLabel(relation mobileui.TargetRelation) string {
