@@ -507,3 +507,35 @@ func TestSavedLoginIDRejectsLineBreaksWithoutChangingConfig(t *testing.T) {
 		t.Fatal("invalid ID changed the existing config")
 	}
 }
+
+
+func TestSaveMobileSettingsRoundTripsRenderOptions(t *testing.T) {
+	isolateUserConfig(t)
+	settings := input.DefaultMobileSettings()
+	settings.Display.VSync = false
+	settings.Display.FPS = true
+	settings.Display.Presentation = input.MobilePresentationDesktop
+
+	path, err := SaveMobileSettings(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, want := range []string{"[render]", "vsync = false", "fps = true", "presentation = desktop"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("saved mobile config missing %q:\n%s", want, text)
+		}
+	}
+
+	loaded, err := LoadUserMobileSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Display.VSync || !loaded.Display.FPS || loaded.Display.Presentation != input.MobilePresentationDesktop {
+		t.Fatalf("mobile render settings did not round trip: %+v", loaded.Display)
+	}
+}
