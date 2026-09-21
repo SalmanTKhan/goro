@@ -12,6 +12,10 @@ func (g *Game) MobileSettings() input.MobileSettings {
 	if g == nil {
 		return input.DefaultMobileSettings()
 	}
+	vsync, fps := g.cfg.Render.VSync, g.cfg.Render.FPS
+	if g.runtime != nil {
+		vsync, fps = g.runtime.VSync(), g.runtime.FPS()
+	}
 	settings := input.MobileSettings{
 		UI:       g.cfg.UI,
 		Controls: g.cfg.Mobile,
@@ -22,8 +26,8 @@ func (g *Game) MobileSettings() input.MobileSettings {
 		},
 		Display: input.MobileDisplaySettings{
 			ShowMinimap:  g.cfg.MobileDisplay.ShowMinimap,
-			VSync:        g.cfg.Render.VSync,
-			FPS:          g.cfg.Render.FPS,
+			VSync:        vsync,
+			FPS:          fps,
 			Presentation: g.cfg.MobileDisplay.Presentation,
 		},
 		Gameplay: input.MobileGameplaySettings{
