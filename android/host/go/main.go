@@ -308,6 +308,27 @@ func writeAndroidRuntimeMetrics(path string, metrics androidRuntimeMetrics) {
 	}
 }
 
+func drawAndroidFPSMeter(frame *render.Frame, text string, x, y float32, centered bool) {
+	if frame == nil || text == "" {
+		return
+	}
+	const scale = 0.82
+	w, h := render.BitmapTextSize(text)
+	if w <= 0 || h <= 0 {
+		return
+	}
+	textW := float32(w) * scale
+	textH := float32(h) * scale
+	padX, padY := float32(7), float32(4)
+	if centered {
+		x -= (textW + 2*padX) / 2
+	}
+	boxW := textW + 2*padX
+	boxH := textH + 2*padY
+	render.DrawRect(frame, float64(x), float64(y), float64(boxW), float64(boxH), mobileColors().panel)
+	drawMobileText(frame, text, x+padX, y+padY, mobileColors().title, scale)
+}
+
 func writeAndroidActiveRelease(release string, overlays []res.AssetOverlay) error {
 	if release == "" {
 		return fmt.Errorf("asset release name is empty")
