@@ -87,19 +87,29 @@ func LayoutSurface(viewport Viewport, model SurfaceModel, state SurfaceInteracti
 }
 
 const (
-	// surfaceRowLabel is the height of a list row. Detail/help text is shown in
-	// the selected detail sheet, so it must not consume invisible space here.
+	// surfaceRowLabel is the height of a row's label line.
 	surfaceRowLabel = 56
+	// surfaceDetailLine is one line of a row's help text.
+	surfaceDetailLine = 36
+	// surfaceDetailLines is how many lines of help text a row may show. Two
+	// lines hold the longest settings descriptions without making every row in
+	// the list taller.
+	surfaceDetailLines = 2
 	// surfaceRowGap separates consecutive rows.
 	surfaceRowGap = 8
 )
 
-// SurfaceRowHeight is intentionally compact and independent of Detail. The
-// renderer draws only label/value content in the scrolling row; Detail is
-// rendered by the detail sheet after selection.
+// SurfaceRowHeight reports how tall a row must be to show its content. Rows
+// carrying help text need room for it; the selected detail sheet can expand on
+// the same explanation, but the list itself must never silently drop help text.
 func SurfaceRowHeight(item SurfaceItem) float32 {
-	_ = item
-	return surfaceRowLabel
+	if item.Detail == "" {
+		return surfaceRowLabel
+	}
+	if item.Kind == SurfaceItemSection {
+		return surfaceRowLabel + surfaceDetailLine
+	}
+	return surfaceRowLabel + surfaceDetailLines*surfaceDetailLine
 }
 
 // SurfaceRowLabelHeight reports the height of the label line within a row, so
