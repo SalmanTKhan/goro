@@ -201,6 +201,18 @@ func (m *Manager) PickMobileTarget(ctx client.Context, position input.WorldPosit
 	return input.PickedTarget{}, false
 }
 
+// PickMobileGroundTarget is the terrain-only counterpart used while a
+// ground-target skill owns mobile input. Keep this forwarding method beside
+// PickMobileTarget so app.Game does not depend on the concrete WorldMode.
+func (m *Manager) PickMobileGroundTarget(ctx client.Context, position input.WorldPosition) (input.PickedTarget, bool) {
+	if mode, ok := m.mode.(interface {
+		PickMobileGroundTarget(client.Context, input.WorldPosition) (input.PickedTarget, bool)
+	}); ok {
+		return mode.PickMobileGroundTarget(ctx, position)
+	}
+	return input.PickedTarget{}, false
+}
+
 func (m *Manager) InspectMobileTarget(ctx client.Context, actorID uint32) (mobileui.TargetHUDModel, bool) {
 	if m == nil {
 		return mobileui.TargetHUDModel{}, false
