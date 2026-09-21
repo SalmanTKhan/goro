@@ -204,14 +204,31 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 	}
 	if portrait {
 		miniW = minf(220, maxf(180, safe.W*0.34))
+		miniX := safe.Right() - tokens.Edge - miniW
 		miniY := maxf(l.Menu.Bottom()+tokens.Gap, l.PlayerPanel.Bottom()+tokens.Gap)
-		l.Minimap = Rect{safe.Right() - tokens.Edge - miniW, miniY, miniW, 224}
+		// On wider portrait surfaces the player card and minimap fit in
+		// independent left/right rails. Start the minimap directly under the
+		// menu instead of wasting the full player-card height above it.
+		if l.PlayerPanel.Right()+overlayGap <= miniX {
+			miniY = l.Menu.Bottom() + tokens.Gap
+		}
+		l.Minimap = Rect{miniX, miniY, miniW, 224}
 	} else {
 		l.Minimap = Rect{l.Menu.X - overlayGap - miniW, l.Menu.Y, miniW, 200}
 	}
 	if !model.Minimap.Visible {
 		l.Minimap = Rect{}
 	}
+
+	// Wide portrait surfaces have enough room for two independent top rails:
+	// player/target/loot on the left and menu/minimap on the right. Narrow
+	// phones fall back to the stacked layout below the minimap.
+	portraitLeftRailRight := safe.Right() - tokens.Edge
+	if portrait && l.Minimap.W > 0 {
+		portraitLeftRailRight = l.Minimap.X - overlayGap
+	}
+	portraitSplitTop := portrait && portraitLeftRailRight-l.PlayerPanel.X >= 220
+
 	// Statuses without resolved retail artwork stay out of the HUD. The game
 	// projection fills IconKey only for effects the target client can actually
 	// present, so this area never degenerates into anonymous empty squares.
@@ -225,9 +242,14 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 	if hasStatusArtwork {
 		statusW := minf(360, maxf(150, safe.W*0.26))
 		if portrait {
-			statusW = maxf(0, safe.W-2*tokens.Edge)
-			statusTop := maxf(progressBottom, l.Minimap.Bottom())
-			l.StatusArea = Rect{safe.X + tokens.Edge, statusTop + tokens.Gap, statusW, 64}
+			if portraitSplitTop {
+				statusW = minf(statusW, portraitLeftRailRight-l.PlayerPanel.X)
+				l.StatusArea = Rect{l.PlayerPanel.X, progressBottom + tokens.Gap, statusW, 64}
+			} else {
+				statusW = maxf(0, safe.W-2*tokens.Edge)
+				statusTop := maxf(progressBottom, l.Minimap.Bottom())
+				l.StatusArea = Rect{safe.X + tokens.Edge, statusTop + tokens.Gap, statusW, 64}
+			}
 		} else {
 			if statusW > safe.Right()-l.PlayerPanel.Right()-2*overlayGap {
 				statusW = maxf(0, safe.Right()-l.PlayerPanel.Right()-2*overlayGap)
@@ -310,12 +332,18 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 	if model.Target.Visible && model.Target.ID != 0 {
 		l.PrimaryAction = primarySlot
 		if portrait {
-			targetW := minf(panelWidth, maxf(220, safe.W-2*tokens.Edge))
-			targetTop := maxf(l.PlayerPanel.Bottom(), l.Minimap.Bottom())
-			if l.StatusArea.W > 0 && l.StatusArea.H > 0 {
-				targetTop = l.StatusArea.Bottom()
+			if portraitSplitTop {
+				targetW := minf(panelWidth, portraitLeftRailRight-l.PlayerPanel.X)
+				targetTop := maxf(progressBottom, l.StatusArea.Bottom())
+				l.TargetPanel = Rect{l.PlayerPanel.X, targetTop + overlayGap, targetW, targetHeight}
+			} else {
+				targetW := minf(panelWidth, maxf(220, safe.W-2*tokens.Edge))
+				targetTop := maxf(l.PlayerPanel.Bottom(), l.Minimap.Bottom())
+				if l.StatusArea.W > 0 && l.StatusArea.H > 0 {
+					targetTop = l.StatusArea.Bottom()
+				}
+				l.TargetPanel = Rect{safe.X + (safe.W-targetW)/2, targetTop + overlayGap, targetW, targetHeight}
 			}
-			l.TargetPanel = Rect{safe.X + (safe.W-targetW)/2, targetTop + overlayGap, targetW, targetHeight}
 		} else {
 			targetW := minf(460, maxf(320, safe.W*0.24))
 			l.TargetPanel = Rect{safe.X + (safe.W-targetW)/2, safe.Y + tokens.Edge, targetW, targetHeight}
@@ -445,7 +473,10 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 	// utility stack. It never competes with the right combat dock.
 	lootTop := maxf(l.PlayerPanel.Bottom(), progressBottom) + overlayGap
 	if portrait {
-		topHUD := maxf(progressBottom, l.Minimap.Bottom())
+		topHUD := progressBottom
+		if !portraitSplitTop {
+			topHUD = maxf(topHUD, l.Minimap.Bottom())
+		}
 		topHUD = maxf(topHUD, l.StatusArea.Bottom())
 		topHUD = maxf(topHUD, l.TargetPanel.Bottom())
 		lootTop = topHUD + tokens.Gap
@@ -470,6 +501,9 @@ func LayoutHUD(viewport Viewport, tokens MobileTokens, model MobileHUDModel, nav
 		lootWidth := minf(360, maxf(240, safe.W*0.30))
 		if portrait {
 			lootWidth = minf(lootWidth, maxf(0, primarySlot.X-safe.X-2*tokens.Edge))
+			if portraitSplitTop {
+				lootWidth = minf(lootWidth, maxf(0, portraitLeftRailRight-(safe.X+tokens.Edge)))
+			}
 		}
 		if lootWidth > safe.W-2*tokens.Edge {
 			lootWidth = maxf(0, safe.W-2*tokens.Edge)
