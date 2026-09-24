@@ -44,8 +44,6 @@ github.com/gogpu/gputypes v0.8.0 h1:Iw4g9lqydTcAFKKQWfgbUpdY6WxObGtjf9SuRkzYMJw=
 github.com/gogpu/gputypes v0.8.0/go.mod h1:cnXrDMwTpWTvJLW1Vreop3PcT6a2YP/i3s91rPaOavw=
 github.com/gogpu/naga v0.19.0 h1:+Pu7kahdMhvRWtpEbTW5YFQZPoklccMO4vryEk6w9zU=
 github.com/gogpu/naga v0.19.0/go.mod h1:15sQaHKkbqXcwTN+hHYGLsA0WBBnkmYzne/eF5p5WEg=
-github.com/gogpu/wgpu v0.34.3 h1:oV7K5ueBqxZuvp1w9KpArzj15+eOrm/l9ZnM3jcKbXA=
-github.com/gogpu/wgpu v0.34.3/go.mod h1:erhaIjD9psJKjHqAhn5MWdJETcACR1NGoqLhkTAHkFM=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
 github.com/google/go-cmp v0.7.0/go.mod h1:pXiqmnSA92OHEEa9HXL2W4E7lf9JzCmGVUdgjX3N/iU=
 github.com/jfreymuth/pulse v0.1.1 h1:9WLNBNCijmtZ14ZJpatgJPu/NjwAl3TIKItSFnTh+9A=
@@ -54,6 +52,8 @@ github.com/kivutar/gg v0.52.4-0.20260907093528-f5ad04483d31 h1:tMRONrxR/Sonjuzo2
 github.com/kivutar/gg v0.52.4-0.20260907093528-f5ad04483d31/go.mod h1:76qRbhwszTfk1McnBiCPtnx1ewpR7C6+mfZoxmD5RUU=
 github.com/kivutar/ui v0.1.55-0.20260910051920-e1fc6c401b18 h1:u3Bij3bv9AbXy1a+R5NCXmwjM839huuOO2m6oZkY1gc=
 github.com/kivutar/ui v0.1.55-0.20260910051920-e1fc6c401b18/go.mod h1:FUJbZho6XeDp0xTuDuXFqcJgZ0nmyb4W5oCyF+24qBs=
+github.com/kivutar/wgpu v0.34.4-0.20260923221948-8e2232e4c2e9 h1:dZxT76We+Rolk7fpRbNOk2onN0hi2GQe4U9Bjoek550=
+github.com/kivutar/wgpu v0.34.4-0.20260923221948-8e2232e4c2e9/go.mod h1:erhaIjD9psJKjHqAhn5MWdJETcACR1NGoqLhkTAHkFM=
 github.com/lucasb-eyer/go-colorful v1.2.0 h1:1nnpGOrhyZZuNyfu1QjKiUICQ74+3FNCN69Aj6K7nkY=
 github.com/lucasb-eyer/go-colorful v1.2.0/go.mod h1:R4dSotOR9KMtayYi1e77YzuveK+i7ruzyGqttikkLy0=
 github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWEY=
